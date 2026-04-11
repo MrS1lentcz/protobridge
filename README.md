@@ -1,5 +1,10 @@
 # protobridge
 
+[![CI](https://github.com/MrS1lentcz/protobridge/actions/workflows/ci.yml/badge.svg)](https://github.com/MrS1lentcz/protobridge/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/MrS1lentcz/protobridge/branch/main/graph/badge.svg)](https://codecov.io/gh/MrS1lentcz/protobridge)
+[![Go Reference](https://pkg.go.dev/badge/github.com/mrs1lentcz/protobridge.svg)](https://pkg.go.dev/github.com/mrs1lentcz/protobridge)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Zero-code gRPC-to-REST proxy generator for Go. Define your API in `.proto` files, run `protoc`, get a fully compilable REST gateway with WebSocket support, OpenAPI spec, authentication, and structured error handling -- no handwritten Go required.
 
 ## Why protobridge

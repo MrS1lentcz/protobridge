@@ -25,15 +25,19 @@ jobs:
 
       - name: Test coverage
         run: |
-          go test ./runtime/ -coverprofile=runtime.cov -count=1
-          go test ./internal/generator/ -coverprofile=generator.cov -count=1
-          go test ./internal/parser/ -coverprofile=parser.cov -count=1
+          go test ./runtime/ ./internal/generator/ ./internal/parser/ \
+            -coverprofile=coverage.out -covermode=atomic -count=1
           echo "### Coverage" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          go tool cover -func=runtime.cov | tail -1 >> $GITHUB_STEP_SUMMARY
-          go tool cover -func=generator.cov | tail -1 >> $GITHUB_STEP_SUMMARY
-          go tool cover -func=parser.cov | tail -1 >> $GITHUB_STEP_SUMMARY
+          go tool cover -func=coverage.out | tail -1 >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.out
+          fail_ci_if_error: false
 
   lint:
     name: Lint
