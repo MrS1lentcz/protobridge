@@ -39,13 +39,14 @@ services:
         limits:
           cpus: "2.0"
           memory: 2G
+    volumes:
+      - ./results:/results
     depends_on:
       - rest-proxy
     networks:
       - bench
 
   # In-process Go benchmarks (standard `go test -bench`).
-  # Runs proxy + gRPC backend in one process – measures pure proxy overhead.
   bench-inprocess:
     build:
       context: ..

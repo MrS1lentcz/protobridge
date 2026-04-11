@@ -1,0 +1,85 @@
+=== protobridge benchmark ===
+target: http://rest-proxy:8080
+
+proxy is healthy
+
+--- GET /healthz (baseline) ---
+requests: 10000, concurrency: 50
+duration:    770ms
+throughput:  12982 req/s
+errors:      0 / 10000 (0.0%)
+latency p50: 2.644833ms
+latency p95: 11.151333ms
+latency p99: 25.892458ms
+latency max: 35.56425ms
+
+--- POST /items/noauth (unary, no auth) ---
+requests: 10000, concurrency: 50
+duration:    4.985s
+throughput:  2006 req/s
+errors:      0 / 10000 (0.0%)
+latency p50: 18.913667ms
+latency p95: 70.981917ms
+latency p99: 84.606583ms
+latency max: 280.278958ms
+
+--- POST /items (unary, with auth) ---
+requests: 10000, concurrency: 50
+duration:    18.361s
+throughput:  545 req/s
+errors:      1770 / 10000 (17.7%)
+latency p50: 49.638167ms
+latency p95: 385.97975ms
+latency p99: 569.6995ms
+latency max: 906.761542ms
+
+--- POST /items/noauth (100 concurrent) ---
+requests: 50000, concurrency: 100
+duration:    1m42.12s
+throughput:  490 req/s
+errors:      11492 / 50000 (23.0%)
+latency p50: 40.311542ms
+latency p95: 919.069043ms
+latency p99: 1.299578s
+latency max: 2.085246751s
+
+--- POST /items/noauth (500 concurrent) ---
+requests: 50000, concurrency: 500
+duration:    1m17.835s
+throughput:  642 req/s
+errors:      7401 / 50000 (14.8%)
+latency p50: 401.622333ms
+latency p95: 3.648354001s
+latency p99: 5.389659919s
+latency max: 8.528100213s
+
+--- POST /items/noauth (1000 concurrent) ---
+requests: 50000, concurrency: 1000
+duration:    1m45.975s
+throughput:  472 req/s
+errors:      13962 / 50000 (27.9%)
+latency p50: 945.397792ms
+latency p95: 7.231528419s
+latency p99: 9.909655921s
+latency max: 15.202718507s
+
+--- POST /items/noauth (5000 concurrent) ---
+requests: 50000, concurrency: 5000
+duration:    1m0.736s
+throughput:  823 req/s
+errors:      31507 / 50000 (63.0%)
+latency p50: 5.179397461s
+latency p95: 8.267292962s
+latency p99: 9.856920379s
+latency max: 15.947579965s
+
+--- POST /items/noauth (10000 concurrent) ---
+requests: 50000, concurrency: 10000
+duration:    37.219s
+throughput:  1343 req/s
+errors:      35918 / 50000 (71.8%)
+latency p50: 5.386093419s
+latency p95: 9.256186629s
+latency p99: 10.585204588s
+latency max: 17.212879591s
+

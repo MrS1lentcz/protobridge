@@ -1,12 +1,13 @@
 // Benchmark runner for isolated Docker-based testing.
-// Sends parallel HTTP requests to the REST proxy and reports throughput,
-// latency percentiles, and error rate.
+// Sends parallel HTTP requests and reports throughput, latency, errors.
+// Writes results to /results/benchmark.txt if the directory exists.
 package main
 
 import (
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"sort"
@@ -15,54 +16,105 @@ import (
 	"time"
 )
 
+// HTTP client tuned for high concurrency benchmarking.
+var client = &http.Client{
+	Transport: &http.Transport{
+		MaxIdleConns:        20000,
+		MaxIdleConnsPerHost: 20000,
+		MaxConnsPerHost:     0, // unlimited
+		IdleConnTimeout:     90 * time.Second,
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+	},
+	Timeout: 30 * time.Second,
+}
+
+var output io.Writer = os.Stdout
+
 func main() {
 	target := os.Getenv("TARGET_URL")
 	if target == "" {
 		target = "http://localhost:8080"
 	}
 
-	fmt.Println("=== protobridge benchmark ===")
-	fmt.Printf("target: %s\n\n", target)
+	// Write results to file if /results exists.
+	if info, err := os.Stat("/results"); err == nil && info.IsDir() {
+		f, err := os.Create("/results/benchmark.txt")
+		if err == nil {
+			defer f.Close()
+			output = io.MultiWriter(os.Stdout, f)
+		}
+	}
 
-	// Wait for proxy to be ready.
-	waitForHealthy(target+"/healthz", 30*time.Second)
+	p := func(format string, args ...any) { fmt.Fprintf(output, format, args...) }
 
-	// Benchmark 1: Health endpoint (baseline).
-	runBench("GET /healthz (baseline)", 10000, 50, func() (*http.Response, error) {
-		return http.Get(target + "/healthz")
-	})
+	p("=== protobridge benchmark ===\n")
+	p("target: %s\n\n", target)
 
-	// Benchmark 2: Unary POST without auth.
+	waitForHealthy(target + "/healthz")
+
 	body := []byte(`{"name":"bench-item","priority":"PRIORITY_HIGH"}`)
-	runBench("POST /items/noauth (unary, no auth)", 10000, 50, func() (*http.Response, error) {
-		return http.Post(target+"/items/noauth", "application/json", bytes.NewReader(body))
+
+	// Baseline.
+	runBench(p, "GET /healthz (baseline)", 10000, 50, func() int {
+		resp, err := client.Get(target + "/healthz")
+		if err != nil {
+			return -1
+		}
+		code := resp.StatusCode
+		resp.Body.Close()
+		return code
 	})
 
-	// Benchmark 3: Unary POST with auth.
-	runBench("POST /items (unary, with auth)", 10000, 50, func() (*http.Response, error) {
+	// Unary no auth.
+	runBench(p, "POST /items/noauth (unary, no auth)", 10000, 50, func() int {
+		resp, err := client.Post(target+"/items/noauth", "application/json", bytes.NewReader(body))
+		if err != nil {
+			return -1
+		}
+		code := resp.StatusCode
+		resp.Body.Close()
+		return code
+	})
+
+	// Unary with auth.
+	runBench(p, "POST /items (unary, with auth)", 10000, 50, func() int {
 		req, _ := http.NewRequest("POST", target+"/items", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "bench-user")
 		req.Header.Set("user_id", "bench-user")
-		return http.DefaultClient.Do(req)
+		resp, err := client.Do(req)
+		if err != nil {
+			return -1
+		}
+		code := resp.StatusCode
+		resp.Body.Close()
+		return code
 	})
 
-	// Benchmark 4: High concurrency (200 workers).
-	runBench("POST /items/noauth (200 concurrent)", 20000, 200, func() (*http.Response, error) {
-		return http.Post(target+"/items/noauth", "application/json", bytes.NewReader(body))
-	})
+	// Ramping concurrency.
+	for _, conc := range []int{100, 500, 1000, 5000, 10000} {
+		runBench(p, fmt.Sprintf("POST /items/noauth (%d concurrent)", conc), 50000, conc, func() int {
+			resp, err := client.Post(target+"/items/noauth", "application/json", bytes.NewReader(body))
+			if err != nil {
+				return -1
+			}
+			code := resp.StatusCode
+			resp.Body.Close()
+			return code
+		})
+	}
 }
 
-func runBench(name string, total, concurrency int, doReq func() (*http.Response, error)) {
-	fmt.Printf("--- %s ---\n", name)
-	fmt.Printf("requests: %d, concurrency: %d\n", total, concurrency)
+func runBench(p func(string, ...any), name string, total, concurrency int, doReq func() int) {
+	p("--- %s ---\n", name)
+	p("requests: %d, concurrency: %d\n", total, concurrency)
 
-	var (
-		errors   atomic.Int64
-		latencies = make([]time.Duration, total)
-		mu        sync.Mutex
-		idx       atomic.Int64
-	)
+	latencies := make([]int64, total) // nanoseconds
+	var errors atomic.Int64
+	var idx atomic.Int64
 
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
@@ -77,22 +129,13 @@ func runBench(name string, total, concurrency int, doReq func() (*http.Response,
 			defer func() { <-sem }()
 
 			t0 := time.Now()
-			resp, err := doReq()
-			d := time.Since(t0)
+			code := doReq()
+			ns := time.Since(t0).Nanoseconds()
 
-			i := idx.Add(1) - 1
-			mu.Lock()
-			latencies[i] = d
-			mu.Unlock()
+			j := idx.Add(1) - 1
+			latencies[j] = ns
 
-			if err != nil {
-				errors.Add(1)
-				return
-			}
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-
-			if resp.StatusCode >= 400 {
+			if code < 0 || code >= 400 {
 				errors.Add(1)
 			}
 		}()
@@ -101,34 +144,34 @@ func runBench(name string, total, concurrency int, doReq func() (*http.Response,
 	wg.Wait()
 	elapsed := time.Since(start)
 
-	// Sort latencies for percentiles.
-	actual := latencies[:idx.Load()]
-	sort.Slice(actual, func(i, j int) bool { return actual[i] < actual[j] })
+	n := int(idx.Load())
+	sorted := make([]int64, n)
+	copy(sorted, latencies[:n])
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 
 	rps := float64(total) / elapsed.Seconds()
-	errRate := float64(errors.Load()) / float64(total) * 100
 
-	fmt.Printf("duration:    %s\n", elapsed.Round(time.Millisecond))
-	fmt.Printf("throughput:  %.0f req/s\n", rps)
-	fmt.Printf("errors:      %d (%.1f%%)\n", errors.Load(), errRate)
-	if len(actual) > 0 {
-		fmt.Printf("latency p50: %s\n", actual[len(actual)*50/100])
-		fmt.Printf("latency p95: %s\n", actual[len(actual)*95/100])
-		fmt.Printf("latency p99: %s\n", actual[len(actual)*99/100])
+	p("duration:    %s\n", elapsed.Round(time.Millisecond))
+	p("throughput:  %.0f req/s\n", rps)
+	p("errors:      %d / %d (%.1f%%)\n", errors.Load(), total, float64(errors.Load())/float64(total)*100)
+	if n > 0 {
+		p("latency p50: %s\n", time.Duration(sorted[n*50/100]))
+		p("latency p95: %s\n", time.Duration(sorted[n*95/100]))
+		p("latency p99: %s\n", time.Duration(sorted[n*99/100]))
+		p("latency max: %s\n", time.Duration(sorted[n-1]))
 	}
-	fmt.Println()
+	p("\n")
 }
 
-func waitForHealthy(url string, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		resp, err := http.Get(url)
+func waitForHealthy(url string) {
+	for i := 0; i < 60; i++ {
+		resp, err := client.Get(url)
 		if err == nil && resp.StatusCode == 200 {
 			resp.Body.Close()
-			fmt.Println("proxy is healthy")
+			fmt.Fprintf(output, "proxy is healthy\n\n")
 			return
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	fmt.Println("WARNING: proxy did not become healthy, proceeding anyway")
+	fmt.Fprintf(output, "WARNING: proxy not healthy after 30s\n\n")
 }
