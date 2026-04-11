@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/mrs1lentcz/gox/grpcx"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
@@ -16,13 +17,13 @@ import (
 	pb "taskboard/v1"
 )
 
-func registerHealthService(r chi.Router, conn *grpc.ClientConn, auth runtime.AuthFunc) {
+func registerHealthService(r chi.Router, conn *grpc.ClientConn, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) {
 	client := pb.NewHealthServiceClient(conn)
 	
-	r.Get("/health", getHealthHandler(client, auth))
+	r.Get("/health", getHealthHandler(client, addr, pool, auth))
 }
 
-func getHealthHandler(client pb.HealthServiceClient, auth runtime.AuthFunc) http.HandlerFunc {
+func getHealthHandler(client pb.HealthServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		
@@ -39,8 +40,11 @@ func getHealthHandler(client pb.HealthServiceClient, auth runtime.AuthFunc) http
 		
 		// Validate required fields
 		
-		// gRPC call
-		resp, err := client.GetHealth(ctx, req)
+		// gRPC call with retry on transient errors
+		resp, err := runtime.UnaryCallWithRetry(ctx, pool, addr,
+			func(ctx context.Context, req *pb.HealthRequest) (*pb.HealthResponse, error) {
+				return client.GetHealth(ctx, req)
+			}, req)
 		if err != nil {
 			runtime.WriteGRPCError(w, err)
 			return

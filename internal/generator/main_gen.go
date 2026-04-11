@@ -56,8 +56,9 @@ func main() {
 	{{ .EnvAddr }} := requireEnv("{{ .EnvAddrKey }}")
 	{{ end }}
 
-	// gRPC connection pool
+	// gRPC connection pool with health monitoring
 	pool := grpcx.NewPool()
+	pool.EnableHealthWatch(30 * time.Second)
 	defer pool.Close()
 
 	{{ range .Services }}
@@ -79,7 +80,7 @@ func main() {
 	r.Use(runtime.SentryMiddleware())
 
 	{{ range .Services -}}
-	register{{ .ServiceName }}(r, {{ .ConnVar }}, authFn)
+	register{{ .ServiceName }}(r, {{ .ConnVar }}, "{{ .EnvAddrKey }}", pool, authFn)
 	{{ end }}
 
 	// HTTP server

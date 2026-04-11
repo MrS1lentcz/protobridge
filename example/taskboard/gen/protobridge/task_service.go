@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/mrs1lentcz/gox/grpcx"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
@@ -16,22 +17,22 @@ import (
 	pb "taskboard/v1"
 )
 
-func registerTaskService(r chi.Router, conn *grpc.ClientConn, auth runtime.AuthFunc) {
+func registerTaskService(r chi.Router, conn *grpc.ClientConn, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) {
 	client := pb.NewTaskServiceClient(conn)
 	
-	r.Post("/api/v1/tasks", createTaskHandler(client, auth))
-	r.Get("/api/v1/tasks/{task_id}", getTaskHandler(client, auth))
-	r.Put("/api/v1/tasks/{task_id}", updateTaskHandler(client, auth))
-	r.Delete("/api/v1/tasks/{task_id}", deleteTaskHandler(client, auth))
-	r.Get("/api/v1/tasks", listTasksHandler(client, auth))
-	r.Get("/api/v1/tasks/watch", watchTasksHandler(client, auth))
-	r.Get("/api/v1/tasks/notifications", taskNotificationsHandler(client, auth))
-	r.Post("/api/v1/tasks/bulk", bulkCreateTasksHandler(client, auth))
-	r.Get("/api/v1/tasks/{task_id}/chat", taskChatHandler(client, auth))
-	r.Get("/api/v1/tasks/feed", activityFeedHandler(client, auth))
+	r.Post("/api/v1/tasks", createTaskHandler(client, addr, pool, auth))
+	r.Get("/api/v1/tasks/{task_id}", getTaskHandler(client, addr, pool, auth))
+	r.Put("/api/v1/tasks/{task_id}", updateTaskHandler(client, addr, pool, auth))
+	r.Delete("/api/v1/tasks/{task_id}", deleteTaskHandler(client, addr, pool, auth))
+	r.Get("/api/v1/tasks", listTasksHandler(client, addr, pool, auth))
+	r.Get("/api/v1/tasks/watch", watchTasksHandler(client, addr, pool, auth))
+	r.Get("/api/v1/tasks/notifications", taskNotificationsHandler(client, addr, pool, auth))
+	r.Post("/api/v1/tasks/bulk", bulkCreateTasksHandler(client, addr, pool, auth))
+	r.Get("/api/v1/tasks/{task_id}/chat", taskChatHandler(client, addr, pool, auth))
+	r.Get("/api/v1/tasks/feed", activityFeedHandler(client, addr, pool, auth))
 }
 
-func createTaskHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.HandlerFunc {
+func createTaskHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		
@@ -70,8 +71,11 @@ func createTaskHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.
 			return
 		}
 		
-		// gRPC call
-		resp, err := client.CreateTask(ctx, req)
+		// gRPC call with retry on transient errors
+		resp, err := runtime.UnaryCallWithRetry(ctx, pool, addr,
+			func(ctx context.Context, req *pb.CreateTaskRequest) (*pb.Task, error) {
+				return client.CreateTask(ctx, req)
+			}, req)
 		if err != nil {
 			runtime.WriteGRPCError(w, err)
 			return
@@ -82,7 +86,7 @@ func createTaskHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.
 	}
 }
 
-func getTaskHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.HandlerFunc {
+func getTaskHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		
@@ -114,8 +118,11 @@ func getTaskHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.Han
 		
 		// Validate required fields
 		
-		// gRPC call
-		resp, err := client.GetTask(ctx, req)
+		// gRPC call with retry on transient errors
+		resp, err := runtime.UnaryCallWithRetry(ctx, pool, addr,
+			func(ctx context.Context, req *pb.GetTaskRequest) (*pb.Task, error) {
+				return client.GetTask(ctx, req)
+			}, req)
 		if err != nil {
 			runtime.WriteGRPCError(w, err)
 			return
@@ -126,7 +133,7 @@ func getTaskHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.Han
 	}
 }
 
-func updateTaskHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.HandlerFunc {
+func updateTaskHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		
@@ -162,8 +169,11 @@ func updateTaskHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.
 		
 		// Validate required fields
 		
-		// gRPC call
-		resp, err := client.UpdateTask(ctx, req)
+		// gRPC call with retry on transient errors
+		resp, err := runtime.UnaryCallWithRetry(ctx, pool, addr,
+			func(ctx context.Context, req *pb.UpdateTaskRequest) (*pb.Task, error) {
+				return client.UpdateTask(ctx, req)
+			}, req)
 		if err != nil {
 			runtime.WriteGRPCError(w, err)
 			return
@@ -174,7 +184,7 @@ func updateTaskHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.
 	}
 }
 
-func deleteTaskHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.HandlerFunc {
+func deleteTaskHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		
@@ -206,8 +216,11 @@ func deleteTaskHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.
 		
 		// Validate required fields
 		
-		// gRPC call
-		resp, err := client.DeleteTask(ctx, req)
+		// gRPC call with retry on transient errors
+		resp, err := runtime.UnaryCallWithRetry(ctx, pool, addr,
+			func(ctx context.Context, req *pb.DeleteTaskRequest) (*pb.DeleteTaskResponse, error) {
+				return client.DeleteTask(ctx, req)
+			}, req)
 		if err != nil {
 			runtime.WriteGRPCError(w, err)
 			return
@@ -218,7 +231,7 @@ func deleteTaskHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.
 	}
 }
 
-func listTasksHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.HandlerFunc {
+func listTasksHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		
@@ -253,8 +266,11 @@ func listTasksHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.H
 		
 		// Validate required fields
 		
-		// gRPC call
-		resp, err := client.ListTasks(ctx, req)
+		// gRPC call with retry on transient errors
+		resp, err := runtime.UnaryCallWithRetry(ctx, pool, addr,
+			func(ctx context.Context, req *pb.ListTasksRequest) (*pb.ListTasksResponse, error) {
+				return client.ListTasks(ctx, req)
+			}, req)
 		if err != nil {
 			runtime.WriteGRPCError(w, err)
 			return
@@ -265,7 +281,7 @@ func listTasksHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.H
 	}
 }
 
-func watchTasksHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.HandlerFunc {
+func watchTasksHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		
@@ -293,7 +309,7 @@ func watchTasksHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.
 	}
 }
 
-func taskNotificationsHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.HandlerFunc {
+func taskNotificationsHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		
@@ -321,7 +337,7 @@ func taskNotificationsHandler(client pb.TaskServiceClient, auth runtime.AuthFunc
 	}
 }
 
-func bulkCreateTasksHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.HandlerFunc {
+func bulkCreateTasksHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		
@@ -349,7 +365,7 @@ func bulkCreateTasksHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) 
 	}
 }
 
-func taskChatHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.HandlerFunc {
+func taskChatHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		
@@ -378,7 +394,7 @@ func taskChatHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.Ha
 	}
 }
 
-func activityFeedHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.HandlerFunc {
+func activityFeedHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		

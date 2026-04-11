@@ -18,6 +18,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/mrs1lentcz/gox/grpcx"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
@@ -25,14 +26,14 @@ import (
 	pb "{{ .ProtoImport }}"
 )
 
-func register{{ .ServiceName }}(r chi.Router, conn *grpc.ClientConn, auth runtime.AuthFunc) {
+func register{{ .ServiceName }}(r chi.Router, conn *grpc.ClientConn, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) {
 	client := pb.New{{ .ServiceName }}Client(conn)
 	{{ range .Methods }}
-	r.{{ .ChiMethod }}("{{ .ChiPath }}", {{ .HandlerFuncName }}(client, auth))
+	r.{{ .ChiMethod }}("{{ .ChiPath }}", {{ .HandlerFuncName }}(client, addr, pool, auth))
 	{{- end }}
 }
 {{ range .Methods }}
-func {{ .HandlerFuncName }}(client pb.{{ $.ServiceName }}Client, auth runtime.AuthFunc) http.HandlerFunc {
+func {{ .HandlerFuncName }}(client pb.{{ $.ServiceName }}Client, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		{{ if not .ExcludeAuth }}
@@ -81,8 +82,11 @@ func {{ .HandlerFuncName }}(client pb.{{ $.ServiceName }}Client, auth runtime.Au
 			return
 		}
 		{{ end }}
-		// gRPC call
-		resp, err := client.{{ .MethodName }}(ctx, req)
+		// gRPC call with retry on transient errors
+		resp, err := runtime.UnaryCallWithRetry(ctx, pool, addr,
+			func(ctx context.Context, req *pb.{{ .InputTypeName }}) (*pb.{{ .OutputTypeName }}, error) {
+				return client.{{ .MethodName }}(ctx, req)
+			}, req)
 		if err != nil {
 			runtime.WriteGRPCError(w, err)
 			return

@@ -51,8 +51,9 @@ func main() {
 	authServiceAddr := requireEnv("PROTOBRIDGE_AUTH_SERVICE_ADDR")
 	
 
-	// gRPC connection pool
+	// gRPC connection pool with health monitoring
 	pool := grpcx.NewPool()
+	pool.EnableHealthWatch(30 * time.Second)
 	defer pool.Close()
 
 	
@@ -80,9 +81,9 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(runtime.SentryMiddleware())
 
-	registerTaskService(r, taskServiceConn, authFn)
-	registerHealthService(r, healthServiceConn, authFn)
-	registerAuthService(r, authServiceConn, authFn)
+	registerTaskService(r, taskServiceConn, "PROTOBRIDGE_TASK_SERVICE_ADDR", pool, authFn)
+	registerHealthService(r, healthServiceConn, "PROTOBRIDGE_HEALTH_SERVICE_ADDR", pool, authFn)
+	registerAuthService(r, authServiceConn, "PROTOBRIDGE_AUTH_SERVICE_ADDR", pool, authFn)
 	
 
 	// HTTP server
