@@ -154,3 +154,100 @@ func TestSSEHandler_SingleMessageThenEOF(t *testing.T) {
 		t.Fatalf("expected close event, got: %s", body)
 	}
 }
+
+// ctxCancelledStream delivers one message, waits for context to be cancelled,
+// then delivers another message (which will trigger the ctx.Err() check).
+type ctxCancelledStream struct {
+	count    int
+	cancelFn context.CancelFunc
+}
+
+func (s *ctxCancelledStream) Recv() (proto.Message, error) {
+	s.count++
+	if s.count == 1 {
+		// First message succeeds normally.
+		return &pb.SimpleResponse{Id: "msg1"}, nil
+	}
+	// Cancel the context before returning the second message.
+	// This ensures ctx.Err() != nil when checked after the next write.
+	s.cancelFn()
+	return &pb.SimpleResponse{Id: "msg2"}, nil
+}
+
+func TestSSEHandler_ClientDisconnect(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	stream := &ctxCancelledStream{cancelFn: cancel}
+
+	opener := &mockServerStreamOpener{stream: stream}
+	handler := runtime.SSEHandler(nil, opener, runtime.NoAuth(), true)
+
+	r := httptest.NewRequest(http.MethodGet, "/stream", nil)
+	r = r.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, r)
+
+	body := w.Body.String()
+	if !strings.Contains(body, `"id":"msg1"`) {
+		t.Fatalf("expected first message, got: %s", body)
+	}
+}
+
+// nonFlusherWriter is an http.ResponseWriter that does NOT implement http.Flusher.
+type nonFlusherWriter struct {
+	header http.Header
+	body   strings.Builder
+	code   int
+}
+
+func (w *nonFlusherWriter) Header() http.Header        { return w.header }
+func (w *nonFlusherWriter) Write(b []byte) (int, error) { return w.body.Write(b) }
+func (w *nonFlusherWriter) WriteHeader(code int)        { w.code = code }
+
+func TestSSEHandler_NonFlusherWriter(t *testing.T) {
+	stream := &mockServerStream{
+		messages: []proto.Message{
+			&pb.SimpleResponse{Id: "1"},
+		},
+	}
+
+	opener := &mockServerStreamOpener{stream: stream}
+	handler := runtime.SSEHandler(nil, opener, runtime.NoAuth(), true)
+
+	r := httptest.NewRequest(http.MethodGet, "/stream", nil)
+	w := &nonFlusherWriter{header: make(http.Header)}
+
+	handler.ServeHTTP(w, r)
+
+	// The handler should detect no Flusher and write an error.
+	if !strings.Contains(w.body.String(), "streaming not supported") {
+		t.Fatalf("expected 'streaming not supported' error, got: %s", w.body.String())
+	}
+}
+
+func TestSSEHandler_AuthSuccess(t *testing.T) {
+	stream := &mockServerStream{
+		messages: []proto.Message{
+			&pb.SimpleResponse{Id: "1"},
+		},
+	}
+
+	opener := &mockServerStreamOpener{stream: stream}
+	successAuth := func(ctx context.Context, r *http.Request) ([]byte, error) {
+		return []byte("user-data"), nil
+	}
+
+	handler := runtime.SSEHandler(nil, opener, successAuth, false)
+
+	r := httptest.NewRequest(http.MethodGet, "/stream", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, r)
+
+	body := w.Body.String()
+	if !strings.Contains(body, `"id":"1"`) {
+		t.Fatalf("expected message, got: %s", body)
+	}
+}

@@ -549,3 +549,299 @@ func TestValidateFullPipeline(t *testing.T) {
 		t.Errorf("expected no error for valid API, got: %v", err)
 	}
 }
+
+// Test validate returns error from validateOneofUniqueness
+func TestValidate_OneofUniquenessError(t *testing.T) {
+	type1 := &MessageType{
+		Name:     "Req1",
+		FullName: ".test.v1.Req1",
+		OneofDecls: []*OneofDecl{
+			{Name: "payload", Variants: []*OneofVariant{{FieldName: "text", IsMessage: true, MessageName: "SharedMsg"}}},
+		},
+	}
+	type2 := &MessageType{
+		Name:     "Req2",
+		FullName: ".test.v1.Req2",
+		OneofDecls: []*OneofDecl{
+			{Name: "data", Variants: []*OneofVariant{{FieldName: "shared", IsMessage: true, MessageName: "SharedMsg"}}},
+		},
+	}
+
+	api := &ParsedAPI{
+		Services: []*Service{
+			{Name: "Svc", Methods: []*Method{
+				{Name: "A", InputType: type1},
+				{Name: "B", InputType: type2},
+			}},
+		},
+	}
+
+	err := validate(api, nil)
+	if err == nil {
+		t.Fatal("expected error from validate")
+	}
+	if !strings.Contains(err.Error(), "SharedMsg") {
+		t.Errorf("error should mention SharedMsg, got: %v", err)
+	}
+}
+
+// Test validate returns error from validateOneofInputConstraint
+func TestValidate_OneofInputConstraintError(t *testing.T) {
+	parentType := &MessageType{
+		Name:     "Parent",
+		FullName: ".test.v1.Parent",
+		OneofDecls: []*OneofDecl{
+			{Name: "payload", Variants: []*OneofVariant{{FieldName: "child", IsMessage: true, MessageName: "ChildMsg"}}},
+		},
+	}
+	childInputType := &MessageType{Name: "ChildMsg", FullName: ".test.v1.ChildMsg"}
+
+	api := &ParsedAPI{
+		Services: []*Service{
+			{Name: "Svc", Methods: []*Method{
+				{Name: "A", InputType: parentType, OutputType: &MessageType{Name: "Resp", FullName: ".test.v1.Resp"}},
+				{Name: "B", InputType: childInputType, OutputType: &MessageType{Name: "Resp2", FullName: ".test.v1.Resp2"}},
+			}},
+		},
+	}
+
+	err := validate(api, nil)
+	if err == nil {
+		t.Fatal("expected error from validate")
+	}
+}
+
+// Test validate returns error from validateOneofDiscriminatorField
+func TestValidate_OneofDiscriminatorFieldError(t *testing.T) {
+	childMsg := &descriptorpb.DescriptorProto{
+		Name: sp("ChildMsg"),
+		Field: []*descriptorpb.FieldDescriptorProto{
+			{Name: sp("protobridge_disc"), Number: i32p(1), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()},
+		},
+	}
+	msgMap := buildMsgMap(childMsg)
+
+	parentType := &MessageType{
+		Name:     "Parent",
+		FullName: ".test.v1.Parent",
+		OneofDecls: []*OneofDecl{
+			{Name: "payload", Variants: []*OneofVariant{{FieldName: "child", IsMessage: true, MessageName: "ChildMsg"}}},
+		},
+	}
+
+	api := &ParsedAPI{
+		Services: []*Service{
+			{Name: "Svc", Methods: []*Method{
+				{Name: "A", InputType: parentType},
+			}},
+		},
+	}
+
+	err := validate(api, msgMap)
+	if err == nil {
+		t.Fatal("expected error from validate")
+	}
+}
+
+// Test validate returns error from validateStreamingOptions
+func TestValidate_StreamingOptionsError(t *testing.T) {
+	api := &ParsedAPI{
+		Services: []*Service{
+			{Name: "Svc", Methods: []*Method{
+				{Name: "Bad", SSE: true, StreamType: StreamUnary},
+			}},
+		},
+	}
+
+	err := validate(api, nil)
+	if err == nil {
+		t.Fatal("expected error from validate for SSE on unary")
+	}
+}
+
+// Test validate returns error from validateQueryParamsTarget
+func TestValidate_QueryParamsTargetError(t *testing.T) {
+	api := &ParsedAPI{
+		Services: []*Service{
+			{Name: "Svc", Methods: []*Method{
+				{
+					Name:              "List",
+					QueryParamsTarget: "nonexistent",
+					InputType: &MessageType{
+						Name:     "Req",
+						FullName: ".test.v1.Req",
+						Fields:   []*Field{{Name: "name", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING}},
+					},
+				},
+			}},
+		},
+	}
+
+	err := validate(api, nil)
+	if err == nil {
+		t.Fatal("expected error from validate for invalid query_params_target")
+	}
+}
+
+// Test validate returns error from validateAuthMethod
+func TestValidate_AuthMethodError(t *testing.T) {
+	inputMsg := &descriptorpb.DescriptorProto{
+		Name: sp("AuthReq"),
+		Field: []*descriptorpb.FieldDescriptorProto{
+			{Name: sp("token"), Number: i32p(1), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()},
+		},
+	}
+	msgMap := buildMsgMap(inputMsg)
+
+	api := &ParsedAPI{
+		AuthMethod: &AuthMethod{
+			ServiceName: "AuthSvc",
+			MethodName:  "Auth",
+			InputType: &MessageType{
+				Name:     "AuthReq",
+				FullName: ".test.v1.AuthReq",
+				Fields:   []*Field{{Name: "token", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING}},
+			},
+		},
+	}
+
+	err := validate(api, msgMap)
+	if err == nil {
+		t.Fatal("expected error from validate for missing map field")
+	}
+}
+
+// Test validateAuthMethod with nil InputType
+func TestValidateAuthMethod_NilInputType(t *testing.T) {
+	api := &ParsedAPI{
+		AuthMethod: &AuthMethod{
+			ServiceName: "AuthSvc",
+			MethodName:  "Auth",
+			InputType:   nil,
+		},
+	}
+
+	err := validateAuthMethod(api, nil)
+	if err == nil {
+		t.Fatal("expected error for nil InputType")
+	}
+	if !strings.Contains(err.Error(), "unresolvable") {
+		t.Errorf("error should mention 'unresolvable', got: %v", err)
+	}
+}
+
+// Test validateOneofUniqueness with output types
+func TestValidateOneofUniqueness_OutputType(t *testing.T) {
+	outputType := &MessageType{
+		Name:     "Resp",
+		FullName: ".test.v1.Resp",
+		OneofDecls: []*OneofDecl{
+			{Name: "payload", Variants: []*OneofVariant{{FieldName: "text", IsMessage: true, MessageName: "SharedMsg"}}},
+		},
+	}
+
+	api := &ParsedAPI{
+		Services: []*Service{
+			{Name: "Svc", Methods: []*Method{
+				{Name: "A", OutputType: outputType},
+			}},
+		},
+	}
+
+	if err := validateOneofUniqueness(api, nil); err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
+// Test validateOneofDiscriminatorField with output types
+func TestValidateOneofDiscriminatorField_OutputType(t *testing.T) {
+	childMsg := &descriptorpb.DescriptorProto{
+		Name: sp("ChildMsg"),
+		Field: []*descriptorpb.FieldDescriptorProto{
+			{Name: sp("protobridge_disc"), Number: i32p(1), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()},
+		},
+	}
+	msgMap := buildMsgMap(childMsg)
+
+	outputType := &MessageType{
+		Name:     "Resp",
+		FullName: ".test.v1.Resp",
+		OneofDecls: []*OneofDecl{
+			{Name: "payload", Variants: []*OneofVariant{{FieldName: "child", IsMessage: true, MessageName: "ChildMsg"}}},
+		},
+	}
+
+	api := &ParsedAPI{
+		Services: []*Service{
+			{Name: "Svc", Methods: []*Method{
+				{Name: "A", OutputType: outputType},
+			}},
+		},
+	}
+
+	err := validateOneofDiscriminatorField(api, msgMap)
+	if err == nil {
+		t.Fatal("expected error for reserved field name in output type")
+	}
+}
+
+// Test validateOneofInputConstraint with nil InputType
+func TestValidateOneofInputConstraint_NilInputType(t *testing.T) {
+	api := &ParsedAPI{
+		Services: []*Service{
+			{Name: "Svc", Methods: []*Method{
+				{Name: "A", InputType: nil, OutputType: &MessageType{Name: "Resp", FullName: ".test.v1.Resp"}},
+			}},
+		},
+	}
+
+	if err := validateOneofInputConstraint(api); err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
+// Test validateOneofUniqueness with non-message variants (should skip)
+func TestValidateOneofUniqueness_NonMessageVariant(t *testing.T) {
+	inputType := &MessageType{
+		Name:     "Req",
+		FullName: ".test.v1.Req",
+		OneofDecls: []*OneofDecl{
+			{Name: "payload", Variants: []*OneofVariant{{FieldName: "text", IsMessage: false}}},
+		},
+	}
+
+	api := &ParsedAPI{
+		Services: []*Service{
+			{Name: "Svc", Methods: []*Method{
+				{Name: "A", InputType: inputType},
+			}},
+		},
+	}
+
+	if err := validateOneofUniqueness(api, nil); err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
+// Test validateOneofDiscriminatorField with non-message variant (should skip)
+func TestValidateOneofDiscriminatorField_NonMessageVariant(t *testing.T) {
+	inputType := &MessageType{
+		Name:     "Req",
+		FullName: ".test.v1.Req",
+		OneofDecls: []*OneofDecl{
+			{Name: "payload", Variants: []*OneofVariant{{FieldName: "text", IsMessage: false}}},
+		},
+	}
+
+	api := &ParsedAPI{
+		Services: []*Service{
+			{Name: "Svc", Methods: []*Method{
+				{Name: "A", InputType: inputType},
+			}},
+		},
+	}
+
+	if err := validateOneofDiscriminatorField(api, nil); err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}

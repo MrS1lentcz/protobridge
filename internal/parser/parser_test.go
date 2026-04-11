@@ -924,3 +924,423 @@ func searchSubstring(s, sub string) bool {
 	}
 	return false
 }
+
+// --- Tests for nil-options guard clauses in options.go ---
+
+func TestGetRequiredHeaders_NilOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("Test")}
+	if got := getRequiredHeaders(m); got != nil {
+		t.Errorf("expected nil, got %v", got)
+	}
+}
+
+func TestGetQueryParamsTarget_NilOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("Test")}
+	if got := getQueryParamsTarget(m); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestGetExcludeAuth_NilOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("Test")}
+	if got := getExcludeAuth(m); got {
+		t.Error("expected false")
+	}
+}
+
+func TestGetAuthMethod_NilOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("Test")}
+	if got := getAuthMethod(m); got {
+		t.Error("expected false")
+	}
+}
+
+func TestGetFieldRequired_NilOptions(t *testing.T) {
+	f := &descriptorpb.FieldDescriptorProto{Name: sp("test")}
+	if got := getFieldRequired(f); got {
+		t.Error("expected false")
+	}
+}
+
+func TestGetSSE_NilOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("Test")}
+	if got := getSSE(m); got {
+		t.Error("expected false")
+	}
+}
+
+func TestGetWSMode_NilOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("Test")}
+	if got := getWSMode(m); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestGetDisplayName_NilOptions(t *testing.T) {
+	s := &descriptorpb.ServiceDescriptorProto{Name: sp("Test")}
+	if got := getDisplayName(s); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestGetPathPrefix_NilOptions(t *testing.T) {
+	s := &descriptorpb.ServiceDescriptorProto{Name: sp("Test")}
+	if got := getPathPrefix(s); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestGetXVarName_NilOptions(t *testing.T) {
+	v := &descriptorpb.EnumValueDescriptorProto{Name: sp("TEST")}
+	if got := getXVarName(v); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+// Test options with empty MethodOptions (extension not set -> type assertion fails)
+func TestGetRequiredHeaders_EmptyOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{
+		Name:    sp("Test"),
+		Options: &descriptorpb.MethodOptions{},
+	}
+	if got := getRequiredHeaders(m); got != nil {
+		t.Errorf("expected nil, got %v", got)
+	}
+}
+
+func TestGetQueryParamsTarget_EmptyOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{
+		Name:    sp("Test"),
+		Options: &descriptorpb.MethodOptions{},
+	}
+	if got := getQueryParamsTarget(m); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestGetExcludeAuth_EmptyOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{
+		Name:    sp("Test"),
+		Options: &descriptorpb.MethodOptions{},
+	}
+	if got := getExcludeAuth(m); got {
+		t.Error("expected false")
+	}
+}
+
+func TestGetAuthMethod_EmptyOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{
+		Name:    sp("Test"),
+		Options: &descriptorpb.MethodOptions{},
+	}
+	if got := getAuthMethod(m); got {
+		t.Error("expected false")
+	}
+}
+
+func TestGetFieldRequired_EmptyOptions(t *testing.T) {
+	f := &descriptorpb.FieldDescriptorProto{
+		Name:    sp("test"),
+		Options: &descriptorpb.FieldOptions{},
+	}
+	if got := getFieldRequired(f); got {
+		t.Error("expected false")
+	}
+}
+
+func TestGetSSE_EmptyOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{
+		Name:    sp("Test"),
+		Options: &descriptorpb.MethodOptions{},
+	}
+	if got := getSSE(m); got {
+		t.Error("expected false")
+	}
+}
+
+func TestGetWSMode_EmptyOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{
+		Name:    sp("Test"),
+		Options: &descriptorpb.MethodOptions{},
+	}
+	if got := getWSMode(m); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestGetDisplayName_EmptyOptions(t *testing.T) {
+	s := &descriptorpb.ServiceDescriptorProto{
+		Name:    sp("Test"),
+		Options: &descriptorpb.ServiceOptions{},
+	}
+	if got := getDisplayName(s); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestGetPathPrefix_EmptyOptions(t *testing.T) {
+	s := &descriptorpb.ServiceDescriptorProto{
+		Name:    sp("Test"),
+		Options: &descriptorpb.ServiceOptions{},
+	}
+	if got := getPathPrefix(s); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestGetXVarName_EmptyOptions(t *testing.T) {
+	v := &descriptorpb.EnumValueDescriptorProto{
+		Name:    sp("TEST"),
+		Options: &descriptorpb.EnumValueOptions{},
+	}
+	if got := getXVarName(v); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+// --- Test collectNestedEnums with nested message containing enum ---
+
+func TestParseNestedMessageWithNestedEnum(t *testing.T) {
+	innerEnum := &descriptorpb.EnumDescriptorProto{
+		Name: sp("InnerStatus"),
+		Value: []*descriptorpb.EnumValueDescriptorProto{
+			{Name: sp("INNER_STATUS_UNSPECIFIED"), Number: i32p(0)},
+			{Name: sp("INNER_STATUS_OK"), Number: i32p(1)},
+		},
+	}
+	innerMsg := &descriptorpb.DescriptorProto{
+		Name:     sp("Inner"),
+		EnumType: []*descriptorpb.EnumDescriptorProto{innerEnum},
+		Field: []*descriptorpb.FieldDescriptorProto{
+			{
+				Name:     sp("status"),
+				Number:   i32p(1),
+				Type:     descriptorpb.FieldDescriptorProto_TYPE_ENUM.Enum(),
+				TypeName: sp(".test.v1.Outer.Inner.InnerStatus"),
+			},
+		},
+	}
+	outerMsg := &descriptorpb.DescriptorProto{
+		Name:       sp("Outer"),
+		NestedType: []*descriptorpb.DescriptorProto{innerMsg},
+		Field: []*descriptorpb.FieldDescriptorProto{
+			{
+				Name:     sp("inner"),
+				Number:   i32p(1),
+				Type:     descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(),
+				TypeName: sp(".test.v1.Outer.Inner"),
+			},
+		},
+	}
+
+	req := makeRequest("test.v1", "test.proto",
+		[]*descriptorpb.DescriptorProto{
+			outerMsg,
+			makeSimpleMessage("Resp"),
+		},
+		nil,
+		[]*descriptorpb.ServiceDescriptorProto{
+			{
+				Name: sp("Svc"),
+				Method: []*descriptorpb.MethodDescriptorProto{
+					{
+						Name:       sp("Do"),
+						InputType:  sp(".test.v1.Outer"),
+						OutputType: sp(".test.v1.Resp"),
+						Options:    httpMethodOpts("GET", "/test"),
+					},
+				},
+			},
+		},
+	)
+
+	api, err := Parse(req)
+	if err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+	// Verify the outer message has an inner field
+	m := api.Services[0].Methods[0]
+	if len(m.InputType.Fields) != 1 {
+		t.Fatalf("expected 1 field in Outer, got %d", len(m.InputType.Fields))
+	}
+	if m.InputType.Fields[0].Name != "inner" {
+		t.Errorf("expected field 'inner', got %q", m.InputType.Fields[0].Name)
+	}
+}
+
+// --- Test extractHTTPRule with PUT, DELETE, PATCH ---
+
+func TestExtractHTTPRule_AllMethods(t *testing.T) {
+	tests := []struct {
+		method string
+		path   string
+	}{
+		{"GET", "/get"},
+		{"POST", "/post"},
+		{"PUT", "/put"},
+		{"DELETE", "/delete"},
+		{"PATCH", "/patch"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.method, func(t *testing.T) {
+			opts := httpMethodOpts(tt.method, tt.path)
+			m := &descriptorpb.MethodDescriptorProto{
+				Name:    sp("Test"),
+				Options: opts,
+			}
+			gotMethod, gotPath := extractHTTPRule(m)
+			if gotMethod != tt.method {
+				t.Errorf("method = %q, want %q", gotMethod, tt.method)
+			}
+			if gotPath != tt.path {
+				t.Errorf("path = %q, want %q", gotPath, tt.path)
+			}
+		})
+	}
+}
+
+func TestExtractHTTPRule_NilOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("Test")}
+	method, path := extractHTTPRule(m)
+	if method != "" || path != "" {
+		t.Errorf("expected empty for nil options, got %q, %q", method, path)
+	}
+}
+
+func TestExtractHTTPRule_NoHTTPExtension(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{
+		Name:    sp("Test"),
+		Options: &descriptorpb.MethodOptions{},
+	}
+	method, path := extractHTTPRule(m)
+	if method != "" || path != "" {
+		t.Errorf("expected empty for no HTTP ext, got %q, %q", method, path)
+	}
+}
+
+func TestExtractHTTPRule_EmptyPattern(t *testing.T) {
+	// HttpRule with no pattern set (Custom or nil pattern)
+	opts := &descriptorpb.MethodOptions{}
+	rule := &annotations.HttpRule{} // no pattern
+	proto.SetExtension(opts, annotations.E_Http, rule)
+	m := &descriptorpb.MethodDescriptorProto{
+		Name:    sp("Test"),
+		Options: opts,
+	}
+	method, path := extractHTTPRule(m)
+	if method != "" || path != "" {
+		t.Errorf("expected empty for nil pattern, got %q, %q", method, path)
+	}
+}
+
+// Test resolveMessageType when the type is not in msgMap (stub path)
+func TestParseUnresolvedMessageType(t *testing.T) {
+	// Create a service that references a message type not defined in any file
+	req := makeRequest("test.v1", "test.proto",
+		[]*descriptorpb.DescriptorProto{
+			// Only define Resp, not Req - so Req won't be found in msgMap
+			makeSimpleMessage("Resp"),
+		},
+		nil,
+		[]*descriptorpb.ServiceDescriptorProto{
+			{
+				Name: sp("Svc"),
+				Method: []*descriptorpb.MethodDescriptorProto{
+					{
+						Name:       sp("Do"),
+						InputType:  sp(".other.pkg.UnknownReq"),
+						OutputType: sp(".test.v1.Resp"),
+						Options:    httpMethodOpts("GET", "/test"),
+					},
+				},
+			},
+		},
+	)
+
+	api, err := Parse(req)
+	if err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+	if len(api.Services) != 1 {
+		t.Fatalf("expected 1 service, got %d", len(api.Services))
+	}
+	m := api.Services[0].Methods[0]
+	// Input type should be a stub with just the name
+	if m.InputType.Name != "UnknownReq" {
+		t.Errorf("InputType.Name = %q, want UnknownReq", m.InputType.Name)
+	}
+	if m.InputType.FullName != ".other.pkg.UnknownReq" {
+		t.Errorf("InputType.FullName = %q, want .other.pkg.UnknownReq", m.InputType.FullName)
+	}
+}
+
+// Test validateOneofUniqueness with output type error
+// Test Parse returning validate error (SSE on unary -> validateStreamingOptions error)
+func TestParseValidateError(t *testing.T) {
+	opts := httpMethodOpts("GET", "/events")
+	opts = withSSE(opts) // SSE on a unary method = validation error
+
+	req := makeRequest("test.v1", "test.proto",
+		[]*descriptorpb.DescriptorProto{
+			makeSimpleMessage("Req"),
+			makeSimpleMessage("Resp"),
+		},
+		nil,
+		[]*descriptorpb.ServiceDescriptorProto{
+			{
+				Name: sp("Svc"),
+				Method: []*descriptorpb.MethodDescriptorProto{
+					{
+						Name:       sp("BadSSE"),
+						InputType:  sp(".test.v1.Req"),
+						OutputType: sp(".test.v1.Resp"),
+						Options:    opts,
+						// unary (no streaming flags) + SSE = error
+					},
+				},
+			},
+		},
+	)
+
+	_, err := Parse(req)
+	if err == nil {
+		t.Fatal("expected validation error for SSE on unary")
+	}
+	if !contains(err.Error(), "sse") {
+		t.Errorf("error should mention sse, got: %v", err)
+	}
+}
+
+func TestValidateOneofUniqueness_OutputTypeConflict(t *testing.T) {
+	type1 := &MessageType{
+		Name:     "In",
+		FullName: ".test.v1.In",
+		OneofDecls: []*OneofDecl{
+			{Name: "payload", Variants: []*OneofVariant{{FieldName: "text", IsMessage: true, MessageName: "SharedMsg"}}},
+		},
+	}
+	type2 := &MessageType{
+		Name:     "Out",
+		FullName: ".test.v1.Out",
+		OneofDecls: []*OneofDecl{
+			{Name: "data", Variants: []*OneofVariant{{FieldName: "shared", IsMessage: true, MessageName: "SharedMsg"}}},
+		},
+	}
+
+	api := &ParsedAPI{
+		Services: []*Service{
+			{
+				Name: "Svc",
+				Methods: []*Method{
+					{Name: "A", InputType: type1, OutputType: type2},
+				},
+			},
+		},
+	}
+
+	err := validateOneofUniqueness(api, nil)
+	if err == nil {
+		t.Fatal("expected error for oneof uniqueness conflict via output type")
+	}
+}

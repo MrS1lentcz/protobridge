@@ -98,6 +98,7 @@ func TestWriteGRPCError_Mapping(t *testing.T) {
 		code     codes.Code
 		expected int
 	}{
+		{codes.OK, 200},
 		{codes.InvalidArgument, 400},
 		{codes.NotFound, 404},
 		{codes.PermissionDenied, 403},

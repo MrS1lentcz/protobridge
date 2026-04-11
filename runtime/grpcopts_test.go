@@ -182,3 +182,21 @@ func TestParseGRPCOptions_InvalidMaxSendSize(t *testing.T) {
 		t.Fatal("expected error for invalid max send size")
 	}
 }
+
+func TestParseGRPCOptions_TrailingComma(t *testing.T) {
+	opts, err := runtime.ParseGRPCOptions("max_recv_msg_size=16mb,")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts) != 1 {
+		t.Fatalf("expected 1 opt, got %d", len(opts))
+	}
+}
+
+func TestParseGRPCOptions_SizeOverflow(t *testing.T) {
+	// A size that exceeds MaxInt32 should return an error.
+	_, err := runtime.ParseGRPCOptions("max_recv_msg_size=999999gb")
+	if err == nil {
+		t.Fatal("expected error for size exceeding MaxInt32")
+	}
+}

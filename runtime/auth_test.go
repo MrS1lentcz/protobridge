@@ -128,3 +128,4 @@ func (h *headerCaptureCaller) CallAuth(ctx context.Context, headers map[string]s
 	*h.capture = headers
 	return h.resp, nil
 }
+

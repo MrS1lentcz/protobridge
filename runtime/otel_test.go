@@ -2,6 +2,7 @@ package runtime_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -88,5 +89,14 @@ func TestInitOTel_WithEndpoint(t *testing.T) {
 		t.Fatal("expected non-nil shutdown func")
 	}
 	// Shutdown should not error even if collector is unreachable.
+	runtime.GracefulShutdownOTel(shutdown)
+}
+
+func TestGracefulShutdownOTel_WithError(t *testing.T) {
+	// OTelShutdown that returns an error.
+	shutdown := runtime.OTelShutdown(func(_ context.Context) error {
+		return fmt.Errorf("shutdown failed")
+	})
+	// Should not panic.
 	runtime.GracefulShutdownOTel(shutdown)
 }

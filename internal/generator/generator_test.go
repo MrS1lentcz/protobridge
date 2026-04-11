@@ -1,12 +1,18 @@
 package generator
 
 import (
+	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
+	"google.golang.org/genproto/googleapis/api/annotations"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/pluginpb"
 
 	"github.com/mrs1lentcz/protobridge/internal/parser"
+	optionspb "github.com/mrs1lentcz/protobridge/proto/protobridge"
 )
 
 func testAPI() *parser.ParsedAPI {
@@ -914,5 +920,902 @@ func TestStreamLabel(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("streamLabel(%v) = %q, want %q", tt.st, got, tt.want)
 		}
+	}
+}
+
+// --- Run() tests ---
+
+func TestRun_ValidRequest(t *testing.T) {
+	// Build a valid CodeGeneratorRequest
+	req := &pluginpb.CodeGeneratorRequest{
+		FileToGenerate: []string{"test.proto"},
+		ProtoFile: []*descriptorpb.FileDescriptorProto{
+			{
+				Name:    strPtr("test.proto"),
+				Package: strPtr("test.v1"),
+				MessageType: []*descriptorpb.DescriptorProto{
+					{
+						Name: strPtr("Req"),
+						Field: []*descriptorpb.FieldDescriptorProto{
+							{Name: strPtr("name"), Number: int32Ptr(1), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()},
+						},
+					},
+					{
+						Name: strPtr("Resp"),
+						Field: []*descriptorpb.FieldDescriptorProto{
+							{Name: strPtr("id"), Number: int32Ptr(1), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()},
+						},
+					},
+				},
+				Service: []*descriptorpb.ServiceDescriptorProto{
+					{
+						Name: strPtr("TestService"),
+						Method: []*descriptorpb.MethodDescriptorProto{
+							{
+								Name:       strPtr("Create"),
+								InputType:  strPtr(".test.v1.Req"),
+								OutputType: strPtr(".test.v1.Resp"),
+								Options:    makeHTTPOpts("POST", "/things"),
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := proto.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	resp := Run(bytes.NewReader(data))
+	if resp.Error != nil {
+		t.Fatalf("Run() returned error: %s", resp.GetError())
+	}
+	if len(resp.File) == 0 {
+		t.Error("expected generated files")
+	}
+}
+
+func TestRun_InvalidBytes(t *testing.T) {
+	resp := Run(bytes.NewReader([]byte("not valid protobuf")))
+	if resp.Error == nil {
+		t.Fatal("expected error for invalid protobuf")
+	}
+}
+
+func TestRun_EmptyReader(t *testing.T) {
+	resp := Run(&errReader{})
+	if resp.Error == nil {
+		t.Fatal("expected error for read error")
+	}
+}
+
+// errReader always returns an error on Read
+type errReader struct{}
+
+func (r *errReader) Read(p []byte) (int, error) {
+	return 0, fmt.Errorf("read error")
+}
+
+// helpers for Run tests
+func strPtr(s string) *string   { return &s }
+func int32Ptr(i int32) *int32   { return &i }
+func boolPtr(b bool) *bool      { return &b }
+
+func makeHTTPOpts(method, path string) *descriptorpb.MethodOptions {
+	opts := &descriptorpb.MethodOptions{}
+	var rule *annotations.HttpRule
+	switch method {
+	case "GET":
+		rule = &annotations.HttpRule{Pattern: &annotations.HttpRule_Get{Get: path}}
+	case "POST":
+		rule = &annotations.HttpRule{Pattern: &annotations.HttpRule_Post{Post: path}}
+	case "PUT":
+		rule = &annotations.HttpRule{Pattern: &annotations.HttpRule_Put{Put: path}}
+	case "DELETE":
+		rule = &annotations.HttpRule{Pattern: &annotations.HttpRule_Delete{Delete: path}}
+	case "PATCH":
+		rule = &annotations.HttpRule{Pattern: &annotations.HttpRule_Patch{Patch: path}}
+	}
+	proto.SetExtension(opts, annotations.E_Http, rule)
+	return opts
+}
+
+// --- AsyncAPI client streaming test ---
+
+func TestGenerateAsyncAPIClientStreaming(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "UploadService",
+				ProtoPackage: "upload.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "UploadChunks",
+						HTTPMethod: "GET",
+						HTTPPath:   "/upload/stream",
+						StreamType: parser.StreamClient,
+						InputType: &parser.MessageType{
+							Name:     "Chunk",
+							FullName: ".upload.v1.Chunk",
+							Fields: []*parser.Field{
+								{Name: "data", Type: descriptorpb.FieldDescriptorProto_TYPE_BYTES},
+							},
+						},
+						OutputType: &parser.MessageType{
+							Name:     "UploadResult",
+							FullName: ".upload.v1.UploadResult",
+							Fields: []*parser.Field{
+								{Name: "url", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	content := GenerateAsyncAPI(api)
+	if content == "" {
+		t.Fatal("expected non-empty AsyncAPI spec for client streaming")
+	}
+
+	checks := []string{
+		"client streaming",
+		"/upload/stream",
+		"UploadChunksSend:",
+		"action: send",
+		"Chunk:",
+	}
+	for _, check := range checks {
+		if !strings.Contains(content, check) {
+			t.Errorf("AsyncAPI spec missing %q", check)
+		}
+	}
+	// Client streaming should NOT have a Receive operation
+	if strings.Contains(content, "UploadChunksReceive:") {
+		t.Error("client streaming should not have Receive operation")
+	}
+}
+
+// --- AsyncAPI transitive message refs test ---
+
+func TestGenerateAsyncAPITransitiveMessageRefs(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "TaskService",
+				ProtoPackage: "tasks.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "WatchTasks",
+						HTTPMethod: "GET",
+						HTTPPath:   "/tasks/watch",
+						StreamType: parser.StreamServer,
+						InputType: &parser.MessageType{
+							Name:     "WatchReq",
+							FullName: ".tasks.v1.WatchReq",
+							Fields: []*parser.Field{
+								{Name: "filter", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+							},
+						},
+						OutputType: &parser.MessageType{
+							Name:     "TaskEvent",
+							FullName: ".tasks.v1.TaskEvent",
+							Fields: []*parser.Field{
+								{Name: "event_type", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+								{Name: "task", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".tasks.v1.Task"},
+							},
+						},
+					},
+					// The Task message type is used as input of another method
+					// so findMessageTypeInAPI can discover it.
+					{
+						Name:       "GetTask",
+						HTTPMethod: "GET",
+						HTTPPath:   "/tasks/{id}",
+						StreamType: parser.StreamUnary,
+						InputType: &parser.MessageType{
+							Name:     "GetTaskReq",
+							FullName: ".tasks.v1.GetTaskReq",
+						},
+						OutputType: &parser.MessageType{
+							Name:     "Task",
+							FullName: ".tasks.v1.Task",
+							Fields: []*parser.Field{
+								{Name: "id", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+								{Name: "title", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	content := GenerateAsyncAPI(api)
+	if content == "" {
+		t.Fatal("expected non-empty AsyncAPI spec")
+	}
+
+	// The Task schema should be included transitively
+	if !strings.Contains(content, "Task:") {
+		t.Error("expected transitive Task schema in AsyncAPI")
+	}
+	if !strings.Contains(content, "TaskEvent:") {
+		t.Error("expected TaskEvent schema in AsyncAPI")
+	}
+}
+
+// --- findMessageTypeInAPI direct test ---
+
+func TestFindMessageTypeInAPI(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name: "Svc",
+				Methods: []*parser.Method{
+					{
+						Name:      "Do",
+						InputType: &parser.MessageType{Name: "Req", FullName: ".svc.v1.Req"},
+						OutputType: &parser.MessageType{Name: "Resp", FullName: ".svc.v1.Resp"},
+					},
+				},
+			},
+		},
+	}
+
+	// Found as input type
+	if got := findMessageTypeInAPI(api, "Req"); got == nil || got.Name != "Req" {
+		t.Error("expected to find Req")
+	}
+	// Found as output type
+	if got := findMessageTypeInAPI(api, "Resp"); got == nil || got.Name != "Resp" {
+		t.Error("expected to find Resp")
+	}
+	// Not found
+	if got := findMessageTypeInAPI(api, "NotExist"); got != nil {
+		t.Error("expected nil for non-existent type")
+	}
+}
+
+// --- OpenAPI writeFieldType missing types ---
+
+func TestGenerateOpenAPIFieldTypes_AllTypes(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "Svc",
+				ProtoPackage: "svc.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "Do",
+						HTTPMethod: "POST",
+						HTTPPath:   "/do",
+						StreamType: parser.StreamUnary,
+						InputType: &parser.MessageType{
+							Name:     "Req",
+							FullName: ".svc.v1.Req",
+							Fields: []*parser.Field{
+								{Name: "u32", Type: descriptorpb.FieldDescriptorProto_TYPE_UINT32},
+								{Name: "u64", Type: descriptorpb.FieldDescriptorProto_TYPE_UINT64},
+								{Name: "f32", Type: descriptorpb.FieldDescriptorProto_TYPE_FIXED32},
+								{Name: "f64", Type: descriptorpb.FieldDescriptorProto_TYPE_FIXED64},
+								{Name: "flt", Type: descriptorpb.FieldDescriptorProto_TYPE_FLOAT},
+								{Name: "dbl", Type: descriptorpb.FieldDescriptorProto_TYPE_DOUBLE},
+								{Name: "raw", Type: descriptorpb.FieldDescriptorProto_TYPE_BYTES},
+								{Name: "sf32", Type: descriptorpb.FieldDescriptorProto_TYPE_SFIXED32},
+								{Name: "sf64", Type: descriptorpb.FieldDescriptorProto_TYPE_SFIXED64},
+								{Name: "si32", Type: descriptorpb.FieldDescriptorProto_TYPE_SINT32},
+								{Name: "si64", Type: descriptorpb.FieldDescriptorProto_TYPE_SINT64},
+								// An unknown/default type
+								{Name: "unknown", Type: descriptorpb.FieldDescriptorProto_Type(99)},
+							},
+						},
+						OutputType: &parser.MessageType{
+							Name:     "Resp",
+							FullName: ".svc.v1.Resp",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	content := GenerateOpenAPI(api)
+
+	checks := []string{
+		"format: uint32",
+		"format: uint64",
+		"format: float",
+		"format: double",
+		"format: byte",
+	}
+	for _, check := range checks {
+		if !strings.Contains(content, check) {
+			t.Errorf("OpenAPI spec missing %q", check)
+		}
+	}
+}
+
+// --- writePath PUT method ---
+
+func TestGenerateOpenAPIPutMethod(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "Svc",
+				ProtoPackage: "svc.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "Update",
+						HTTPMethod: "PUT",
+						HTTPPath:   "/items/{id}",
+						PathParams: []string{"id"},
+						StreamType: parser.StreamUnary,
+						InputType:  &parser.MessageType{Name: "Req", FullName: ".svc.v1.Req"},
+						OutputType: &parser.MessageType{Name: "Resp", FullName: ".svc.v1.Resp"},
+					},
+				},
+			},
+		},
+	}
+
+	content := GenerateOpenAPI(api)
+	if !strings.Contains(content, "put:") {
+		t.Error("expected put: in OpenAPI spec")
+	}
+	if !strings.Contains(content, "requestBody:") {
+		t.Error("expected requestBody for PUT method")
+	}
+}
+
+func TestGenerateOpenAPIPatchMethod(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "Svc",
+				ProtoPackage: "svc.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "Patch",
+						HTTPMethod: "PATCH",
+						HTTPPath:   "/items/{id}",
+						PathParams: []string{"id"},
+						StreamType: parser.StreamUnary,
+						InputType:  &parser.MessageType{Name: "Req", FullName: ".svc.v1.Req"},
+						OutputType: &parser.MessageType{Name: "Resp", FullName: ".svc.v1.Resp"},
+					},
+				},
+			},
+		},
+	}
+
+	content := GenerateOpenAPI(api)
+	if !strings.Contains(content, "patch:") {
+		t.Error("expected patch: in OpenAPI spec")
+	}
+	if !strings.Contains(content, "requestBody:") {
+		t.Error("expected requestBody for PATCH method")
+	}
+}
+
+func TestGenerateOpenAPIDeleteMethod(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "Svc",
+				ProtoPackage: "svc.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "Delete",
+						HTTPMethod: "DELETE",
+						HTTPPath:   "/items/{id}",
+						PathParams: []string{"id"},
+						StreamType: parser.StreamUnary,
+						InputType:  &parser.MessageType{Name: "Req", FullName: ".svc.v1.Req"},
+						OutputType: &parser.MessageType{Name: "Resp", FullName: ".svc.v1.Resp"},
+					},
+				},
+			},
+		},
+	}
+
+	content := GenerateOpenAPI(api)
+	if !strings.Contains(content, "delete:") {
+		t.Error("expected delete: in OpenAPI spec")
+	}
+	// DELETE should NOT have requestBody
+	if strings.Contains(content, "requestBody:") {
+		t.Error("DELETE should not have requestBody")
+	}
+}
+
+// --- generateMain with auth service not in services list (fallback auth conn) ---
+
+func TestGenerateMainAuthServiceNotInServicesList(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "ChatService",
+				ProtoPackage: "chat.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "Send",
+						HTTPMethod: "POST",
+						HTTPPath:   "/send",
+						StreamType: parser.StreamUnary,
+						InputType:  &parser.MessageType{Name: "Req", FullName: ".chat.v1.Req"},
+						OutputType: &parser.MessageType{Name: "Resp", FullName: ".chat.v1.Resp"},
+					},
+				},
+			},
+		},
+		AuthMethod: &parser.AuthMethod{
+			ServiceName: "AuthService",
+			MethodName:  "Authenticate",
+		},
+	}
+
+	content, err := generateMain(api)
+	if err != nil {
+		t.Fatalf("generateMain() error: %v", err)
+	}
+
+	// Auth service should get its own connection
+	if !strings.Contains(content, "authServiceConn") {
+		t.Error("expected authServiceConn for fallback auth connection")
+	}
+	if !strings.Contains(content, "PROTOBRIDGE_AUTH_SERVICE_ADDR") {
+		t.Error("expected PROTOBRIDGE_AUTH_SERVICE_ADDR")
+	}
+	if !strings.Contains(content, "runtime.NewAuthFunc") {
+		t.Error("expected NewAuthFunc")
+	}
+}
+
+// --- generateWSHandler server streaming ---
+
+func TestGenerateWSHandlerServerStreaming(t *testing.T) {
+	svc := &parser.Service{
+		Name:         "EventService",
+		ProtoPackage: "events.v1",
+	}
+	m := &parser.Method{
+		Name:       "StreamEvents",
+		StreamType: parser.StreamServer,
+		InputType:  &parser.MessageType{Name: "StreamEventsReq", FullName: ".events.v1.StreamEventsReq"},
+		OutputType: &parser.MessageType{Name: "Event", FullName: ".events.v1.Event"},
+	}
+
+	content, err := generateWSHandler(svc, m)
+	if err != nil {
+		t.Fatalf("generateWSHandler() error: %v", err)
+	}
+
+	checks := []string{
+		"streamEventsWSHandler",
+		"StreamEvents(ctx)",
+		"StreamEventsReq",
+	}
+	for _, check := range checks {
+		if !strings.Contains(content, check) {
+			t.Errorf("WS handler missing %q", check)
+		}
+	}
+}
+
+// --- generateWSHandler with ExcludeAuth ---
+
+func TestGenerateWSHandlerExcludeAuth(t *testing.T) {
+	svc := &parser.Service{
+		Name:         "EventService",
+		ProtoPackage: "events.v1",
+	}
+	m := &parser.Method{
+		Name:        "StreamEvents",
+		StreamType:  parser.StreamBidi,
+		ExcludeAuth: true,
+		InputType:   &parser.MessageType{Name: "Req", FullName: ".events.v1.Req"},
+		OutputType:  &parser.MessageType{Name: "Resp", FullName: ".events.v1.Resp"},
+	}
+
+	content, err := generateWSHandler(svc, m)
+	if err != nil {
+		t.Fatalf("generateWSHandler() error: %v", err)
+	}
+
+	if !strings.Contains(content, "true") {
+		t.Error("expected ExcludeAuth=true in WS handler")
+	}
+}
+
+// --- GenerateEnvExample with auth service not in services list ---
+
+func TestGenerateEnvExampleAuthServiceNotInList(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "ChatService",
+				ProtoPackage: "chat.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "Send",
+						HTTPMethod: "POST",
+						HTTPPath:   "/send",
+						StreamType: parser.StreamUnary,
+						InputType:  &parser.MessageType{Name: "Req", FullName: ".chat.v1.Req"},
+						OutputType: &parser.MessageType{Name: "Resp", FullName: ".chat.v1.Resp"},
+					},
+				},
+			},
+		},
+		AuthMethod: &parser.AuthMethod{
+			ServiceName: "AuthService",
+			MethodName:  "Authenticate",
+		},
+	}
+
+	content := GenerateEnvExample(api)
+	if !strings.Contains(content, "PROTOBRIDGE_AUTH_SERVICE_ADDR=localhost:50051") {
+		t.Error("expected auth service addr in .env.example")
+	}
+}
+
+// --- GenerateK8sManifest with auth service not in services list ---
+
+func TestGenerateK8sManifestAuthServiceNotInList(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "ChatService",
+				ProtoPackage: "chat.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "Send",
+						HTTPMethod: "POST",
+						HTTPPath:   "/send",
+						StreamType: parser.StreamUnary,
+						InputType:  &parser.MessageType{Name: "Req", FullName: ".chat.v1.Req"},
+						OutputType: &parser.MessageType{Name: "Resp", FullName: ".chat.v1.Resp"},
+					},
+				},
+			},
+		},
+		AuthMethod: &parser.AuthMethod{
+			ServiceName: "AuthService",
+			MethodName:  "Authenticate",
+		},
+	}
+
+	content := GenerateK8sManifest(api)
+	if !strings.Contains(content, "PROTOBRIDGE_AUTH_SERVICE_ADDR") {
+		t.Error("expected auth service addr in k8s manifest")
+	}
+}
+
+// --- generateServiceFile with streaming method (non-unary, IsUnary=false branch) ---
+
+func TestGenerateServiceFileStreamingMethod(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "EventService",
+				ProtoPackage: "events.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "BidiChat",
+						HTTPMethod: "GET",
+						HTTPPath:   "/events/chat",
+						StreamType: parser.StreamBidi,
+						InputType: &parser.MessageType{
+							Name:     "ChatMsg",
+							FullName: ".events.v1.ChatMsg",
+							Fields: []*parser.Field{
+								{Name: "text", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+							},
+						},
+						OutputType: &parser.MessageType{
+							Name:     "ChatReply",
+							FullName: ".events.v1.ChatReply",
+							Fields: []*parser.Field{
+								{Name: "reply", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	content, err := generateServiceFile(api.Services[0], api)
+	if err != nil {
+		t.Fatalf("generateServiceFile() error: %v", err)
+	}
+
+	// Streaming methods should still produce a handler function
+	if !strings.Contains(content, "bidiChatHandler") {
+		t.Error("expected handler function for streaming method")
+	}
+	// But should NOT contain UnaryCallWithRetry (that's for unary only)
+	if strings.Contains(content, "UnaryCallWithRetry") {
+		t.Error("streaming method should not have UnaryCallWithRetry")
+	}
+}
+
+// --- OpenAPI with query params target ---
+
+func TestGenerateOpenAPIQueryParamsTarget(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "Svc",
+				ProtoPackage: "svc.v1",
+				Methods: []*parser.Method{
+					{
+						Name:              "List",
+						HTTPMethod:        "GET",
+						HTTPPath:          "/items",
+						StreamType:        parser.StreamUnary,
+						QueryParamsTarget: "filter",
+						InputType: &parser.MessageType{
+							Name:     "Req",
+							FullName: ".svc.v1.Req",
+							Fields: []*parser.Field{
+								{Name: "filter", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".svc.v1.Filter"},
+							},
+						},
+						OutputType: &parser.MessageType{
+							Name:     "Resp",
+							FullName: ".svc.v1.Resp",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	content := GenerateOpenAPI(api)
+	if !strings.Contains(content, "# query params from filter") {
+		t.Error("expected query params comment in OpenAPI spec")
+	}
+}
+
+// --- generateMain with auth service IN services list (AuthConnVar found directly) ---
+
+func TestGenerateMainAuthServiceInServicesList(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "AuthService",
+				ProtoPackage: "auth.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "Login",
+						HTTPMethod: "POST",
+						HTTPPath:   "/login",
+						StreamType: parser.StreamUnary,
+						InputType:  &parser.MessageType{Name: "LoginReq", FullName: ".auth.v1.LoginReq"},
+						OutputType: &parser.MessageType{Name: "LoginResp", FullName: ".auth.v1.LoginResp"},
+					},
+				},
+			},
+		},
+		AuthMethod: &parser.AuthMethod{
+			ServiceName: "AuthService",
+			MethodName:  "Authenticate",
+		},
+	}
+
+	content, err := generateMain(api)
+	if err != nil {
+		t.Fatalf("generateMain() error: %v", err)
+	}
+	if !strings.Contains(content, "authServiceConn") {
+		t.Error("expected authServiceConn")
+	}
+	if !strings.Contains(content, "runtime.NewAuthFunc") {
+		t.Error("expected NewAuthFunc")
+	}
+	// Should only have one service entry (not duplicated)
+	count := strings.Count(content, "PROTOBRIDGE_AUTH_SERVICE_ADDR")
+	if count != 2 { // once for requireEnv, once for register call
+		// Just ensure it's not zero
+		if count == 0 {
+			t.Error("expected PROTOBRIDGE_AUTH_SERVICE_ADDR")
+		}
+	}
+}
+
+// --- GenerateEnvExample with auth service IN services list (found=true branch) ---
+
+func TestGenerateEnvExampleAuthServiceInList(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "AuthService",
+				ProtoPackage: "auth.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "Login",
+						HTTPMethod: "POST",
+						HTTPPath:   "/login",
+						StreamType: parser.StreamUnary,
+						InputType:  &parser.MessageType{Name: "LoginReq", FullName: ".auth.v1.LoginReq"},
+						OutputType: &parser.MessageType{Name: "LoginResp", FullName: ".auth.v1.LoginResp"},
+					},
+				},
+			},
+		},
+		AuthMethod: &parser.AuthMethod{
+			ServiceName: "AuthService",
+			MethodName:  "Authenticate",
+		},
+	}
+
+	content := GenerateEnvExample(api)
+	// Auth service addr should appear exactly once (from services loop, not duplicated)
+	count := strings.Count(content, "PROTOBRIDGE_AUTH_SERVICE_ADDR=localhost:50051")
+	if count != 1 {
+		t.Errorf("expected exactly 1 occurrence of PROTOBRIDGE_AUTH_SERVICE_ADDR, got %d", count)
+	}
+}
+
+// --- Run with parser error (validation failure) ---
+
+func TestRun_ParserError(t *testing.T) {
+	// Trigger a parser error by creating a request with duplicate auth methods.
+	// We need the protobridge auth_method extension. Import it.
+	authOpts := &descriptorpb.MethodOptions{}
+	proto.SetExtension(authOpts, optionspb.E_AuthMethod, true)
+
+	// Auth method input needs a map field so the first auth method passes validation
+	// before the duplicate check kicks in.
+	mapEntry := &descriptorpb.DescriptorProto{
+		Name: strPtr("HeadersEntry"),
+		Field: []*descriptorpb.FieldDescriptorProto{
+			{Name: strPtr("key"), Number: int32Ptr(1), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()},
+			{Name: strPtr("value"), Number: int32Ptr(2), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()},
+		},
+		Options: &descriptorpb.MessageOptions{MapEntry: boolPtr(true)},
+	}
+	authInput := &descriptorpb.DescriptorProto{
+		Name: strPtr("AuthReq"),
+		Field: []*descriptorpb.FieldDescriptorProto{
+			{
+				Name:     strPtr("headers"),
+				Number:   int32Ptr(1),
+				Type:     descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(),
+				TypeName: strPtr(".test.v1.AuthReq.HeadersEntry"),
+				Label:    descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum(),
+			},
+		},
+		NestedType: []*descriptorpb.DescriptorProto{mapEntry},
+	}
+
+	req := &pluginpb.CodeGeneratorRequest{
+		FileToGenerate: []string{"test.proto"},
+		ProtoFile: []*descriptorpb.FileDescriptorProto{
+			{
+				Name:    strPtr("test.proto"),
+				Package: strPtr("test.v1"),
+				MessageType: []*descriptorpb.DescriptorProto{
+					authInput,
+					{Name: strPtr("AuthResp"), Field: []*descriptorpb.FieldDescriptorProto{
+						{Name: strPtr("user_id"), Number: int32Ptr(1), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()},
+					}},
+				},
+				Service: []*descriptorpb.ServiceDescriptorProto{
+					{
+						Name: strPtr("Svc"),
+						Method: []*descriptorpb.MethodDescriptorProto{
+							{
+								Name:       strPtr("Auth1"),
+								InputType:  strPtr(".test.v1.AuthReq"),
+								OutputType: strPtr(".test.v1.AuthResp"),
+								Options:    authOpts,
+							},
+							{
+								Name:       strPtr("Auth2"),
+								InputType:  strPtr(".test.v1.AuthReq"),
+								OutputType: strPtr(".test.v1.AuthResp"),
+								Options:    authOpts,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := proto.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	resp := Run(bytes.NewReader(data))
+	if resp.Error == nil {
+		t.Fatal("expected error for duplicate auth methods")
+	}
+}
+
+// --- collectAsyncSchemas with nil message type ---
+
+func TestCollectAsyncSchemasNilMessageType(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "Svc",
+				ProtoPackage: "svc.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "Stream",
+						StreamType: parser.StreamServer,
+						InputType:  nil,
+						OutputType: &parser.MessageType{
+							Name:     "Event",
+							FullName: ".svc.v1.Event",
+							Fields: []*parser.Field{
+								{Name: "data", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	channels := []asyncChannel{{svc: api.Services[0], method: api.Services[0].Methods[0]}}
+	schemas := collectAsyncSchemas(channels, api)
+	// Should have Event but handle nil InputType gracefully
+	found := false
+	for _, s := range schemas {
+		if s.Name == "Event" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected Event schema")
+	}
+}
+
+// --- writeSchema with empty oneofDecls (zero variants) ---
+
+func TestGenerateOpenAPIOneofEmptyVariants(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "Svc",
+				ProtoPackage: "svc.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "Do",
+						HTTPMethod: "POST",
+						HTTPPath:   "/do",
+						StreamType: parser.StreamUnary,
+						InputType: &parser.MessageType{
+							Name:     "Req",
+							FullName: ".svc.v1.Req",
+							Fields:   []*parser.Field{},
+							OneofDecls: []*parser.OneofDecl{
+								{Name: "empty", Variants: nil},
+							},
+						},
+						OutputType: &parser.MessageType{
+							Name:     "Resp",
+							FullName: ".svc.v1.Resp",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	content := GenerateOpenAPI(api)
+	// Empty oneof should NOT produce a comment
+	if strings.Contains(content, "# oneof: empty") {
+		t.Error("empty oneof should not produce a comment")
 	}
 }

@@ -163,6 +163,126 @@ func TestUserStreamHub_MultipleSubscribers(t *testing.T) {
 	}
 }
 
+func TestUserStreamHub_StreamError(t *testing.T) {
+	hub := runtime.NewUserStreamHub()
+
+	stream := &mockServerStream{
+		err: fmt.Errorf("stream error"),
+	}
+
+	opener := func(ctx context.Context, conn *grpc.ClientConn) (runtime.ServerStream, error) {
+		return stream, nil
+	}
+
+	ch, unsub, err := hub.Subscribe(context.Background(), "user1", nil, opener)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer unsub()
+
+	// Channel should be closed after stream error.
+	select {
+	case _, ok := <-ch:
+		if ok {
+			t.Fatal("expected channel to be closed after stream error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for channel close")
+	}
+}
+
+func TestUserStreamHub_DoubleUnsubscribe(t *testing.T) {
+	hub := runtime.NewUserStreamHub()
+
+	block := make(chan struct{})
+	stream := &mockServerStream{
+		messages: []proto.Message{
+			&pb.SimpleResponse{Id: "1"},
+		},
+		block: block,
+	}
+
+	opener := func(ctx context.Context, conn *grpc.ClientConn) (runtime.ServerStream, error) {
+		return stream, nil
+	}
+
+	_, unsub, err := hub.Subscribe(context.Background(), "user1", nil, opener)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Unsubscribe twice -- second should be a no-op.
+	unsub()
+	unsub()
+
+	close(block)
+	time.Sleep(50 * time.Millisecond)
+}
+
+func TestUserStreamHub_SlowSubscriber(t *testing.T) {
+	hub := runtime.NewUserStreamHub()
+
+	// Create a stream with many messages to overflow subscriber buffer.
+	msgs := make([]proto.Message, 100)
+	for i := range msgs {
+		msgs[i] = &pb.SimpleResponse{Id: fmt.Sprintf("%d", i)}
+	}
+	stream := &mockServerStream{messages: msgs}
+
+	opener := func(ctx context.Context, conn *grpc.ClientConn) (runtime.ServerStream, error) {
+		return stream, nil
+	}
+
+	ch, unsub, err := hub.Subscribe(context.Background(), "user1", nil, opener)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer unsub()
+
+	// Don't read from ch -- let it overflow (buffer is 32).
+	// Wait for stream to end.
+	select {
+	case <-ch:
+		// Got at least one message or channel closed.
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out")
+	}
+}
+
+func TestUserStreamHub_UnsubscribeOneOfMany(t *testing.T) {
+	hub := runtime.NewUserStreamHub()
+
+	block := make(chan struct{})
+	stream := &mockServerStream{
+		messages: []proto.Message{
+			&pb.SimpleResponse{Id: "1"},
+		},
+		block: block,
+	}
+
+	opener := func(ctx context.Context, conn *grpc.ClientConn) (runtime.ServerStream, error) {
+		return stream, nil
+	}
+
+	_, unsub1, err := hub.Subscribe(context.Background(), "user1", nil, opener)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, unsub2, err := hub.Subscribe(context.Background(), "user1", nil, opener)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Unsubscribe only the first -- stream should stay alive for the second.
+	unsub1()
+
+	// Unblock and clean up.
+	close(block)
+	time.Sleep(50 * time.Millisecond)
+	unsub2()
+}
+
 func TestUserStreamHub_UnsubscribeLastStopsStream(t *testing.T) {
 	hub := runtime.NewUserStreamHub()
 
