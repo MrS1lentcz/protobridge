@@ -31,7 +31,7 @@ func main() {
 		}
 	}
 
-	p := func(format string, args ...any) { fmt.Fprintf(output, format, args...) }
+	p := func(format string, args ...any) { _, _ = fmt.Fprintf(output, format, args...) }
 
 	p("=== protobridge benchmark ===\n")
 	p("target: %s\n", target)
@@ -176,10 +176,10 @@ func runBench(p func(string, ...any), name string, total, concurrency int, doReq
 func waitForHealthy(url string) {
 	for i := 0; i < 60; i++ {
 		if code := doGet(url); code == 200 {
-			fmt.Fprintf(output, "proxy is healthy\n\n")
+			_, _ = fmt.Fprintf(output, "proxy is healthy\n\n")
 			return
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	fmt.Fprintf(output, "WARNING: proxy not healthy after 30s\n\n")
+	_, _ = fmt.Fprintf(output, "WARNING: proxy not healthy after 30s\n\n")
 }

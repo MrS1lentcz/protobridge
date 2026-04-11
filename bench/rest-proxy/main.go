@@ -31,7 +31,7 @@ func main() {
 
 	pool := grpcx.NewPool()
 	pool.EnableHealthWatch(30 * time.Second)
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	scalingCfg := grpcx.ScalingConfig{
 		StreamsPerConn: 100,

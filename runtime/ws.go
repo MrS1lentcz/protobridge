@@ -110,7 +110,7 @@ func WSHandler(conn *grpc.ClientConn, factory StreamFactory, auth AuthFunc, excl
 			}
 			msg := stream.NewRequestMessage()
 			if err := protojson.Unmarshal(data, msg); err != nil {
-				ws.Close(websocket.StatusInvalidFramePayloadData, "invalid JSON")
+				_ = ws.Close(websocket.StatusInvalidFramePayloadData, "invalid JSON")
 				return
 			}
 			if err := stream.Send(msg); err != nil {

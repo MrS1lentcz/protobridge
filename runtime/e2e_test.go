@@ -90,18 +90,18 @@ func buildWSServerStreamHandler(client pb.BenchServiceClient) http.HandlerFunc {
 		ctx := r.Context()
 		stream, err := client.Subscribe(ctx, &pb.CreateItemRequest{Name: "ws-test"})
 		if err != nil {
-			ws.Close(websocket.StatusInternalError, "stream open failed")
+			_ = ws.Close(websocket.StatusInternalError, "stream open failed")
 			return
 		}
 
 		for {
 			msg, err := stream.Recv()
 			if err == io.EOF {
-				ws.Close(websocket.StatusNormalClosure, "stream ended")
+				_ = ws.Close(websocket.StatusNormalClosure, "stream ended")
 				return
 			}
 			if err != nil {
-				ws.Close(websocket.StatusInternalError, "stream error")
+				_ = ws.Close(websocket.StatusInternalError, "stream error")
 				return
 			}
 			data, _ := protojson.Marshal(msg)
@@ -123,7 +123,7 @@ func buildWSBidiHandler(client pb.BenchServiceClient) http.HandlerFunc {
 		ctx := r.Context()
 		stream, err := client.Chat(ctx)
 		if err != nil {
-			ws.Close(websocket.StatusInternalError, "stream open failed")
+			_ = ws.Close(websocket.StatusInternalError, "stream open failed")
 			return
 		}
 
@@ -133,7 +133,7 @@ func buildWSBidiHandler(client pb.BenchServiceClient) http.HandlerFunc {
 			for {
 				msg, err := stream.Recv()
 				if err != nil {
-					ws.Close(websocket.StatusNormalClosure, "done")
+					_ = ws.Close(websocket.StatusNormalClosure, "done")
 					return
 				}
 				data, _ := protojson.Marshal(msg)
@@ -152,7 +152,7 @@ func buildWSBidiHandler(client pb.BenchServiceClient) http.HandlerFunc {
 			}
 			msg := &pb.StreamMessage{}
 			if err := protojson.Unmarshal(data, msg); err != nil {
-				ws.Close(websocket.StatusInvalidFramePayloadData, "bad json")
+				_ = ws.Close(websocket.StatusInvalidFramePayloadData, "bad json")
 				return
 			}
 			if err := stream.Send(msg); err != nil {
@@ -172,7 +172,7 @@ func TestE2E_HealthEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /healthz error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -199,7 +199,7 @@ func TestE2E_CreateItem_ValidRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /items error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -232,7 +232,7 @@ func TestE2E_CreateItem_EmptyBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /items error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Empty body with required "name" field should fail validation (422).
 	if resp.StatusCode != http.StatusUnprocessableEntity {
@@ -265,7 +265,7 @@ func TestE2E_CreateItemAuth_WithHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /items/auth error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -297,7 +297,7 @@ func TestE2E_CreateItemAuth_MissingRequiredHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /items/auth error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -319,7 +319,7 @@ func TestE2E_SSE_ReceivesEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /subscribe error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -373,8 +373,8 @@ func TestE2E_MultipleRequestsSequential(t *testing.T) {
 		if err != nil {
 			t.Fatalf("request %d error: %v", i, err)
 		}
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
 		if resp.StatusCode != 200 {
 			t.Fatalf("request %d: expected 200, got %d", i, resp.StatusCode)
 		}
@@ -396,7 +396,7 @@ func TestE2E_WS_ServerStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WS dial error: %v", err)
 	}
-	defer ws.CloseNow()
+	defer func() { _ = ws.CloseNow() }()
 
 	// Receive 100 messages from server stream.
 	received := 0
@@ -435,7 +435,7 @@ func TestE2E_WS_Bidi(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WS dial error: %v", err)
 	}
-	defer ws.CloseNow()
+	defer func() { _ = ws.CloseNow() }()
 
 	// Send 5 messages and verify echo responses.
 	for i := 0; i < 5; i++ {
@@ -463,5 +463,5 @@ func TestE2E_WS_Bidi(t *testing.T) {
 	}
 
 	// Clean close.
-	ws.Close(websocket.StatusNormalClosure, "done")
+	_ = ws.Close(websocket.StatusNormalClosure, "done")
 }

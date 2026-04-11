@@ -84,7 +84,7 @@ func TestWSHandler_AuthFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", resp.StatusCode)
 	}
@@ -108,7 +108,7 @@ func TestWSHandler_StreamOpenError(t *testing.T) {
 		// Connection might be rejected, which is also fine.
 		return
 	}
-	defer ws.CloseNow()
+	defer func() { _ = ws.CloseNow() }()
 
 	// Reading should fail because the server closed the connection.
 	_, _, err = ws.Read(ctx)
@@ -136,7 +136,7 @@ func TestWSHandler_ReceiveMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial error: %v", err)
 	}
-	defer ws.CloseNow()
+	defer func() { _ = ws.CloseNow() }()
 
 	// Read the message sent from gRPC stream -> WS.
 	_, data, err := ws.Read(ctx)
@@ -189,7 +189,7 @@ func TestWSHandler_SendMessage(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Close WS to end the handler.
-	ws.Close(websocket.StatusNormalClosure, "done")
+	_ = ws.Close(websocket.StatusNormalClosure, "done")
 	close(block)
 
 	// Verify message was sent to stream.
@@ -242,7 +242,7 @@ func TestWSHandler_SendInvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial error: %v", err)
 	}
-	defer ws.CloseNow()
+	defer func() { _ = ws.CloseNow() }()
 
 	// Send invalid JSON.
 	if err := ws.Write(ctx, websocket.MessageText, []byte("{invalid json")); err != nil {
@@ -275,7 +275,7 @@ func TestWSHandler_StreamRecvError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial error: %v", err)
 	}
-	defer ws.CloseNow()
+	defer func() { _ = ws.CloseNow() }()
 
 	// The server should close the connection because stream recv returns an error.
 	_, _, err = ws.Read(ctx)
@@ -320,7 +320,7 @@ func TestWSHandler_NonWebSocketRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	// websocket.Accept should fail and write an error response.
 	// The exact status depends on the library implementation.
 }
@@ -348,7 +348,7 @@ func TestWSHandler_AuthSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial error: %v", err)
 	}
-	defer ws.CloseNow()
+	defer func() { _ = ws.CloseNow() }()
 
 	_, data, err := ws.Read(ctx)
 	if err != nil {
@@ -416,7 +416,7 @@ func TestWSHandler_WriteErrorOnClientDisconnect(t *testing.T) {
 	}
 
 	// Close immediately -- the delayed second message write should fail.
-	ws.CloseNow()
+	_ = ws.CloseNow()
 	time.Sleep(300 * time.Millisecond)
 }
 
@@ -439,7 +439,7 @@ func TestWSHandler_StreamSendError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial error: %v", err)
 	}
-	defer ws.CloseNow()
+	defer func() { _ = ws.CloseNow() }()
 
 	// Send a valid message -- the server's stream.Send will fail.
 	req := &pb.SimpleRequest{Name: "test"}
@@ -479,7 +479,7 @@ func TestWSHandler_GoroutineCleanupOnDisconnect(t *testing.T) {
 	}
 
 	// Close WS client immediately to trigger disconnect.
-	ws.CloseNow()
+	_ = ws.CloseNow()
 
 	// Unblock the recv goroutine so it can detect the context cancellation.
 	close(block)
