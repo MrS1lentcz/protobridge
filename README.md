@@ -531,15 +531,17 @@ Benchmarked on Apple M1 Pro in Docker Desktop with resource limits per container
 - Benchmark runner: 3 CPUs, 2GB RAM
 - Network: Docker Compose bridge
 
-**Results (proxy on 1 CPU):**
+**Results (proxy on 1 CPU, 2GB RAM):**
 
 | Scenario | Concurrency | Throughput | Success | p50 | p99 |
 |---|---|---|---|---|---|
-| `GET /healthz` (baseline) | 50 | **13,000 req/s** | 100% | 2.6ms | 26ms |
-| Unary POST (no auth) | 50 | **17,000 req/s** | 100% | 1.8ms | 31ms |
-| Unary POST (with auth) | 50 | **4,200 req/s** | 100% | 4.3ms | 139ms |
+| `GET /healthz` (baseline) | 50 | **51,500 req/s** | 100% | 380µs | 15ms |
+| Unary POST (no auth) | 50 | **20,400 req/s** | 100% | 1.2ms | 41ms |
+| Unary POST (with auth) | 50 | **14,200 req/s** | 100% | 2.0ms | 46ms |
+| Unary POST (no auth) | 100 | **23,400 req/s** | 100% | 2.3ms | 48ms |
+| Unary POST (no auth) | 500 | **23,300 req/s** | 100% | 12ms | 71ms |
 
-Auth requests are ~2x slower because they involve two sequential gRPC calls (auth RPC + business RPC) per HTTP request.
+Auth requests involve two sequential gRPC calls (auth RPC + business RPC), hence ~30% lower throughput. At 500 concurrent connections on a single CPU, the proxy maintains **23k req/s with zero errors**. Connection scaling (1→N gRPC connections) kicks in automatically as load increases.
 
 **Run the benchmark yourself:**
 

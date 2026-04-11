@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/mrs1lentcz/gox/grpcx"
@@ -29,7 +30,7 @@ func main() {
 	}
 
 	pool := grpcx.NewPool()
-	pool.EnableHealthWatch(30)
+	pool.EnableHealthWatch(30 * time.Second)
 	defer pool.Close()
 
 	scalingCfg := grpcx.ScalingConfig{
