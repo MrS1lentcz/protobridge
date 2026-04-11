@@ -123,14 +123,16 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	TaskService_CreateTask_FullMethodName      = "/taskboard.v1.TaskService/CreateTask"
-	TaskService_GetTask_FullMethodName         = "/taskboard.v1.TaskService/GetTask"
-	TaskService_UpdateTask_FullMethodName      = "/taskboard.v1.TaskService/UpdateTask"
-	TaskService_DeleteTask_FullMethodName      = "/taskboard.v1.TaskService/DeleteTask"
-	TaskService_ListTasks_FullMethodName       = "/taskboard.v1.TaskService/ListTasks"
-	TaskService_WatchTasks_FullMethodName      = "/taskboard.v1.TaskService/WatchTasks"
-	TaskService_BulkCreateTasks_FullMethodName = "/taskboard.v1.TaskService/BulkCreateTasks"
-	TaskService_TaskChat_FullMethodName        = "/taskboard.v1.TaskService/TaskChat"
+	TaskService_CreateTask_FullMethodName        = "/taskboard.v1.TaskService/CreateTask"
+	TaskService_GetTask_FullMethodName           = "/taskboard.v1.TaskService/GetTask"
+	TaskService_UpdateTask_FullMethodName        = "/taskboard.v1.TaskService/UpdateTask"
+	TaskService_DeleteTask_FullMethodName        = "/taskboard.v1.TaskService/DeleteTask"
+	TaskService_ListTasks_FullMethodName         = "/taskboard.v1.TaskService/ListTasks"
+	TaskService_WatchTasks_FullMethodName        = "/taskboard.v1.TaskService/WatchTasks"
+	TaskService_TaskNotifications_FullMethodName = "/taskboard.v1.TaskService/TaskNotifications"
+	TaskService_BulkCreateTasks_FullMethodName   = "/taskboard.v1.TaskService/BulkCreateTasks"
+	TaskService_TaskChat_FullMethodName          = "/taskboard.v1.TaskService/TaskChat"
+	TaskService_ActivityFeed_FullMethodName      = "/taskboard.v1.TaskService/ActivityFeed"
 )
 
 // TaskServiceClient is the client API for TaskService service.
@@ -143,8 +145,10 @@ type TaskServiceClient interface {
 	DeleteTask(ctx context.Context, in *DeleteTaskRequest, opts ...grpc.CallOption) (*DeleteTaskResponse, error)
 	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*ListTasksResponse, error)
 	WatchTasks(ctx context.Context, in *WatchTasksRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskEvent], error)
+	TaskNotifications(ctx context.Context, in *WatchTasksRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskEvent], error)
 	BulkCreateTasks(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[BulkCreateTaskRequest, BulkCreateTaskResponse], error)
 	TaskChat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ChatMessage, ChatMessage], error)
+	ActivityFeed(ctx context.Context, in *WatchTasksRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskEvent], error)
 }
 
 type taskServiceClient struct {
@@ -224,9 +228,28 @@ func (c *taskServiceClient) WatchTasks(ctx context.Context, in *WatchTasksReques
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TaskService_WatchTasksClient = grpc.ServerStreamingClient[TaskEvent]
 
+func (c *taskServiceClient) TaskNotifications(ctx context.Context, in *WatchTasksRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &TaskService_ServiceDesc.Streams[1], TaskService_TaskNotifications_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchTasksRequest, TaskEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskService_TaskNotificationsClient = grpc.ServerStreamingClient[TaskEvent]
+
 func (c *taskServiceClient) BulkCreateTasks(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[BulkCreateTaskRequest, BulkCreateTaskResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &TaskService_ServiceDesc.Streams[1], TaskService_BulkCreateTasks_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &TaskService_ServiceDesc.Streams[2], TaskService_BulkCreateTasks_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +262,7 @@ type TaskService_BulkCreateTasksClient = grpc.ClientStreamingClient[BulkCreateTa
 
 func (c *taskServiceClient) TaskChat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ChatMessage, ChatMessage], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &TaskService_ServiceDesc.Streams[2], TaskService_TaskChat_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &TaskService_ServiceDesc.Streams[3], TaskService_TaskChat_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -249,6 +272,25 @@ func (c *taskServiceClient) TaskChat(ctx context.Context, opts ...grpc.CallOptio
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TaskService_TaskChatClient = grpc.BidiStreamingClient[ChatMessage, ChatMessage]
+
+func (c *taskServiceClient) ActivityFeed(ctx context.Context, in *WatchTasksRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &TaskService_ServiceDesc.Streams[4], TaskService_ActivityFeed_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchTasksRequest, TaskEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskService_ActivityFeedClient = grpc.ServerStreamingClient[TaskEvent]
 
 // TaskServiceServer is the server API for TaskService service.
 // All implementations must embed UnimplementedTaskServiceServer
@@ -260,8 +302,10 @@ type TaskServiceServer interface {
 	DeleteTask(context.Context, *DeleteTaskRequest) (*DeleteTaskResponse, error)
 	ListTasks(context.Context, *ListTasksRequest) (*ListTasksResponse, error)
 	WatchTasks(*WatchTasksRequest, grpc.ServerStreamingServer[TaskEvent]) error
+	TaskNotifications(*WatchTasksRequest, grpc.ServerStreamingServer[TaskEvent]) error
 	BulkCreateTasks(grpc.ClientStreamingServer[BulkCreateTaskRequest, BulkCreateTaskResponse]) error
 	TaskChat(grpc.BidiStreamingServer[ChatMessage, ChatMessage]) error
+	ActivityFeed(*WatchTasksRequest, grpc.ServerStreamingServer[TaskEvent]) error
 	mustEmbedUnimplementedTaskServiceServer()
 }
 
@@ -290,11 +334,17 @@ func (UnimplementedTaskServiceServer) ListTasks(context.Context, *ListTasksReque
 func (UnimplementedTaskServiceServer) WatchTasks(*WatchTasksRequest, grpc.ServerStreamingServer[TaskEvent]) error {
 	return status.Errorf(codes.Unimplemented, "method WatchTasks not implemented")
 }
+func (UnimplementedTaskServiceServer) TaskNotifications(*WatchTasksRequest, grpc.ServerStreamingServer[TaskEvent]) error {
+	return status.Errorf(codes.Unimplemented, "method TaskNotifications not implemented")
+}
 func (UnimplementedTaskServiceServer) BulkCreateTasks(grpc.ClientStreamingServer[BulkCreateTaskRequest, BulkCreateTaskResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method BulkCreateTasks not implemented")
 }
 func (UnimplementedTaskServiceServer) TaskChat(grpc.BidiStreamingServer[ChatMessage, ChatMessage]) error {
 	return status.Errorf(codes.Unimplemented, "method TaskChat not implemented")
+}
+func (UnimplementedTaskServiceServer) ActivityFeed(*WatchTasksRequest, grpc.ServerStreamingServer[TaskEvent]) error {
+	return status.Errorf(codes.Unimplemented, "method ActivityFeed not implemented")
 }
 func (UnimplementedTaskServiceServer) mustEmbedUnimplementedTaskServiceServer() {}
 func (UnimplementedTaskServiceServer) testEmbeddedByValue()                     {}
@@ -418,6 +468,17 @@ func _TaskService_WatchTasks_Handler(srv interface{}, stream grpc.ServerStream) 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TaskService_WatchTasksServer = grpc.ServerStreamingServer[TaskEvent]
 
+func _TaskService_TaskNotifications_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchTasksRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(TaskServiceServer).TaskNotifications(m, &grpc.GenericServerStream[WatchTasksRequest, TaskEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskService_TaskNotificationsServer = grpc.ServerStreamingServer[TaskEvent]
+
 func _TaskService_BulkCreateTasks_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(TaskServiceServer).BulkCreateTasks(&grpc.GenericServerStream[BulkCreateTaskRequest, BulkCreateTaskResponse]{ServerStream: stream})
 }
@@ -431,6 +492,17 @@ func _TaskService_TaskChat_Handler(srv interface{}, stream grpc.ServerStream) er
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TaskService_TaskChatServer = grpc.BidiStreamingServer[ChatMessage, ChatMessage]
+
+func _TaskService_ActivityFeed_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchTasksRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(TaskServiceServer).ActivityFeed(m, &grpc.GenericServerStream[WatchTasksRequest, TaskEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskService_ActivityFeedServer = grpc.ServerStreamingServer[TaskEvent]
 
 // TaskService_ServiceDesc is the grpc.ServiceDesc for TaskService service.
 // It's only intended for direct use with grpc.RegisterService,
@@ -467,6 +539,11 @@ var TaskService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 		{
+			StreamName:    "TaskNotifications",
+			Handler:       _TaskService_TaskNotifications_Handler,
+			ServerStreams: true,
+		},
+		{
 			StreamName:    "BulkCreateTasks",
 			Handler:       _TaskService_BulkCreateTasks_Handler,
 			ClientStreams: true,
@@ -476,6 +553,11 @@ var TaskService_ServiceDesc = grpc.ServiceDesc{
 			Handler:       _TaskService_TaskChat_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "ActivityFeed",
+			Handler:       _TaskService_ActivityFeed_Handler,
+			ServerStreams: true,
 		},
 	},
 	Metadata: "taskboard/v1/taskboard.proto",

@@ -14,6 +14,12 @@ channels:
     messages:
       TaskEvent:
         $ref: '#/components/messages/TaskEvent'
+  taskServiceTaskNotifications:
+    address: /api/v1/tasks/notifications
+    description: 'TaskService.TaskNotifications (server streaming)'
+    messages:
+      TaskEvent:
+        $ref: '#/components/messages/TaskEvent'
   taskServiceBulkCreateTasks:
     address: /api/v1/tasks/bulk
     description: 'TaskService.BulkCreateTasks (client streaming)'
@@ -26,11 +32,22 @@ channels:
     messages:
       ChatMessage:
         $ref: '#/components/messages/ChatMessage'
+  taskServiceActivityFeed:
+    address: /api/v1/tasks/feed
+    description: 'TaskService.ActivityFeed (server streaming)'
+    messages:
+      TaskEvent:
+        $ref: '#/components/messages/TaskEvent'
 operations:
   taskServiceWatchTasksReceive:
     action: receive
     channel:
       $ref: '#/channels/taskServiceWatchTasks'
+    summary: Receive TaskEvent events from server
+  taskServiceTaskNotificationsReceive:
+    action: receive
+    channel:
+      $ref: '#/channels/taskServiceTaskNotifications'
     summary: Receive TaskEvent events from server
   taskServiceBulkCreateTasksSend:
     action: send
@@ -47,6 +64,11 @@ operations:
     channel:
       $ref: '#/channels/taskServiceTaskChat'
     summary: Receive ChatMessage messages
+  taskServiceActivityFeedReceive:
+    action: receive
+    channel:
+      $ref: '#/channels/taskServiceActivityFeed'
+    summary: Receive TaskEvent events from server
 components:
   messages:
     TaskEvent:

@@ -89,6 +89,8 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 					QueryParamsTarget: getQueryParamsTarget(m),
 					ExcludeAuth:       getExcludeAuth(m),
 					StreamType:        resolveStreamType(m),
+					SSE:               getSSE(m),
+					WSMode:            getWSMode(m),
 				}
 				service.Methods = append(service.Methods, method)
 			}

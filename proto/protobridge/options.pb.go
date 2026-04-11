@@ -63,6 +63,22 @@ var file_protobridge_options_proto_extTypes = []protoimpl.ExtensionInfo{
 		Filename:      "protobridge/options.proto",
 	},
 	{
+		ExtendedType:  (*descriptorpb.MethodOptions)(nil),
+		ExtensionType: (*bool)(nil),
+		Field:         50021,
+		Name:          "protobridge.sse",
+		Tag:           "varint,50021,opt,name=sse",
+		Filename:      "protobridge/options.proto",
+	},
+	{
+		ExtendedType:  (*descriptorpb.MethodOptions)(nil),
+		ExtensionType: (*string)(nil),
+		Field:         50022,
+		Name:          "protobridge.ws_mode",
+		Tag:           "bytes,50022,opt,name=ws_mode",
+		Filename:      "protobridge/options.proto",
+	},
+	{
 		ExtendedType:  (*descriptorpb.ServiceOptions)(nil),
 		ExtensionType: (*string)(nil),
 		Field:         50040,
@@ -118,6 +134,22 @@ var (
 	//
 	// optional bool auth_method = 50020;
 	E_AuthMethod = &file_protobridge_options_proto_extTypes[4]
+	// Use Server-Sent Events instead of WebSocket for server-streaming RPCs.
+	// Only valid on server-streaming methods. SSE is lighter than WebSocket
+	// for one-way server→client push (e.g. live feeds, notifications).
+	//
+	// optional bool sse = 50021;
+	E_Sse = &file_protobridge_options_proto_extTypes[5]
+	// WebSocket connection mode for streaming RPCs.
+	//
+	//	"private"   – each WS connection opens its own gRPC stream with the
+	//	              authenticated user_id in metadata. Backend knows exactly
+	//	              who it's talking to. (default for auth endpoints)
+	//	"broadcast" – all WS connections share the same event stream.
+	//	              Backend pushes to everyone. No per-user routing.
+	//
+	// optional string ws_mode = 50022;
+	E_WsMode = &file_protobridge_options_proto_extTypes[6]
 )
 
 // Extension fields to descriptorpb.ServiceOptions.
@@ -126,12 +158,12 @@ var (
 	// If not set, the proto service name is used.
 	//
 	// optional string display_name = 50040;
-	E_DisplayName = &file_protobridge_options_proto_extTypes[5]
+	E_DisplayName = &file_protobridge_options_proto_extTypes[7]
 	// Path prefix prepended to all HTTP paths in this service.
 	// Must start with "/" and not end with "/". Example: "/api/v1"
 	//
 	// optional string path_prefix = 50041;
-	E_PathPrefix = &file_protobridge_options_proto_extTypes[6]
+	E_PathPrefix = &file_protobridge_options_proto_extTypes[8]
 )
 
 // Extension fields to descriptorpb.EnumValueOptions.
@@ -139,7 +171,7 @@ var (
 	// Override the enum value name in OpenAPI / JSON output.
 	//
 	// optional string x_var_name = 50030;
-	E_XVarName = &file_protobridge_options_proto_extTypes[7]
+	E_XVarName = &file_protobridge_options_proto_extTypes[9]
 )
 
 var File_protobridge_options_proto protoreflect.FileDescriptor
@@ -152,7 +184,9 @@ const file_protobridge_options_proto_rawDesc = "" +
 	"\x13query_params_target\x12\x1e.google.protobuf.MethodOptions\x18ۆ\x03 \x01(\tR\x11queryParamsTarget:C\n" +
 	"\fexclude_auth\x12\x1e.google.protobuf.MethodOptions\x18܆\x03 \x01(\bR\vexcludeAuth:A\n" +
 	"\vauth_method\x12\x1e.google.protobuf.MethodOptions\x18\xe4\x86\x03 \x01(\bR\n" +
-	"authMethod:D\n" +
+	"authMethod:2\n" +
+	"\x03sse\x12\x1e.google.protobuf.MethodOptions\x18\xe5\x86\x03 \x01(\bR\x03sse:9\n" +
+	"\aws_mode\x12\x1e.google.protobuf.MethodOptions\x18\xe6\x86\x03 \x01(\tR\x06wsMode:D\n" +
 	"\fdisplay_name\x12\x1f.google.protobuf.ServiceOptions\x18\xf8\x86\x03 \x01(\tR\vdisplayName:B\n" +
 	"\vpath_prefix\x12\x1f.google.protobuf.ServiceOptions\x18\xf9\x86\x03 \x01(\tR\n" +
 	"pathPrefix:A\n" +
@@ -166,19 +200,21 @@ var file_protobridge_options_proto_goTypes = []any{
 	(*descriptorpb.EnumValueOptions)(nil), // 3: google.protobuf.EnumValueOptions
 }
 var file_protobridge_options_proto_depIdxs = []int32{
-	0, // 0: protobridge.required:extendee -> google.protobuf.FieldOptions
-	1, // 1: protobridge.required_headers:extendee -> google.protobuf.MethodOptions
-	1, // 2: protobridge.query_params_target:extendee -> google.protobuf.MethodOptions
-	1, // 3: protobridge.exclude_auth:extendee -> google.protobuf.MethodOptions
-	1, // 4: protobridge.auth_method:extendee -> google.protobuf.MethodOptions
-	2, // 5: protobridge.display_name:extendee -> google.protobuf.ServiceOptions
-	2, // 6: protobridge.path_prefix:extendee -> google.protobuf.ServiceOptions
-	3, // 7: protobridge.x_var_name:extendee -> google.protobuf.EnumValueOptions
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	0, // [0:8] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	0,  // 0: protobridge.required:extendee -> google.protobuf.FieldOptions
+	1,  // 1: protobridge.required_headers:extendee -> google.protobuf.MethodOptions
+	1,  // 2: protobridge.query_params_target:extendee -> google.protobuf.MethodOptions
+	1,  // 3: protobridge.exclude_auth:extendee -> google.protobuf.MethodOptions
+	1,  // 4: protobridge.auth_method:extendee -> google.protobuf.MethodOptions
+	1,  // 5: protobridge.sse:extendee -> google.protobuf.MethodOptions
+	1,  // 6: protobridge.ws_mode:extendee -> google.protobuf.MethodOptions
+	2,  // 7: protobridge.display_name:extendee -> google.protobuf.ServiceOptions
+	2,  // 8: protobridge.path_prefix:extendee -> google.protobuf.ServiceOptions
+	3,  // 9: protobridge.x_var_name:extendee -> google.protobuf.EnumValueOptions
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	0,  // [0:10] is the sub-list for extension extendee
+	0,  // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_protobridge_options_proto_init() }
@@ -193,7 +229,7 @@ func file_protobridge_options_proto_init() {
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protobridge_options_proto_rawDesc), len(file_protobridge_options_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   0,
-			NumExtensions: 8,
+			NumExtensions: 10,
 			NumServices:   0,
 		},
 		GoTypes:           file_protobridge_options_proto_goTypes,

@@ -205,11 +205,21 @@ service TaskService {
     option (protobridge.query_params_target) = "paging";
   }
 
-  // --- Server streaming: watch task events ---
+  // --- Server streaming: watch task events (private WS – per user) ---
 
   rpc WatchTasks(WatchTasksRequest) returns (stream TaskEvent) {
     option (google.api.http) = {get: "/tasks/watch"};
     option (protobridge.required_headers) = "user_id";
+    option (protobridge.ws_mode) = "private";
+  }
+
+  // --- Server streaming via SSE: live notifications ---
+
+  rpc TaskNotifications(WatchTasksRequest) returns (stream TaskEvent) {
+    option (google.api.http) = {get: "/tasks/notifications"};
+    option (protobridge.required_headers) = "user_id";
+    option (protobridge.sse) = true;
+    option (protobridge.ws_mode) = "private";
   }
 
   // --- Client streaming: bulk create ---
@@ -217,13 +227,22 @@ service TaskService {
   rpc BulkCreateTasks(stream BulkCreateTaskRequest) returns (BulkCreateTaskResponse) {
     option (google.api.http) = {post: "/tasks/bulk"};
     option (protobridge.required_headers) = "user_id";
+    option (protobridge.ws_mode) = "private";
   }
 
-  // --- Bidi streaming: task chat ---
+  // --- Bidi streaming: task chat (private per user) ---
 
   rpc TaskChat(stream ChatMessage) returns (stream ChatMessage) {
     option (google.api.http) = {get: "/tasks/{task_id}/chat"};
     option (protobridge.required_headers) = "user_id";
+    option (protobridge.ws_mode) = "private";
+  }
+
+  // --- Server streaming: public activity feed (broadcast to all) ---
+
+  rpc ActivityFeed(WatchTasksRequest) returns (stream TaskEvent) {
+    option (google.api.http) = {get: "/tasks/feed"};
+    option (protobridge.ws_mode) = "broadcast";
   }
 }
 

@@ -6,7 +6,7 @@ Zero-code gRPC-to-REST proxy generator for Go. Define your API in `.proto` files
 
 Existing gRPC-REST gateways (grpc-gateway, etc.) fall short in areas that frontend teams care about most:
 
-- **Broken `oneof` / union types** -- `protojson` produces flat objects with no discriminator. Frontend can't tell which variant it received. protobridge generates clean discriminated unions with a `"discriminator"` field, validated for global uniqueness at generation time. Oneof variant messages have strict usage rules enforced by the generator, so the API surface is always consistent.
+- **Broken `oneof` / union types** -- `protojson` produces flat objects with no discriminator. Frontend can't tell which variant it received. protobridge generates clean discriminated unions with a `"protobridge_disc"` field, validated for global uniqueness at generation time. Oneof variant messages have strict usage rules enforced by the generator, so the API surface is always consistent.
 - **Unusable enums** -- proto enums expose raw `SCREAMING_CASE` names and the meaningless `0` default to the API consumer. protobridge strips the zero member entirely and lets you define clean names via `x_var_name` (`"low"`, `"high"` instead of `TASK_PRIORITY_LOW`). The result is an OpenAPI spec that frontend codegen tools can consume directly.
 - **No streaming story** -- most gateways either ignore streaming RPCs or require separate configuration. protobridge automatically maps all stream types (server, client, bidi) to WebSocket endpoints. Same proto annotations, same proxy.
 - **Boilerplate everywhere** -- even with a gateway, you still write middleware, auth wiring, connection management, error mapping, validation, and a `main.go`. protobridge generates all of it. The output compiles and runs with zero handwritten Go.
@@ -226,18 +226,48 @@ Streaming RPCs are automatically exposed as WebSocket endpoints:
 | gRPC stream type | HTTP transport |
 |---|---|
 | Unary | Standard HTTP |
-| Server streaming | WebSocket (server sends, client receives) |
+| Server streaming | WebSocket or SSE |
 | Client streaming | WebSocket (client sends, server receives) |
 | Bidirectional | WebSocket (full duplex) |
 
+### Connection modes
+
+Every streaming endpoint has a **ws_mode** that controls how connections are managed:
+
 ```protobuf
-// Becomes a WebSocket endpoint at /tasks/watch
+// Private: each WS client gets its own gRPC stream with user_id in metadata.
+// Backend knows exactly who it's talking to.
 rpc WatchTasks(WatchTasksRequest) returns (stream TaskEvent) {
   option (google.api.http) = {get: "/tasks/watch"};
+  option (protobridge.ws_mode) = "private";
+}
+
+// Broadcast: all WS clients receive the same events. No per-user routing.
+// Good for public feeds, market data, system-wide notifications.
+rpc ActivityFeed(WatchTasksRequest) returns (stream TaskEvent) {
+  option (google.api.http) = {get: "/tasks/feed"};
+  option (protobridge.ws_mode) = "broadcast";
 }
 ```
 
-Alongside `openapi.yaml`, protobridge generates an **`asyncapi.yaml`** (AsyncAPI 3.0) spec for all WebSocket endpoints. This lets frontend teams use AsyncAPI tooling for WebSocket client codegen, documentation, and contract testing.
+`private` and `broadcast` are independent of authentication -- a broadcast endpoint can still require auth (e.g. a shared dashboard visible only to logged-in users), and a private endpoint without auth makes no sense (the generator will warn).
+
+### Server-Sent Events (SSE)
+
+For server→client one-way streaming, SSE is lighter than WebSocket -- no upgrade handshake, works through HTTP/2 proxies, and has native browser support via `EventSource`.
+
+```protobuf
+rpc TaskNotifications(WatchTasksRequest) returns (stream TaskEvent) {
+  option (google.api.http) = {get: "/tasks/notifications"};
+  option (protobridge.sse) = true;
+}
+```
+
+The `sse` option is only valid on **server-streaming** RPCs (not client or bidi). The generated handler uses `text/event-stream` with JSON payloads -- each gRPC message becomes one `data:` frame.
+
+### AsyncAPI spec
+
+Alongside `openapi.yaml`, protobridge generates an **`asyncapi.yaml`** (AsyncAPI 3.0) spec for all WebSocket and SSE endpoints. This lets frontend teams use AsyncAPI tooling for client codegen, documentation, and contract testing.
 
 ## Error handling
 
@@ -315,23 +345,23 @@ message Task {
 {
   "id": "abc123",
   "attachment": {
-    "discriminator": "FileAttachment",
+    "protobridge_disc": "FileAttachment",
     "filename": "report.pdf",
     "size_bytes": 1024
   }
 }
 ```
 
-The `"discriminator"` field is added automatically. The value is the unqualified proto message name. Frontend can `switch` on it directly.
+The `"protobridge_disc"` field is added automatically. The value is the unqualified proto message name. Frontend can `switch` on it directly. The `protobridge_` prefix guarantees zero collision with user-defined fields -- no one names their fields after third-party libraries.
 
 **Primitive variants** (scalars in a oneof) are inlined without a discriminator -- type inference handles them naturally.
 
 **Safety:**
 - Message type names used inside `oneof` blocks must be globally unique across the entire API. Collisions are caught at **generation time**, not runtime.
 - Messages used as oneof variants **cannot be used as standalone RPC input types** outside of a oneof. This prevents confusion where the same message sometimes has a discriminator and sometimes doesn't. The generator enforces this at build time.
-- The field name `"discriminator"` is **reserved** -- proto messages used inside oneof blocks must not define a field with this name.
+- The field name `"protobridge_disc"` is **reserved** -- proto messages used inside oneof blocks must not define a field with this name.
 
-**Deserialization** works in reverse: the parser reads the `"discriminator"` field to select the correct proto variant. No ambiguity, no guessing.
+**Deserialization** works in reverse: the parser reads the `"protobridge_disc"` field to select the correct proto variant. No ambiguity, no guessing.
 
 ## Example
 

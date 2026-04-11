@@ -1394,7 +1394,7 @@ const file_taskboard_v1_taskboard_proto_rawDesc = "" +
 	"\x17TASK_STATUS_IN_PROGRESS\x10\x02\x1a\x0f\xf2\xb6\x18\vin_progress\x12\x1e\n" +
 	"\x10TASK_STATUS_DONE\x10\x03\x1a\b\xf2\xb6\x18\x04done2Z\n" +
 	"\vAuthService\x12K\n" +
-	"\fAuthenticate\x12\x19.taskboard.v1.AuthRequest\x1a\x1a.taskboard.v1.AuthResponse\"\x04\xa0\xb6\x18\x012\xf9\x06\n" +
+	"\fAuthenticate\x12\x19.taskboard.v1.AuthRequest\x1a\x1a.taskboard.v1.AuthResponse\"\x04\xa0\xb6\x18\x012\xa9\t\n" +
 	"\vTaskService\x12\\\n" +
 	"\n" +
 	"CreateTask\x12\x1f.taskboard.v1.CreateTaskRequest\x1a\x12.taskboard.v1.Task\"\x19ҵ\x18\auser_id\x82\xd3\xe4\x93\x02\b\"\x06/tasks\x12`\n" +
@@ -1403,13 +1403,16 @@ const file_taskboard_v1_taskboard_proto_rawDesc = "" +
 	"UpdateTask\x12\x1f.taskboard.v1.UpdateTaskRequest\x1a\x12.taskboard.v1.Task\"#ҵ\x18\auser_id\x82\xd3\xe4\x93\x02\x12\x1a\x10/tasks/{task_id}\x12t\n" +
 	"\n" +
 	"DeleteTask\x12\x1f.taskboard.v1.DeleteTaskRequest\x1a .taskboard.v1.DeleteTaskResponse\"#ҵ\x18\auser_id\x82\xd3\xe4\x93\x02\x12*\x10/tasks/{task_id}\x12q\n" +
-	"\tListTasks\x12\x1e.taskboard.v1.ListTasksRequest\x1a\x1f.taskboard.v1.ListTasksResponse\"#ҵ\x18\auser_idڵ\x18\x06paging\x82\xd3\xe4\x93\x02\b\x12\x06/tasks\x12i\n" +
+	"\tListTasks\x12\x1e.taskboard.v1.ListTasksRequest\x1a\x1f.taskboard.v1.ListTasksResponse\"#ҵ\x18\auser_idڵ\x18\x06paging\x82\xd3\xe4\x93\x02\b\x12\x06/tasks\x12t\n" +
 	"\n" +
-	"WatchTasks\x12\x1f.taskboard.v1.WatchTasksRequest\x1a\x17.taskboard.v1.TaskEvent\"\x1fҵ\x18\auser_id\x82\xd3\xe4\x93\x02\x0e\x12\f/tasks/watch0\x01\x12~\n" +
-	"\x0fBulkCreateTasks\x12#.taskboard.v1.BulkCreateTaskRequest\x1a$.taskboard.v1.BulkCreateTaskResponse\"\x1eҵ\x18\auser_id\x82\xd3\xe4\x93\x02\r\"\v/tasks/bulk(\x01\x12n\n" +
-	"\bTaskChat\x12\x19.taskboard.v1.ChatMessage\x1a\x19.taskboard.v1.ChatMessage\"(ҵ\x18\auser_id\x82\xd3\xe4\x93\x02\x17\x12\x15/tasks/{task_id}/chat(\x010\x012l\n" +
+	"WatchTasks\x12\x1f.taskboard.v1.WatchTasksRequest\x1a\x17.taskboard.v1.TaskEvent\"*ҵ\x18\auser_id\xb2\xb6\x18\aprivate\x82\xd3\xe4\x93\x02\x0e\x12\f/tasks/watch0\x01\x12\x87\x01\n" +
+	"\x11TaskNotifications\x12\x1f.taskboard.v1.WatchTasksRequest\x1a\x17.taskboard.v1.TaskEvent\"6ҵ\x18\auser_id\xa8\xb6\x18\x01\xb2\xb6\x18\aprivate\x82\xd3\xe4\x93\x02\x16\x12\x14/tasks/notifications0\x01\x12\x89\x01\n" +
+	"\x0fBulkCreateTasks\x12#.taskboard.v1.BulkCreateTaskRequest\x1a$.taskboard.v1.BulkCreateTaskResponse\")ҵ\x18\auser_id\xb2\xb6\x18\aprivate\x82\xd3\xe4\x93\x02\r\"\v/tasks/bulk(\x01\x12y\n" +
+	"\bTaskChat\x12\x19.taskboard.v1.ChatMessage\x1a\x19.taskboard.v1.ChatMessage\"3ҵ\x18\auser_id\xb2\xb6\x18\aprivate\x82\xd3\xe4\x93\x02\x17\x12\x15/tasks/{task_id}/chat(\x010\x01\x12l\n" +
+	"\fActivityFeed\x12\x1f.taskboard.v1.WatchTasksRequest\x1a\x17.taskboard.v1.TaskEvent\" \xb2\xb6\x18\tbroadcast\x82\xd3\xe4\x93\x02\r\x12\v/tasks/feed0\x01\x1a\x14·\x18\x05Tasksʷ\x18\a/api/v12x\n" +
 	"\rHealthService\x12[\n" +
-	"\tGetHealth\x12\x1b.taskboard.v1.HealthRequest\x1a\x1c.taskboard.v1.HealthResponse\"\x13\xe0\xb5\x18\x01\x82\xd3\xe4\x93\x02\t\x12\a/healthBKZIgithub.com/mrs1lentcz/protobridge/example/taskboard/gen/grpc/taskboard/v1b\x06proto3"
+	"\tGetHealth\x12\x1b.taskboard.v1.HealthRequest\x1a\x1c.taskboard.v1.HealthResponse\"\x13\xe0\xb5\x18\x01\x82\xd3\xe4\x93\x02\t\x12\a/health\x1a\n" +
+	"·\x18\x06SystemBKZIgithub.com/mrs1lentcz/protobridge/example/taskboard/gen/grpc/taskboard/v1b\x06proto3"
 
 var (
 	file_taskboard_v1_taskboard_proto_rawDescOnce sync.Once
@@ -1472,21 +1475,25 @@ var file_taskboard_v1_taskboard_proto_depIdxs = []int32{
 	10, // 18: taskboard.v1.TaskService.DeleteTask:input_type -> taskboard.v1.DeleteTaskRequest
 	12, // 19: taskboard.v1.TaskService.ListTasks:input_type -> taskboard.v1.ListTasksRequest
 	16, // 20: taskboard.v1.TaskService.WatchTasks:input_type -> taskboard.v1.WatchTasksRequest
-	17, // 21: taskboard.v1.TaskService.BulkCreateTasks:input_type -> taskboard.v1.BulkCreateTaskRequest
-	19, // 22: taskboard.v1.TaskService.TaskChat:input_type -> taskboard.v1.ChatMessage
-	20, // 23: taskboard.v1.HealthService.GetHealth:input_type -> taskboard.v1.HealthRequest
-	6,  // 24: taskboard.v1.AuthService.Authenticate:output_type -> taskboard.v1.AuthResponse
-	2,  // 25: taskboard.v1.TaskService.CreateTask:output_type -> taskboard.v1.Task
-	2,  // 26: taskboard.v1.TaskService.GetTask:output_type -> taskboard.v1.Task
-	2,  // 27: taskboard.v1.TaskService.UpdateTask:output_type -> taskboard.v1.Task
-	11, // 28: taskboard.v1.TaskService.DeleteTask:output_type -> taskboard.v1.DeleteTaskResponse
-	14, // 29: taskboard.v1.TaskService.ListTasks:output_type -> taskboard.v1.ListTasksResponse
-	15, // 30: taskboard.v1.TaskService.WatchTasks:output_type -> taskboard.v1.TaskEvent
-	18, // 31: taskboard.v1.TaskService.BulkCreateTasks:output_type -> taskboard.v1.BulkCreateTaskResponse
-	19, // 32: taskboard.v1.TaskService.TaskChat:output_type -> taskboard.v1.ChatMessage
-	21, // 33: taskboard.v1.HealthService.GetHealth:output_type -> taskboard.v1.HealthResponse
-	24, // [24:34] is the sub-list for method output_type
-	14, // [14:24] is the sub-list for method input_type
+	16, // 21: taskboard.v1.TaskService.TaskNotifications:input_type -> taskboard.v1.WatchTasksRequest
+	17, // 22: taskboard.v1.TaskService.BulkCreateTasks:input_type -> taskboard.v1.BulkCreateTaskRequest
+	19, // 23: taskboard.v1.TaskService.TaskChat:input_type -> taskboard.v1.ChatMessage
+	16, // 24: taskboard.v1.TaskService.ActivityFeed:input_type -> taskboard.v1.WatchTasksRequest
+	20, // 25: taskboard.v1.HealthService.GetHealth:input_type -> taskboard.v1.HealthRequest
+	6,  // 26: taskboard.v1.AuthService.Authenticate:output_type -> taskboard.v1.AuthResponse
+	2,  // 27: taskboard.v1.TaskService.CreateTask:output_type -> taskboard.v1.Task
+	2,  // 28: taskboard.v1.TaskService.GetTask:output_type -> taskboard.v1.Task
+	2,  // 29: taskboard.v1.TaskService.UpdateTask:output_type -> taskboard.v1.Task
+	11, // 30: taskboard.v1.TaskService.DeleteTask:output_type -> taskboard.v1.DeleteTaskResponse
+	14, // 31: taskboard.v1.TaskService.ListTasks:output_type -> taskboard.v1.ListTasksResponse
+	15, // 32: taskboard.v1.TaskService.WatchTasks:output_type -> taskboard.v1.TaskEvent
+	15, // 33: taskboard.v1.TaskService.TaskNotifications:output_type -> taskboard.v1.TaskEvent
+	18, // 34: taskboard.v1.TaskService.BulkCreateTasks:output_type -> taskboard.v1.BulkCreateTaskResponse
+	19, // 35: taskboard.v1.TaskService.TaskChat:output_type -> taskboard.v1.ChatMessage
+	15, // 36: taskboard.v1.TaskService.ActivityFeed:output_type -> taskboard.v1.TaskEvent
+	21, // 37: taskboard.v1.HealthService.GetHealth:output_type -> taskboard.v1.HealthResponse
+	26, // [26:38] is the sub-list for method output_type
+	14, // [14:26] is the sub-list for method input_type
 	14, // [14:14] is the sub-list for extension type_name
 	14, // [14:14] is the sub-list for extension extendee
 	0,  // [0:14] is the sub-list for field type_name

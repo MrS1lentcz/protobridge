@@ -253,6 +253,16 @@ func (s *taskService) WatchTasks(req *pb.WatchTasksRequest, stream pb.TaskServic
 	}
 }
 
+// Server streaming via SSE – task notifications (same logic as WatchTasks).
+func (s *taskService) TaskNotifications(req *pb.WatchTasksRequest, stream pb.TaskService_TaskNotificationsServer) error {
+	return s.WatchTasks(req, stream)
+}
+
+// Server streaming – public activity feed (broadcast, no per-user routing).
+func (s *taskService) ActivityFeed(req *pb.WatchTasksRequest, stream pb.TaskService_ActivityFeedServer) error {
+	return s.WatchTasks(req, stream)
+}
+
 // Client streaming – bulk create tasks.
 func (s *taskService) BulkCreateTasks(stream pb.TaskService_BulkCreateTasksServer) error {
 	user := authUser(stream.Context())

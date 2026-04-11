@@ -31,6 +31,19 @@ extend google.protobuf.MethodOptions {
   // Input must accept HTTP headers, output must be a serializable User proto.
   // Exactly one method across all services must have this annotation.
   bool auth_method = 50020;
+
+  // Use Server-Sent Events instead of WebSocket for server-streaming RPCs.
+  // Only valid on server-streaming methods. SSE is lighter than WebSocket
+  // for one-way server→client push (e.g. live feeds, notifications).
+  bool sse = 50021;
+
+  // WebSocket connection mode for streaming RPCs.
+  //   "private"   – each WS connection opens its own gRPC stream with the
+  //                 authenticated user_id in metadata. Backend knows exactly
+  //                 who it's talking to. (default for auth endpoints)
+  //   "broadcast" – all WS connections share the same event stream.
+  //                 Backend pushes to everyone. No per-user routing.
+  string ws_mode = 50022;
 }
 
 // --- Service options ---

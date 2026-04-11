@@ -1,0 +1,93 @@
+package runtime
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+)
+
+// ServerStreamOpener opens a server-streaming gRPC call and returns
+// a receive-only stream. Generated code provides concrete implementations.
+type ServerStreamOpener interface {
+	OpenServerStream(ctx context.Context, conn *grpc.ClientConn, req proto.Message) (ServerStream, error)
+	NewRequestMessage() proto.Message
+}
+
+// ServerStream abstracts a server-streaming gRPC response.
+type ServerStream interface {
+	Recv() (proto.Message, error)
+}
+
+// SSEHandler creates an HTTP handler that streams server-sent events from
+// a gRPC server stream. Each message becomes one SSE "data:" frame.
+func SSEHandler(conn *grpc.ClientConn, opener ServerStreamOpener, auth AuthFunc, excludeAuth bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		// Auth
+		if !excludeAuth {
+			userData, err := auth(ctx, r)
+			if err != nil {
+				WriteAuthError(w, err)
+				return
+			}
+			ctx = SetUserMetadata(ctx, userData)
+		}
+
+		// Open gRPC server stream
+		req := opener.NewRequestMessage()
+		stream, err := opener.OpenServerStream(ctx, conn, req)
+		if err != nil {
+			WriteGRPCError(w, err)
+			return
+		}
+
+		// Set SSE headers
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			WriteError(w, http.StatusInternalServerError, "INTERNAL", "streaming not supported")
+			return
+		}
+
+		// Stream events
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				if err == io.EOF {
+					// Stream ended normally.
+					fmt.Fprintf(w, "event: close\ndata: {}\n\n")
+					flusher.Flush()
+					return
+				}
+				reportError(err)
+				fmt.Fprintf(w, "event: error\ndata: {\"message\":%q}\n\n", err.Error())
+				flusher.Flush()
+				return
+			}
+
+			data, err := protojson.Marshal(msg)
+			if err != nil {
+				reportError(err)
+				continue
+			}
+
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+
+			// Check if client disconnected.
+			if ctx.Err() != nil {
+				return
+			}
+		}
+	}
+}

@@ -62,6 +62,28 @@ func getFieldRequired(f *descriptorpb.FieldDescriptorProto) bool {
 	return false
 }
 
+func getSSE(m *descriptorpb.MethodDescriptorProto) bool {
+	if m.Options == nil {
+		return false
+	}
+	val := proto.GetExtension(m.Options, optionspb.E_Sse)
+	if b, ok := val.(bool); ok {
+		return b
+	}
+	return false
+}
+
+func getWSMode(m *descriptorpb.MethodDescriptorProto) string {
+	if m.Options == nil {
+		return ""
+	}
+	val := proto.GetExtension(m.Options, optionspb.E_WsMode)
+	if s, ok := val.(string); ok {
+		return s
+	}
+	return ""
+}
+
 func getDisplayName(s *descriptorpb.ServiceDescriptorProto) string {
 	if s.Options == nil {
 		return ""

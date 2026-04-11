@@ -25,8 +25,10 @@ func registerTaskService(r chi.Router, conn *grpc.ClientConn, auth runtime.AuthF
 	r.Delete("/api/v1/tasks/{task_id}", deleteTaskHandler(client, auth))
 	r.Get("/api/v1/tasks", listTasksHandler(client, auth))
 	r.Get("/api/v1/tasks/watch", watchTasksHandler(client, auth))
+	r.Get("/api/v1/tasks/notifications", taskNotificationsHandler(client, auth))
 	r.Post("/api/v1/tasks/bulk", bulkCreateTasksHandler(client, auth))
 	r.Get("/api/v1/tasks/{task_id}/chat", taskChatHandler(client, auth))
+	r.Get("/api/v1/tasks/feed", activityFeedHandler(client, auth))
 }
 
 func createTaskHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.HandlerFunc {
@@ -291,6 +293,34 @@ func watchTasksHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.
 	}
 }
 
+func taskNotificationsHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		
+		// Auth
+		userData, err := auth(ctx, r)
+		if err != nil {
+			runtime.WriteAuthError(w, err)
+			return
+		}
+		ctx = runtime.SetUserMetadata(ctx, userData)
+		
+		// Path params → metadata
+		md := metadata.MD{}
+		
+		// Required headers
+		headerUserId := r.Header.Get("user_id")
+		if headerUserId == "" {
+			runtime.WriteError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "missing required header: user_id")
+			return
+		}
+		md.Set("user_id", headerUserId)
+		
+		ctx = metadata.NewOutgoingContext(ctx, md)
+		
+	}
+}
+
 func bulkCreateTasksHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -342,6 +372,28 @@ func taskChatHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.Ha
 			return
 		}
 		md.Set("user_id", headerUserId)
+		
+		ctx = metadata.NewOutgoingContext(ctx, md)
+		
+	}
+}
+
+func activityFeedHandler(client pb.TaskServiceClient, auth runtime.AuthFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		
+		// Auth
+		userData, err := auth(ctx, r)
+		if err != nil {
+			runtime.WriteAuthError(w, err)
+			return
+		}
+		ctx = runtime.SetUserMetadata(ctx, userData)
+		
+		// Path params → metadata
+		md := metadata.MD{}
+		
+		// Required headers
 		
 		ctx = metadata.NewOutgoingContext(ctx, md)
 		

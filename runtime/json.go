@@ -57,8 +57,9 @@ type OneofRegistry struct {
 
 // DiscriminatorField is the JSON field name used to identify oneof message
 // variants. This field is reserved -- proto messages used inside oneof blocks
-// must not define a field with this name.
-const DiscriminatorField = "discriminator"
+// must not define a field with this name. The "protobridge_" prefix ensures
+// no collision with user-defined fields.
+const DiscriminatorField = "protobridge_disc"
 
 // MarshalOneofField marshals a oneof message variant with a discriminator field.
 func MarshalOneofField(msg proto.Message, typeName string) (json.RawMessage, error) {

@@ -16,6 +16,9 @@ func validate(api *ParsedAPI, msgMap map[string]*descriptorpb.DescriptorProto) e
 	if err := validateOneofDiscriminatorField(api, msgMap); err != nil {
 		return err
 	}
+	if err := validateStreamingOptions(api); err != nil {
+		return err
+	}
 	if err := validateQueryParamsTarget(api, msgMap); err != nil {
 		return err
 	}
@@ -178,10 +181,10 @@ func validateOneofInputConstraint(api *ParsedAPI) error {
 }
 
 // validateOneofDiscriminatorField ensures that messages used as oneof variants
-// do not define a field named "discriminator", since that name is reserved for
-// the generated discriminator.
+// do not define a field named "protobridge_disc", since that name is reserved
+// for the generated discriminator.
 func validateOneofDiscriminatorField(api *ParsedAPI, msgMap map[string]*descriptorpb.DescriptorProto) error {
-	const reserved = "discriminator"
+	const reserved = "protobridge_disc"
 	checked := make(map[string]bool)
 
 	checkMessage := func(mt *MessageType, location string) error {
@@ -224,6 +227,34 @@ func validateOneofDiscriminatorField(api *ParsedAPI, msgMap map[string]*descript
 			}
 			if err := checkMessage(m.OutputType, loc); err != nil {
 				return err
+			}
+		}
+	}
+	return nil
+}
+
+// validateStreamingOptions checks SSE and ws_mode constraints.
+func validateStreamingOptions(api *ParsedAPI) error {
+	for _, svc := range api.Services {
+		for _, m := range svc.Methods {
+			loc := svc.Name + "." + m.Name
+
+			// SSE is only valid on server-streaming RPCs.
+			if m.SSE {
+				if m.StreamType != StreamServer {
+					return fmt.Errorf("sse option on %s is only valid on server-streaming RPCs", loc)
+				}
+			}
+
+			// ws_mode is only valid on streaming RPCs.
+			if m.WSMode != "" {
+				if m.StreamType == StreamUnary {
+					return fmt.Errorf("ws_mode option on %s is only valid on streaming RPCs", loc)
+				}
+				if m.WSMode != "private" && m.WSMode != "broadcast" {
+					return fmt.Errorf("ws_mode on %s must be \"private\" or \"broadcast\", got %q", loc, m.WSMode)
+				}
+				// SSE + ws_mode is redundant but not invalid (SSE can be private or broadcast too).
 			}
 		}
 	}

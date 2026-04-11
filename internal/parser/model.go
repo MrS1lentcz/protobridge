@@ -28,6 +28,8 @@ type Method struct {
 	QueryParamsTarget string
 	ExcludeAuth      bool
 	StreamType       StreamType
+	SSE              bool   // use SSE instead of WS (server-streaming only)
+	WSMode           string // "private" or "broadcast" (streaming only)
 }
 
 type StreamType int
