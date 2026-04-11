@@ -2,11 +2,45 @@ package generator
 
 import (
 	"fmt"
+	"io"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/pluginpb"
 
 	"github.com/mrs1lentcz/protobridge/internal/parser"
 )
+
+// Run reads a CodeGeneratorRequest from r, parses it, generates all output
+// files, and returns the CodeGeneratorResponse. Errors are returned inside
+// the response (not as Go errors), matching the protoc plugin contract.
+func Run(r io.Reader) *pluginpb.CodeGeneratorResponse {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return errResponse(err)
+	}
+
+	var req pluginpb.CodeGeneratorRequest
+	if err := proto.Unmarshal(data, &req); err != nil {
+		return errResponse(err)
+	}
+
+	api, err := parser.Parse(&req)
+	if err != nil {
+		return errResponse(err)
+	}
+
+	resp, err := Generate(api)
+	if err != nil {
+		return errResponse(err)
+	}
+
+	return resp
+}
+
+func errResponse(err error) *pluginpb.CodeGeneratorResponse {
+	msg := err.Error()
+	return &pluginpb.CodeGeneratorResponse{Error: &msg}
+}
 
 // Generate takes a ParsedAPI and produces a CodeGeneratorResponse with all
 // generated Go source files and the OpenAPI spec.
