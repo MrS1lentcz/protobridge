@@ -98,6 +98,9 @@ func main() {
 	r.Use(runtime.OTelMiddleware(serviceName))
 	r.Use(runtime.SentryMiddleware())
 
+	// Proxy health endpoint (always available, independent of backend services)
+	r.Get("/healthz", runtime.HealthHandler())
+
 	{{ range .Services -}}
 	register{{ .ServiceName }}(r, {{ .ConnVar }}, "{{ .EnvAddrKey }}", pool, authFn)
 	{{ end }}
