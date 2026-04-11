@@ -39,6 +39,7 @@ func DecodeRequest(r *http.Request, msg proto.Message) error {
 func WriteResponse(w http.ResponseWriter, status int, msg proto.Message) {
 	data, err := marshaller.Marshal(msg)
 	if err != nil {
+		// Proto3 marshal failure = data corruption → Sentry.
 		reportError(err)
 		WriteError(w, http.StatusInternalServerError, "INTERNAL", "failed to marshal response")
 		return
@@ -46,7 +47,8 @@ func WriteResponse(w http.ResponseWriter, status int, msg proto.Message) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if _, err := w.Write(data); err != nil {
-		reportError(err)
+		// Client disconnected during write – normal, log only.
+		logError(err)
 	}
 }
 

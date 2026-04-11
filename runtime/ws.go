@@ -57,7 +57,10 @@ func WSHandler(conn *grpc.ClientConn, factory StreamFactory, auth AuthFunc, excl
 		stream, err := factory.OpenStream(ctx, conn)
 		if err != nil {
 			ws.Close(websocket.StatusInternalError, "failed to open stream")
-			reportError(err)
+			// Only report non-transient errors to Sentry.
+			if !isClientGone(err) {
+				reportError(err)
+			}
 			return
 		}
 
@@ -66,33 +69,32 @@ func WSHandler(conn *grpc.ClientConn, factory StreamFactory, auth AuthFunc, excl
 
 		// gRPC → WebSocket
 		go func() {
+			defer recoverGoroutine()
 			defer cancel()
 			for {
-				// Check if the context has been cancelled (e.g. WS client disconnected).
 				if ctx.Err() != nil {
 					return
 				}
 				msg, err := stream.Recv()
 				if err != nil {
-					if err == io.EOF {
+					if err == io.EOF || ctx.Err() != nil {
 						ws.Close(websocket.StatusNormalClosure, "stream ended")
 						return
 					}
-					// If context was cancelled while blocked in Recv, don't
-					// attempt to write an error frame back to the closed WS.
-					if ctx.Err() != nil {
-						return
-					}
+					// Stream error is logged (not Sentry) unless it's a server bug.
+					logError(err)
 					ws.Close(websocket.StatusInternalError, "stream error")
 					return
 				}
 				data, err := protojson.Marshal(msg)
 				if err != nil {
+					// Marshal error on valid proto = bug → Sentry.
 					reportError(err)
 					ws.Close(websocket.StatusInternalError, "marshal error")
 					return
 				}
 				if err := ws.Write(ctx, websocket.MessageText, data); err != nil {
+					// Client disconnected – normal, no logging needed.
 					return
 				}
 			}
@@ -102,7 +104,7 @@ func WSHandler(conn *grpc.ClientConn, factory StreamFactory, auth AuthFunc, excl
 		for {
 			_, data, err := ws.Read(ctx)
 			if err != nil {
-				// Client disconnected or context cancelled
+				// Client disconnected or context cancelled – normal.
 				stream.CloseSend()
 				return
 			}

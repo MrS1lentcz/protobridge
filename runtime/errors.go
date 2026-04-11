@@ -25,21 +25,26 @@ type FieldError struct {
 func WriteError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(APIError{
+	if err := json.NewEncoder(w).Encode(APIError{
 		Code:    code,
 		Message: message,
-	})
+	}); err != nil {
+		// Client disconnected during error write – log, don't Sentry.
+		logError(err)
+	}
 }
 
 // WriteValidationError writes a 422 with field-level violations.
 func WriteValidationError(w http.ResponseWriter, violations []FieldError) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnprocessableEntity)
-	json.NewEncoder(w).Encode(APIError{
+	if err := json.NewEncoder(w).Encode(APIError{
 		Code:    "VALIDATION_ERROR",
 		Message: "request validation failed",
 		Details: violations,
-	})
+	}); err != nil {
+		logError(err)
+	}
 }
 
 // WriteAuthError writes a 401 error from an auth failure.
@@ -48,10 +53,12 @@ func WriteAuthError(w http.ResponseWriter, err error) {
 }
 
 // WriteGRPCError maps a gRPC error to an HTTP error response and reports
-// server-side errors to Sentry.
+// server-side errors (5xx) to Sentry. Client errors (4xx) and transient
+// errors are logged to stderr only.
 func WriteGRPCError(w http.ResponseWriter, err error) {
 	st, ok := status.FromError(err)
 	if !ok {
+		// Non-gRPC error reaching the proxy is unexpected → Sentry.
 		reportError(err)
 		WriteError(w, http.StatusInternalServerError, "INTERNAL", "internal server error")
 		return
@@ -59,6 +66,7 @@ func WriteGRPCError(w http.ResponseWriter, err error) {
 
 	httpStatus := grpcToHTTPStatus(st.Code())
 	if httpStatus >= 500 {
+		// Server-side gRPC errors (Internal, Unknown, etc.) → Sentry.
 		reportError(err)
 	}
 

@@ -120,6 +120,7 @@ func (h *UserStreamHub) Subscribe(
 }
 
 func (h *UserStreamHub) receiveLoop(userID string, us *userStream, stream ServerStream) {
+	defer recoverGoroutine()
 	defer func() {
 		h.mu.Lock()
 		// Only clean up if this is still the active stream for the user
@@ -142,8 +143,9 @@ func (h *UserStreamHub) receiveLoop(userID string, us *userStream, stream Server
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
-			if err != io.EOF {
-				reportError(err)
+			if err != io.EOF && !isClientGone(err) {
+				// Unexpected stream error → log (not Sentry, these are often transient).
+				logError(err)
 			}
 			return
 		}

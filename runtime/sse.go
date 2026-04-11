@@ -64,12 +64,18 @@ func SSEHandler(conn *grpc.ClientConn, opener ServerStreamOpener, auth AuthFunc,
 			msg, err := stream.Recv()
 			if err != nil {
 				if err == io.EOF {
-					// Stream ended normally.
+					// Stream ended normally – not an error.
 					fmt.Fprintf(w, "event: close\ndata: {}\n\n")
 					flusher.Flush()
 					return
 				}
-				reportError(err)
+				if isClientGone(err) {
+					// Client disconnected – normal lifecycle, no logging.
+					return
+				}
+				// Unexpected stream error – log to stderr (not Sentry,
+				// these are often transient backend issues).
+				logError(err)
 				fmt.Fprintf(w, "event: error\ndata: {\"message\":%q}\n\n", err.Error())
 				flusher.Flush()
 				return
@@ -77,6 +83,7 @@ func SSEHandler(conn *grpc.ClientConn, opener ServerStreamOpener, auth AuthFunc,
 
 			data, err := protojson.Marshal(msg)
 			if err != nil {
+				// Marshal error on valid proto3 = bug → Sentry.
 				reportError(err)
 				continue
 			}
