@@ -118,15 +118,21 @@ var activeConnectionsMeter = otel.Meter("protobridge")
 
 // RecordConnectionOpen increments the active connections gauge.
 func RecordConnectionOpen(connType string) {
-	counter, _ := activeConnectionsMeter.Int64UpDownCounter("protobridge.active_connections",
-	)
+	counter, err := activeConnectionsMeter.Int64UpDownCounter("protobridge.active_connections")
+	if err != nil {
+		logError(err)
+		return
+	}
 	counter.Add(context.Background(), 1)
 }
 
 // RecordConnectionClose decrements the active connections gauge.
 func RecordConnectionClose(connType string) {
-	counter, _ := activeConnectionsMeter.Int64UpDownCounter("protobridge.active_connections",
-	)
+	counter, err := activeConnectionsMeter.Int64UpDownCounter("protobridge.active_connections")
+	if err != nil {
+		logError(err)
+		return
+	}
 	counter.Add(context.Background(), -1)
 }
 

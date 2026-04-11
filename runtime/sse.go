@@ -65,7 +65,9 @@ func SSEHandler(conn *grpc.ClientConn, opener ServerStreamOpener, auth AuthFunc,
 			if err != nil {
 				if err == io.EOF {
 					// Stream ended normally – not an error.
-					fmt.Fprintf(w, "event: close\ndata: {}\n\n")
+					if _, err := fmt.Fprintf(w, "event: close\ndata: {}\n\n"); err != nil {
+						return
+					}
 					flusher.Flush()
 					return
 				}
@@ -76,7 +78,9 @@ func SSEHandler(conn *grpc.ClientConn, opener ServerStreamOpener, auth AuthFunc,
 				// Unexpected stream error – log to stderr (not Sentry,
 				// these are often transient backend issues).
 				logError(err)
-				fmt.Fprintf(w, "event: error\ndata: {\"message\":%q}\n\n", err.Error())
+				if _, err := fmt.Fprintf(w, "event: error\ndata: {\"message\":%q}\n\n", err.Error()); err != nil {
+					return
+				}
 				flusher.Flush()
 				return
 			}

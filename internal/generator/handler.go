@@ -139,7 +139,9 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 			}
 			data, err := protojson.Marshal(msg)
 			if err != nil {
-				fmt.Fprintf(w, "event: error\ndata: {\"error\":\"marshal failure\"}\n\n")
+				if _, writeErr := fmt.Fprintf(w, "event: error\ndata: {\"error\":\"marshal failure\"}\n\n"); writeErr != nil {
+					return
+				}
 				flusher.Flush()
 				return
 			}
