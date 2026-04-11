@@ -1,0 +1,64 @@
+services:
+  grpc-server:
+    build:
+      context: ..
+      dockerfile: bench/Dockerfile.grpc
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+    networks:
+      - bench
+
+  rest-proxy:
+    build:
+      context: ..
+      dockerfile: bench/Dockerfile.proxy
+    environment:
+      - GRPC_ADDR=grpc-server:50051
+      - PORT=8080
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2G
+    depends_on:
+      - grpc-server
+    networks:
+      - bench
+
+  bench-runner:
+    build:
+      context: ..
+      dockerfile: bench/Dockerfile.runner
+    environment:
+      - TARGET_URL=http://rest-proxy:8080
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+    depends_on:
+      - rest-proxy
+    networks:
+      - bench
+
+  # In-process Go benchmarks (standard `go test -bench`).
+  # Runs proxy + gRPC backend in one process – measures pure proxy overhead.
+  bench-inprocess:
+    build:
+      context: ..
+      dockerfile: bench/Dockerfile.inprocess
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+    networks:
+      - bench
+    profiles:
+      - inprocess
+
+networks:
+  bench:

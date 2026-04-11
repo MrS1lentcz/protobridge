@@ -1,0 +1,11 @@
+FROM golang:latest AS build
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /grpc-server ./bench/grpc-server/
+
+FROM alpine:latest
+COPY --from=build /grpc-server /grpc-server
+EXPOSE 50051
+ENTRYPOINT ["/grpc-server"]

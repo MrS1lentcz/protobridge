@@ -1,0 +1,6 @@
+FROM golang:latest
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ENTRYPOINT ["go", "test", "./runtime/", "-run=^$", "-bench=.", "-benchmem", "-count=1", "-benchtime=3s", "-timeout=300s"]

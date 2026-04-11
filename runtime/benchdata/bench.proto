@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package benchdata;
+
+option go_package = "github.com/mrs1lentcz/protobridge/runtime/benchdata";
+
+enum Priority {
+  PRIORITY_UNSPECIFIED = 0;
+  PRIORITY_LOW = 1;
+  PRIORITY_HIGH = 2;
+}
+
+message CreateItemRequest {
+  string name = 1;
+  Priority priority = 2;
+}
+
+message Item {
+  string id = 1;
+  string name = 2;
+  Priority priority = 3;
+}
+
+message AuthRequest {
+  map<string, string> headers = 1;
+}
+
+message AuthResponse {
+  string user_id = 1;
+  string role = 2;
+}
+
+message StreamMessage {
+  string data = 1;
+}
+
+service BenchService {
+  rpc CreateItem(CreateItemRequest) returns (Item);
+  rpc Authenticate(AuthRequest) returns (AuthResponse);
+  rpc Subscribe(CreateItemRequest) returns (stream StreamMessage);
+}

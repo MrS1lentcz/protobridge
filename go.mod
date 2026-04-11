@@ -4,6 +4,7 @@ go 1.26.2
 
 require (
 	github.com/coder/websocket v1.8.14
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
 	github.com/mrs1lentcz/gox v0.5.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0
