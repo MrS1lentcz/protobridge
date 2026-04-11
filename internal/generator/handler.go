@@ -26,16 +26,25 @@ import (
 	pb "{{ .ProtoImport }}"
 )
 
-func register{{ .ServiceName }}(r chi.Router, conn *grpc.ClientConn, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) {
-	client := pb.New{{ .ServiceName }}Client(conn)
+func register{{ .ServiceName }}(r chi.Router, addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConfig, auth runtime.AuthFunc) {
 	{{ range .Methods }}
-	r.{{ .ChiMethod }}("{{ .ChiPath }}", {{ .HandlerFuncName }}(client, addr, pool, auth))
+	r.{{ .ChiMethod }}("{{ .ChiPath }}", {{ .HandlerFuncName }}(addr, pool, scalingCfg, auth))
 	{{- end }}
 }
 {{ range .Methods }}
-func {{ .HandlerFuncName }}(client pb.{{ $.ServiceName }}Client, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
+func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConfig, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+
+		// Acquire a scaled connection (auto-scales based on load).
+		conn, err := pool.ConnectScaled(addr, scalingCfg)
+		if err != nil {
+			runtime.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "connection pool exhausted")
+			return
+		}
+		defer pool.Release(addr, conn)
+
+		client := pb.New{{ $.ServiceName }}Client(conn)
 		{{ if not .ExcludeAuth }}
 		// Auth
 		userData, err := auth(ctx, r)

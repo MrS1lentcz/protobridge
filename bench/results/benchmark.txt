@@ -5,81 +5,101 @@ proxy is healthy
 
 --- GET /healthz (baseline) ---
 requests: 10000, concurrency: 50
-duration:    770ms
-throughput:  12982 req/s
-errors:      0 / 10000 (0.0%)
-latency p50: 2.644833ms
-latency p95: 11.151333ms
-latency p99: 25.892458ms
-latency max: 35.56425ms
+duration:    765ms
+throughput:  13064 req/s
+success:     10000 / 10000 (100.0%)
+latency p50: 2.477708ms
+latency p95: 12.310833ms
+latency p99: 18.795708ms
+latency max: 32.130083ms
 
 --- POST /items/noauth (unary, no auth) ---
 requests: 10000, concurrency: 50
-duration:    4.985s
-throughput:  2006 req/s
-errors:      0 / 10000 (0.0%)
-latency p50: 18.913667ms
-latency p95: 70.981917ms
-latency p99: 84.606583ms
-latency max: 280.278958ms
+duration:    4.31s
+throughput:  2320 req/s
+success:     10000 / 10000 (100.0%)
+latency p50: 15.079209ms
+latency p95: 66.950959ms
+latency p99: 92.096708ms
+latency max: 227.738708ms
 
 --- POST /items (unary, with auth) ---
 requests: 10000, concurrency: 50
-duration:    18.361s
-throughput:  545 req/s
-errors:      1770 / 10000 (17.7%)
-latency p50: 49.638167ms
-latency p95: 385.97975ms
-latency p99: 569.6995ms
-latency max: 906.761542ms
+duration:    14.773s
+throughput:  677 req/s
+success:     8230 / 10000 (82.3%)
+errors:      1770 total
+  conn err:  1770
+  - connection: 1770
+latency p50: 38.705834ms
+latency p95: 274.20275ms
+latency p99: 389.175292ms
+latency max: 704.900958ms
 
 --- POST /items/noauth (100 concurrent) ---
 requests: 50000, concurrency: 100
-duration:    1m42.12s
-throughput:  490 req/s
-errors:      11492 / 50000 (23.0%)
-latency p50: 40.311542ms
-latency p95: 919.069043ms
-latency p99: 1.299578s
-latency max: 2.085246751s
+duration:    1m44.528s
+throughput:  478 req/s
+success:     30270 / 50000 (60.5%)
+errors:      19730 total
+  conn err:  19730
+  - connection: 19730
+latency p50: 68.301541ms
+latency p95: 696.753626ms
+latency p99: 1.443007792s
+latency max: 4.498943627s
 
 --- POST /items/noauth (500 concurrent) ---
 requests: 50000, concurrency: 500
-duration:    1m17.835s
-throughput:  642 req/s
-errors:      7401 / 50000 (14.8%)
-latency p50: 401.622333ms
-latency p95: 3.648354001s
-latency p99: 5.389659919s
-latency max: 8.528100213s
+duration:    1m2.025s
+throughput:  806 req/s
+success:     36570 / 50000 (73.1%)
+errors:      13430 total
+  conn err:  13430
+  - connection: 13430
+latency p50: 209.190459ms
+latency p95: 2.375814376s
+latency p99: 3.063278209s
+latency max: 4.321498794s
 
 --- POST /items/noauth (1000 concurrent) ---
 requests: 50000, concurrency: 1000
-duration:    1m45.975s
-throughput:  472 req/s
-errors:      13962 / 50000 (27.9%)
-latency p50: 945.397792ms
-latency p95: 7.231528419s
-latency p99: 9.909655921s
-latency max: 15.202718507s
+duration:    1m12.472s
+throughput:  690 req/s
+success:     36610 / 50000 (73.2%)
+errors:      13390 total
+  conn err:  13390
+  - connection: 13390
+latency p50: 726.170042ms
+latency p95: 4.833860919s
+latency p99: 6.435740503s
+latency max: 9.140617838s
 
 --- POST /items/noauth (5000 concurrent) ---
 requests: 50000, concurrency: 5000
-duration:    1m0.736s
-throughput:  823 req/s
-errors:      31507 / 50000 (63.0%)
-latency p50: 5.179397461s
-latency p95: 8.267292962s
-latency p99: 9.856920379s
-latency max: 15.947579965s
+duration:    1m23.91s
+throughput:  596 req/s
+success:     33633 / 50000 (67.3%)
+errors:      16367 total
+  conn err:  16367
+  - connection: 12076
+  - timeout: 4291
+latency p50: 6.507317086s
+latency p95: 20.192739551s
+latency p99: 26.009803929s
+latency max: 31.073899056s
 
 --- POST /items/noauth (10000 concurrent) ---
 requests: 50000, concurrency: 10000
-duration:    37.219s
-throughput:  1343 req/s
-errors:      35918 / 50000 (71.8%)
-latency p50: 5.386093419s
-latency p95: 9.256186629s
-latency p99: 10.585204588s
-latency max: 17.212879591s
+duration:    1m21.741s
+throughput:  612 req/s
+success:     23969 / 50000 (47.9%)
+errors:      26031 total
+  conn err:  26031
+  - timeout: 10928
+  - connection: 15103
+latency p50: 11.987706506s
+latency p95: 21.261998967s
+latency p99: 24.462590303s
+latency max: 29.290172971s
 

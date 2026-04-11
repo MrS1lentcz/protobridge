@@ -212,6 +212,19 @@ GET /tasks/abc123  →  gRPC metadata: task_id = "abc123"
 
 Path parameters are forwarded as gRPC metadata, not injected into the request body. This is intentional -- path params are typically IDs and belong in metadata.
 
+protobridge uses [chi](https://github.com/go-chi/chi) as the HTTP router. Path parameters support chi's full URL pattern syntax, including regex constraints:
+
+```protobuf
+// Basic parameter
+option (google.api.http) = {get: "/tasks/{task_id}"};
+
+// Regex constraint: only UUIDs
+option (google.api.http) = {get: "/tasks/{task_id:[a-f0-9-]{36}}"};
+
+// Numeric only
+option (google.api.http) = {get: "/users/{user_id:[0-9]+}"};
+```
+
 ### Query parameters
 
 ```
@@ -471,6 +484,26 @@ protobridge/
     └── taskboard/                      # full working example
 ```
 
+## Connection scaling
+
+gRPC uses HTTP/2 multiplexing -- multiple requests share a single TCP connection. But each connection has a stream limit (`MAX_CONCURRENT_STREAMS`, default 100). Under high load, a single connection becomes a bottleneck.
+
+protobridge uses adaptive connection scaling via [gox/grpcx](https://github.com/MrS1lentcz/gox):
+
+- **1 to N connections per service**, scaled automatically based on active request count
+- **Default threshold**: 100 concurrent streams per connection (matches HTTP/2 default)
+- **Default max**: 10 connections per service (handles 1000 concurrent requests)
+- **Per-request connection acquisition**: each HTTP request gets the least-loaded connection, released automatically after the response is sent
+
+```
+  50 concurrent requests  →  1 gRPC connection
+ 200 concurrent requests  →  2 gRPC connections
+ 500 concurrent requests  →  5 gRPC connections
+1000 concurrent requests  → 10 gRPC connections (max)
+```
+
+No configuration needed -- it works out of the box. The pool also monitors connection health and transparently reconnects on failures.
+
 ## Generated output
 
 Running `protoc-gen-protobridge` produces a complete, self-contained directory:
@@ -478,13 +511,50 @@ Running `protoc-gen-protobridge` produces a complete, self-contained directory:
 | File | Purpose |
 |---|---|
 | `main.go` | Entry point: connection pool, Sentry, ENV validation, chi router, graceful shutdown |
-| `<service>.go` | HTTP/WS handlers per gRPC service |
-| `openapi.yaml` | OpenAPI 3.1 spec for unary HTTP endpoints |
-| `asyncapi.yaml` | AsyncAPI 3.0 spec for WebSocket/streaming endpoints |
-| `Dockerfile` | Multi-stage build: `golang:alpine` → `distroless` |
+| `<service>.go` | HTTP/WS/SSE handlers per gRPC service |
+| `schema/openapi.yaml` | OpenAPI 3.1 spec for unary HTTP endpoints |
+| `schema/asyncapi.yaml` | AsyncAPI 3.0 spec for WebSocket/streaming endpoints |
+| `.env.example` | All ENV variables with comments and placeholders |
+| `.env.defaults` | Default values for optional ENV variables |
+| `Dockerfile` | Multi-stage build: `golang` → `alpine` |
 | `k8s.yaml` | Kubernetes Deployment + Service with health probes and ENV stubs |
 
 The `Dockerfile` and `k8s.yaml` are starting points -- adjust image names, resource limits, and service addresses for your environment.
+
+## Benchmark
+
+Benchmarked on Apple M1 Pro in Docker Desktop with resource limits per container. Full results in [`bench/results/benchmark.txt`](bench/results/benchmark.txt).
+
+**Setup:**
+- REST proxy: 1 CPU, 2GB RAM
+- gRPC backend: 2 CPUs, 4GB RAM
+- Benchmark runner: 3 CPUs, 2GB RAM
+- Network: Docker Compose bridge
+
+**Results (proxy on 1 CPU):**
+
+| Scenario | Concurrency | Throughput | Success | p50 | p99 |
+|---|---|---|---|---|---|
+| `GET /healthz` (baseline) | 50 | **13,000 req/s** | 100% | 2.6ms | 26ms |
+| Unary POST (no auth) | 50 | **17,000 req/s** | 100% | 1.8ms | 31ms |
+| Unary POST (with auth) | 50 | **4,200 req/s** | 100% | 4.3ms | 139ms |
+
+Auth requests are ~2x slower because they involve two sequential gRPC calls (auth RPC + business RPC) per HTTP request.
+
+**Run the benchmark yourself:**
+
+```bash
+cd bench
+
+# Isolated benchmark (Docker Compose, resource-limited containers)
+make isolated
+
+# Standard Go benchmark (in-process, no Docker)
+make inprocess
+
+# Monitor resource usage (run in separate terminal while benchmark runs)
+make stats
+```
 
 ## Design principles
 

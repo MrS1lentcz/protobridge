@@ -1,10 +1,9 @@
 // Minimal REST proxy for benchmarking. Hand-wired handlers that simulate
-// what protoc-gen-protobridge generates, without requiring actual code
-// generation.
+// what protoc-gen-protobridge generates, using ConnectScaled for adaptive
+// connection scaling.
 package main
 
 import (
-	"context"
 	"log"
 	"net/http"
 	"os"
@@ -30,28 +29,19 @@ func main() {
 	}
 
 	pool := grpcx.NewPool()
+	pool.EnableHealthWatch(30)
 	defer pool.Close()
 
-	conn, err := pool.Connect(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		log.Fatalf("connecting to gRPC: %v", err)
+	scalingCfg := grpcx.ScalingConfig{
+		StreamsPerConn: 100,
+		MaxConns:       10,
 	}
 
-	client := pb.NewBenchServiceClient(conn)
+	dialOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 
-	// Auth function: calls Authenticate RPC.
-	authFn := func(ctx context.Context, r *http.Request) ([]byte, error) {
-		headers := make(map[string]string)
-		for k, v := range r.Header {
-			if len(v) > 0 {
-				headers[k] = v[0]
-			}
-		}
-		resp, err := client.Authenticate(ctx, &pb.AuthRequest{Headers: headers})
-		if err != nil {
-			return nil, err
-		}
-		return proto.Marshal(resp)
+	// Pre-create first connection (fail-fast).
+	if _, err := pool.ConnectScaled(addr, scalingCfg, dialOpts...); err != nil {
+		log.Fatalf("connecting to gRPC: %v", err)
 	}
 
 	r := chi.NewRouter()
@@ -61,14 +51,29 @@ func main() {
 
 	// POST /items – unary with auth
 	r.Post("/items", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := pool.ConnectScaled(addr, scalingCfg, dialOpts...)
+		if err != nil {
+			runtime.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "pool exhausted")
+			return
+		}
+		defer pool.Release(addr, conn)
+
+		client := pb.NewBenchServiceClient(conn)
 		ctx := r.Context()
 
 		// Auth
-		userData, err := authFn(ctx, r)
+		headers := make(map[string]string)
+		for k, v := range r.Header {
+			if len(v) > 0 {
+				headers[k] = v[0]
+			}
+		}
+		authResp, err := client.Authenticate(ctx, &pb.AuthRequest{Headers: headers})
 		if err != nil {
 			runtime.WriteAuthError(w, err)
 			return
 		}
+		userData, _ := proto.Marshal(authResp)
 		ctx = runtime.SetUserMetadata(ctx, userData)
 
 		// Decode + validate
@@ -82,19 +87,24 @@ func main() {
 			return
 		}
 
-		// gRPC call
 		resp, err := client.CreateItem(ctx, req)
 		if err != nil {
 			runtime.WriteGRPCError(w, err)
 			return
 		}
-
 		runtime.WriteResponse(w, http.StatusOK, resp)
 	})
 
-	// POST /items/noauth – unary without auth (measures pure proxy overhead)
+	// POST /items/noauth – unary without auth
 	r.Post("/items/noauth", func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+		conn, err := pool.ConnectScaled(addr, scalingCfg, dialOpts...)
+		if err != nil {
+			runtime.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "pool exhausted")
+			return
+		}
+		defer pool.Release(addr, conn)
+
+		client := pb.NewBenchServiceClient(conn)
 
 		req := &pb.CreateItemRequest{}
 		if err := runtime.DecodeRequest(r, req); err != nil {
@@ -102,16 +112,16 @@ func main() {
 			return
 		}
 
-		resp, err := client.CreateItem(ctx, req)
+		resp, err := client.CreateItem(r.Context(), req)
 		if err != nil {
 			runtime.WriteGRPCError(w, err)
 			return
 		}
-
 		runtime.WriteResponse(w, http.StatusOK, resp)
 	})
 
-	log.Printf("bench REST proxy on :%s → gRPC %s", port, addr)
+	log.Printf("bench REST proxy on :%s → gRPC %s (scaled: %d streams/conn, max %d conns)",
+		port, addr, scalingCfg.StreamsPerConn, scalingCfg.MaxConns)
 	if err := http.ListenAndServe(":"+port, r); err != nil {
 		log.Fatal(err)
 	}

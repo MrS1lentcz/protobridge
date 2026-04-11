@@ -73,14 +73,21 @@ func main() {
 	{{ .EnvAddr }} := requireEnv("{{ .EnvAddrKey }}")
 	{{ end }}
 
-	// gRPC connection pool with health monitoring
+	// gRPC connection pool with adaptive scaling and health monitoring.
+	// Each service scales from 1 to MaxConns connections based on load.
+	// Default: 100 concurrent streams per connection, max 10 connections.
 	pool := grpcx.NewPool()
 	pool.EnableHealthWatch(30 * time.Second)
 	defer pool.Close()
 
+	scalingCfg := grpcx.ScalingConfig{
+		StreamsPerConn: 100,
+		MaxConns:       10,
+	}
+
+	// Pre-create first connection per service (fail-fast on bad addresses).
 	{{ range .Services }}
-	{{ .ConnVar }}, err := pool.Connect({{ .EnvAddr }}, dialOpts("{{ .EnvTLSKey }}", "{{ .EnvGRPCOptsKey }}")...)
-	if err != nil {
+	if _, err := pool.ConnectScaled({{ .EnvAddr }}, scalingCfg, dialOpts("{{ .EnvTLSKey }}", "{{ .EnvGRPCOptsKey }}")...); err != nil {
 		log.Fatalf("connecting to %s: %v", {{ .EnvAddr }}, err)
 	}
 	{{ end }}
@@ -102,7 +109,7 @@ func main() {
 	r.Get("/healthz", runtime.HealthHandler())
 
 	{{ range .Services -}}
-	register{{ .ServiceName }}(r, {{ .ConnVar }}, "{{ .EnvAddrKey }}", pool, authFn)
+	register{{ .ServiceName }}(r, "{{ .EnvAddrKey }}", pool, scalingCfg, authFn)
 	{{ end }}
 
 	// Prometheus metrics endpoint

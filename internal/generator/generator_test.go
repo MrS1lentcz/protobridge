@@ -244,11 +244,11 @@ func TestGenerateMain(t *testing.T) {
 		"pool.EnableHealthWatch",
 		"PROTOBRIDGE_CHAT_SERVICE_ADDR",
 		"chatServiceAddr",
-		"chatServiceConn",
-		"registerChatService(r, chatServiceConn",
+		"ConnectScaled",
+		"ScalingConfig",
+		"registerChatService(r,",
 		// Auth service should be wired
 		"runtime.NewAuthFunc",
-		"authServiceConn",
 		"PROTOBRIDGE_AUTH_SERVICE_ADDR",
 		// Environment variables
 		"PROTOBRIDGE_PORT",
