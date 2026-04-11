@@ -2,6 +2,7 @@ package runtime_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -52,6 +53,43 @@ func TestWriteValidationError(t *testing.T) {
 	}
 	if len(apiErr.Details) != 2 {
 		t.Fatalf("expected 2 details, got %d", len(apiErr.Details))
+	}
+}
+
+func TestWriteAuthError(t *testing.T) {
+	w := httptest.NewRecorder()
+	runtime.WriteAuthError(w, fmt.Errorf("token expired"))
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+
+	var apiErr runtime.APIError
+	if err := json.Unmarshal(w.Body.Bytes(), &apiErr); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if apiErr.Code != "UNAUTHENTICATED" {
+		t.Fatalf("expected code UNAUTHENTICATED, got %s", apiErr.Code)
+	}
+	if apiErr.Message != "authentication failed" {
+		t.Fatalf("expected message 'authentication failed', got %s", apiErr.Message)
+	}
+}
+
+func TestWriteGRPCError_NonGRPCError(t *testing.T) {
+	w := httptest.NewRecorder()
+	runtime.WriteGRPCError(w, fmt.Errorf("plain error"))
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", w.Code)
+	}
+
+	var apiErr runtime.APIError
+	if err := json.Unmarshal(w.Body.Bytes(), &apiErr); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if apiErr.Code != "INTERNAL" {
+		t.Fatalf("expected code INTERNAL, got %s", apiErr.Code)
 	}
 }
 

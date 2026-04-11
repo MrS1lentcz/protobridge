@@ -71,5 +71,21 @@ func Generate(api *parser.ParsedAPI) (*pluginpb.CodeGeneratorResponse, error) {
 		Content: &k8sContent,
 	})
 
+	// Generate .env.example
+	envExampleContent := GenerateEnvExample(api)
+	envExampleName := ".env.example"
+	resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
+		Name:    &envExampleName,
+		Content: &envExampleContent,
+	})
+
+	// Generate .env.defaults
+	envDefaultsContent := GenerateEnvDefaults(api)
+	envDefaultsName := ".env.defaults"
+	resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
+		Name:    &envDefaultsName,
+		Content: &envDefaultsContent,
+	})
+
 	return resp, nil
 }

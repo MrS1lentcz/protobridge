@@ -2,6 +2,7 @@ package runtime_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -87,5 +88,80 @@ func TestWriteResponse_IncludesNonZeroEnum(t *testing.T) {
 	body := w.Body.String()
 	if !bytes.Contains([]byte(body), []byte("STATUS_ACTIVE")) {
 		t.Fatalf("expected STATUS_ACTIVE in response, got: %s", body)
+	}
+}
+
+func TestMarshalOneofField_AddsDiscriminator(t *testing.T) {
+	msg := &pb.TextContent{Body: "hello world"}
+	data, err := runtime.MarshalOneofField(msg, "TextContent")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	raw, ok := m[runtime.DiscriminatorField]
+	if !ok {
+		t.Fatalf("expected %s field in output", runtime.DiscriminatorField)
+	}
+
+	var disc string
+	if err := json.Unmarshal(raw, &disc); err != nil {
+		t.Fatalf("unmarshal disc error: %v", err)
+	}
+	if disc != "TextContent" {
+		t.Fatalf("expected discriminator 'TextContent', got %q", disc)
+	}
+
+	// Verify original field is present.
+	raw, ok = m["body"]
+	if !ok {
+		t.Fatal("expected body field in output")
+	}
+}
+
+func TestUnmarshalOneofField_ReadsDiscriminator(t *testing.T) {
+	input := []byte(`{"body":"hello","protobridge_disc":"TextContent"}`)
+	typeName, err := runtime.UnmarshalOneofField(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if typeName != "TextContent" {
+		t.Fatalf("expected 'TextContent', got %q", typeName)
+	}
+}
+
+func TestUnmarshalOneofField_MissingDiscriminator(t *testing.T) {
+	input := []byte(`{"body":"hello"}`)
+	_, err := runtime.UnmarshalOneofField(input)
+	if err == nil {
+		t.Fatal("expected error for missing discriminator")
+	}
+}
+
+func TestUnmarshalOneofField_EmptyDiscriminator(t *testing.T) {
+	input := []byte(`{"body":"hello","protobridge_disc":""}`)
+	_, err := runtime.UnmarshalOneofField(input)
+	if err == nil {
+		t.Fatal("expected error for empty discriminator")
+	}
+}
+
+func TestUnmarshalOneofField_InvalidJSON(t *testing.T) {
+	input := []byte(`{invalid`)
+	_, err := runtime.UnmarshalOneofField(input)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestUnmarshalOneofField_InvalidDiscriminatorType(t *testing.T) {
+	input := []byte(`{"protobridge_disc": 123}`)
+	_, err := runtime.UnmarshalOneofField(input)
+	if err == nil {
+		t.Fatal("expected error for non-string discriminator")
 	}
 }

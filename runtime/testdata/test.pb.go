@@ -480,6 +480,293 @@ func (x *SimpleResponse) GetStatus() Status {
 	return Status_STATUS_UNSPECIFIED
 }
 
+// AllTypesRequest is used for testing parseFieldValue and isZero with all
+// common proto scalar types.
+type AllTypesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StrVal        string                 `protobuf:"bytes,1,opt,name=str_val,json=strVal,proto3" json:"str_val,omitempty"`
+	BoolVal       bool                   `protobuf:"varint,2,opt,name=bool_val,json=boolVal,proto3" json:"bool_val,omitempty"`
+	Int32Val      int32                  `protobuf:"varint,3,opt,name=int32_val,json=int32Val,proto3" json:"int32_val,omitempty"`
+	Int64Val      int64                  `protobuf:"varint,4,opt,name=int64_val,json=int64Val,proto3" json:"int64_val,omitempty"`
+	Uint32Val     uint32                 `protobuf:"varint,5,opt,name=uint32_val,json=uint32Val,proto3" json:"uint32_val,omitempty"`
+	Uint64Val     uint64                 `protobuf:"varint,6,opt,name=uint64_val,json=uint64Val,proto3" json:"uint64_val,omitempty"`
+	FloatVal      float32                `protobuf:"fixed32,7,opt,name=float_val,json=floatVal,proto3" json:"float_val,omitempty"`
+	DoubleVal     float64                `protobuf:"fixed64,8,opt,name=double_val,json=doubleVal,proto3" json:"double_val,omitempty"`
+	BytesVal      []byte                 `protobuf:"bytes,9,opt,name=bytes_val,json=bytesVal,proto3" json:"bytes_val,omitempty"`
+	EnumVal       Status                 `protobuf:"varint,10,opt,name=enum_val,json=enumVal,proto3,enum=testdata.Status" json:"enum_val,omitempty"`
+	MsgVal        *Paging                `protobuf:"bytes,11,opt,name=msg_val,json=msgVal,proto3" json:"msg_val,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AllTypesRequest) Reset() {
+	*x = AllTypesRequest{}
+	mi := &file_test_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AllTypesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AllTypesRequest) ProtoMessage() {}
+
+func (x *AllTypesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_test_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AllTypesRequest.ProtoReflect.Descriptor instead.
+func (*AllTypesRequest) Descriptor() ([]byte, []int) {
+	return file_test_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *AllTypesRequest) GetStrVal() string {
+	if x != nil {
+		return x.StrVal
+	}
+	return ""
+}
+
+func (x *AllTypesRequest) GetBoolVal() bool {
+	if x != nil {
+		return x.BoolVal
+	}
+	return false
+}
+
+func (x *AllTypesRequest) GetInt32Val() int32 {
+	if x != nil {
+		return x.Int32Val
+	}
+	return 0
+}
+
+func (x *AllTypesRequest) GetInt64Val() int64 {
+	if x != nil {
+		return x.Int64Val
+	}
+	return 0
+}
+
+func (x *AllTypesRequest) GetUint32Val() uint32 {
+	if x != nil {
+		return x.Uint32Val
+	}
+	return 0
+}
+
+func (x *AllTypesRequest) GetUint64Val() uint64 {
+	if x != nil {
+		return x.Uint64Val
+	}
+	return 0
+}
+
+func (x *AllTypesRequest) GetFloatVal() float32 {
+	if x != nil {
+		return x.FloatVal
+	}
+	return 0
+}
+
+func (x *AllTypesRequest) GetDoubleVal() float64 {
+	if x != nil {
+		return x.DoubleVal
+	}
+	return 0
+}
+
+func (x *AllTypesRequest) GetBytesVal() []byte {
+	if x != nil {
+		return x.BytesVal
+	}
+	return nil
+}
+
+func (x *AllTypesRequest) GetEnumVal() Status {
+	if x != nil {
+		return x.EnumVal
+	}
+	return Status_STATUS_UNSPECIFIED
+}
+
+func (x *AllTypesRequest) GetMsgVal() *Paging {
+	if x != nil {
+		return x.MsgVal
+	}
+	return nil
+}
+
+// QueryRequest has a nested query params message with diverse types.
+type QueryRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Params        *QueryParams           `protobuf:"bytes,2,opt,name=params,proto3" json:"params,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryRequest) Reset() {
+	*x = QueryRequest{}
+	mi := &file_test_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryRequest) ProtoMessage() {}
+
+func (x *QueryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_test_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryRequest.ProtoReflect.Descriptor instead.
+func (*QueryRequest) Descriptor() ([]byte, []int) {
+	return file_test_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *QueryRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *QueryRequest) GetParams() *QueryParams {
+	if x != nil {
+		return x.Params
+	}
+	return nil
+}
+
+type QueryParams struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Search        string                 `protobuf:"bytes,1,opt,name=search,proto3" json:"search,omitempty"`
+	Active        bool                   `protobuf:"varint,2,opt,name=active,proto3" json:"active,omitempty"`
+	Offset        int64                  `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
+	Score         float32                `protobuf:"fixed32,4,opt,name=score,proto3" json:"score,omitempty"`
+	Status        Status                 `protobuf:"varint,5,opt,name=status,proto3,enum=testdata.Status" json:"status,omitempty"`
+	PageSize      uint32                 `protobuf:"varint,6,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	Cursor        uint64                 `protobuf:"varint,7,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	Weight        float64                `protobuf:"fixed64,8,opt,name=weight,proto3" json:"weight,omitempty"`
+	Page          int32                  `protobuf:"varint,9,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryParams) Reset() {
+	*x = QueryParams{}
+	mi := &file_test_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryParams) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryParams) ProtoMessage() {}
+
+func (x *QueryParams) ProtoReflect() protoreflect.Message {
+	mi := &file_test_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryParams.ProtoReflect.Descriptor instead.
+func (*QueryParams) Descriptor() ([]byte, []int) {
+	return file_test_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *QueryParams) GetSearch() string {
+	if x != nil {
+		return x.Search
+	}
+	return ""
+}
+
+func (x *QueryParams) GetActive() bool {
+	if x != nil {
+		return x.Active
+	}
+	return false
+}
+
+func (x *QueryParams) GetOffset() int64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *QueryParams) GetScore() float32 {
+	if x != nil {
+		return x.Score
+	}
+	return 0
+}
+
+func (x *QueryParams) GetStatus() Status {
+	if x != nil {
+		return x.Status
+	}
+	return Status_STATUS_UNSPECIFIED
+}
+
+func (x *QueryParams) GetPageSize() uint32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *QueryParams) GetCursor() uint64 {
+	if x != nil {
+		return x.Cursor
+	}
+	return 0
+}
+
+func (x *QueryParams) GetWeight() float64 {
+	if x != nil {
+		return x.Weight
+	}
+	return 0
+}
+
+func (x *QueryParams) GetPage() int32 {
+	if x != nil {
+		return x.Page
+	}
+	return 0
+}
+
 var File_test_proto protoreflect.FileDescriptor
 
 const file_test_proto_rawDesc = "" +
@@ -509,7 +796,36 @@ const file_test_proto_rawDesc = "" +
 	"\x0eSimpleResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12(\n" +
-	"\x06status\x18\x03 \x01(\x0e2\x10.testdata.StatusR\x06status*H\n" +
+	"\x06status\x18\x03 \x01(\x0e2\x10.testdata.StatusR\x06status\"\xee\x02\n" +
+	"\x0fAllTypesRequest\x12\x17\n" +
+	"\astr_val\x18\x01 \x01(\tR\x06strVal\x12\x19\n" +
+	"\bbool_val\x18\x02 \x01(\bR\aboolVal\x12\x1b\n" +
+	"\tint32_val\x18\x03 \x01(\x05R\bint32Val\x12\x1b\n" +
+	"\tint64_val\x18\x04 \x01(\x03R\bint64Val\x12\x1d\n" +
+	"\n" +
+	"uint32_val\x18\x05 \x01(\rR\tuint32Val\x12\x1d\n" +
+	"\n" +
+	"uint64_val\x18\x06 \x01(\x04R\tuint64Val\x12\x1b\n" +
+	"\tfloat_val\x18\a \x01(\x02R\bfloatVal\x12\x1d\n" +
+	"\n" +
+	"double_val\x18\b \x01(\x01R\tdoubleVal\x12\x1b\n" +
+	"\tbytes_val\x18\t \x01(\fR\bbytesVal\x12+\n" +
+	"\benum_val\x18\n" +
+	" \x01(\x0e2\x10.testdata.StatusR\aenumVal\x12)\n" +
+	"\amsg_val\x18\v \x01(\v2\x10.testdata.PagingR\x06msgVal\"M\n" +
+	"\fQueryRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12-\n" +
+	"\x06params\x18\x02 \x01(\v2\x15.testdata.QueryParamsR\x06params\"\xf6\x01\n" +
+	"\vQueryParams\x12\x16\n" +
+	"\x06search\x18\x01 \x01(\tR\x06search\x12\x16\n" +
+	"\x06active\x18\x02 \x01(\bR\x06active\x12\x16\n" +
+	"\x06offset\x18\x03 \x01(\x03R\x06offset\x12\x14\n" +
+	"\x05score\x18\x04 \x01(\x02R\x05score\x12(\n" +
+	"\x06status\x18\x05 \x01(\x0e2\x10.testdata.StatusR\x06status\x12\x1b\n" +
+	"\tpage_size\x18\x06 \x01(\rR\bpageSize\x12\x16\n" +
+	"\x06cursor\x18\a \x01(\x04R\x06cursor\x12\x16\n" +
+	"\x06weight\x18\b \x01(\x01R\x06weight\x12\x12\n" +
+	"\x04page\x18\t \x01(\x05R\x04page*H\n" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rSTATUS_ACTIVE\x10\x01\x12\x13\n" +
@@ -528,28 +844,35 @@ func file_test_proto_rawDescGZIP() []byte {
 }
 
 var file_test_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_test_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_test_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_test_proto_goTypes = []any{
-	(Status)(0),            // 0: testdata.Status
-	(*SimpleRequest)(nil),  // 1: testdata.SimpleRequest
-	(*NestedRequest)(nil),  // 2: testdata.NestedRequest
-	(*Paging)(nil),         // 3: testdata.Paging
-	(*OneofResponse)(nil),  // 4: testdata.OneofResponse
-	(*TextContent)(nil),    // 5: testdata.TextContent
-	(*ImageContent)(nil),   // 6: testdata.ImageContent
-	(*SimpleResponse)(nil), // 7: testdata.SimpleResponse
+	(Status)(0),             // 0: testdata.Status
+	(*SimpleRequest)(nil),   // 1: testdata.SimpleRequest
+	(*NestedRequest)(nil),   // 2: testdata.NestedRequest
+	(*Paging)(nil),          // 3: testdata.Paging
+	(*OneofResponse)(nil),   // 4: testdata.OneofResponse
+	(*TextContent)(nil),     // 5: testdata.TextContent
+	(*ImageContent)(nil),    // 6: testdata.ImageContent
+	(*SimpleResponse)(nil),  // 7: testdata.SimpleResponse
+	(*AllTypesRequest)(nil), // 8: testdata.AllTypesRequest
+	(*QueryRequest)(nil),    // 9: testdata.QueryRequest
+	(*QueryParams)(nil),     // 10: testdata.QueryParams
 }
 var file_test_proto_depIdxs = []int32{
-	0, // 0: testdata.SimpleRequest.status:type_name -> testdata.Status
-	3, // 1: testdata.NestedRequest.paging:type_name -> testdata.Paging
-	5, // 2: testdata.OneofResponse.text:type_name -> testdata.TextContent
-	6, // 3: testdata.OneofResponse.image:type_name -> testdata.ImageContent
-	0, // 4: testdata.SimpleResponse.status:type_name -> testdata.Status
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	0,  // 0: testdata.SimpleRequest.status:type_name -> testdata.Status
+	3,  // 1: testdata.NestedRequest.paging:type_name -> testdata.Paging
+	5,  // 2: testdata.OneofResponse.text:type_name -> testdata.TextContent
+	6,  // 3: testdata.OneofResponse.image:type_name -> testdata.ImageContent
+	0,  // 4: testdata.SimpleResponse.status:type_name -> testdata.Status
+	0,  // 5: testdata.AllTypesRequest.enum_val:type_name -> testdata.Status
+	3,  // 6: testdata.AllTypesRequest.msg_val:type_name -> testdata.Paging
+	10, // 7: testdata.QueryRequest.params:type_name -> testdata.QueryParams
+	0,  // 8: testdata.QueryParams.status:type_name -> testdata.Status
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_test_proto_init() }
@@ -567,7 +890,7 @@ func file_test_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_test_proto_rawDesc), len(file_test_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   7,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

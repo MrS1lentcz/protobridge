@@ -100,3 +100,85 @@ func TestParseGRPCOptions_WhitespaceHandling(t *testing.T) {
 		t.Fatalf("expected 2 opts, got %d", len(opts))
 	}
 }
+
+func TestParseGRPCOptions_MaxSendMsgSize(t *testing.T) {
+	opts, err := runtime.ParseGRPCOptions("max_send_msg_size=8mb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts) != 1 {
+		t.Fatalf("expected 1 opt, got %d", len(opts))
+	}
+}
+
+func TestParseGRPCOptions_InitialWindowSize(t *testing.T) {
+	opts, err := runtime.ParseGRPCOptions("initial_window_size=1mb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts) != 1 {
+		t.Fatalf("expected 1 opt, got %d", len(opts))
+	}
+}
+
+func TestParseGRPCOptions_InitialConnWindowSize(t *testing.T) {
+	opts, err := runtime.ParseGRPCOptions("initial_conn_window_size=2mb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts) != 1 {
+		t.Fatalf("expected 1 opt, got %d", len(opts))
+	}
+}
+
+func TestParseGRPCOptions_CompressionNone(t *testing.T) {
+	opts, err := runtime.ParseGRPCOptions("compression=none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts) != 0 {
+		t.Fatalf("expected 0 opts for compression=none, got %d", len(opts))
+	}
+}
+
+func TestParseGRPCOptions_InvalidKeepaliveTime(t *testing.T) {
+	_, err := runtime.ParseGRPCOptions("keepalive_time=invalid")
+	if err == nil {
+		t.Fatal("expected error for invalid keepalive time")
+	}
+}
+
+func TestParseGRPCOptions_InvalidKeepaliveTimeout(t *testing.T) {
+	_, err := runtime.ParseGRPCOptions("keepalive_timeout=invalid")
+	if err == nil {
+		t.Fatal("expected error for invalid keepalive timeout")
+	}
+}
+
+func TestParseGRPCOptions_InvalidKeepalivePermit(t *testing.T) {
+	_, err := runtime.ParseGRPCOptions("keepalive_permit_without_stream=maybe")
+	if err == nil {
+		t.Fatal("expected error for invalid bool")
+	}
+}
+
+func TestParseGRPCOptions_InvalidWindowSize(t *testing.T) {
+	_, err := runtime.ParseGRPCOptions("initial_window_size=abc")
+	if err == nil {
+		t.Fatal("expected error for invalid window size")
+	}
+}
+
+func TestParseGRPCOptions_InvalidConnWindowSize(t *testing.T) {
+	_, err := runtime.ParseGRPCOptions("initial_conn_window_size=abc")
+	if err == nil {
+		t.Fatal("expected error for invalid conn window size")
+	}
+}
+
+func TestParseGRPCOptions_InvalidMaxSendSize(t *testing.T) {
+	_, err := runtime.ParseGRPCOptions("max_send_msg_size=abc")
+	if err == nil {
+		t.Fatal("expected error for invalid max send size")
+	}
+}

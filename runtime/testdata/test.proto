@@ -48,3 +48,37 @@ message SimpleResponse {
   string name = 2;
   Status status = 3;
 }
+
+// AllTypesRequest is used for testing parseFieldValue and isZero with all
+// common proto scalar types.
+message AllTypesRequest {
+  string str_val = 1;
+  bool bool_val = 2;
+  int32 int32_val = 3;
+  int64 int64_val = 4;
+  uint32 uint32_val = 5;
+  uint64 uint64_val = 6;
+  float float_val = 7;
+  double double_val = 8;
+  bytes bytes_val = 9;
+  Status enum_val = 10;
+  Paging msg_val = 11;
+}
+
+// QueryRequest has a nested query params message with diverse types.
+message QueryRequest {
+  string id = 1;
+  QueryParams params = 2;
+}
+
+message QueryParams {
+  string search = 1;
+  bool active = 2;
+  int64 offset = 3;
+  float score = 4;
+  Status status = 5;
+  uint32 page_size = 6;
+  uint64 cursor = 7;
+  double weight = 8;
+  int32 page = 9;
+}
