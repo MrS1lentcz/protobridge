@@ -19,12 +19,28 @@ func GenerateOpenAPI(api *parser.ParsedAPI) string {
 	b.WriteString("  version: '1.0.0'\n")
 	b.WriteString("paths:\n")
 
+	// Group methods by HTTP path to avoid duplicate YAML keys.
+	type pathMethod struct {
+		svc    *parser.Service
+		method *parser.Method
+	}
+	pathGroups := make(map[string][]pathMethod)
+	var pathOrder []string
 	for _, svc := range api.Services {
 		for _, m := range svc.Methods {
 			if m.StreamType != parser.StreamUnary {
-				continue // WS endpoints are not in OpenAPI
+				continue
 			}
-			writePath(&b, svc, m)
+			if _, exists := pathGroups[m.HTTPPath]; !exists {
+				pathOrder = append(pathOrder, m.HTTPPath)
+			}
+			pathGroups[m.HTTPPath] = append(pathGroups[m.HTTPPath], pathMethod{svc, m})
+		}
+	}
+	for _, path := range pathOrder {
+		fmt.Fprintf(&b, "  %s:\n", path)
+		for _, pm := range pathGroups[path] {
+			writePathMethod(&b, pm.svc, pm.method)
 		}
 	}
 
@@ -48,11 +64,9 @@ func GenerateOpenAPI(api *parser.ParsedAPI) string {
 	return b.String()
 }
 
-func writePath(b *strings.Builder, svc *parser.Service, m *parser.Method) {
-	// Convert {param} to OpenAPI style (same syntax).
+func writePathMethod(b *strings.Builder, svc *parser.Service, m *parser.Method) {
 	method := strings.ToLower(m.HTTPMethod)
 
-	fmt.Fprintf(b, "  %s:\n", m.HTTPPath)
 	fmt.Fprintf(b, "    %s:\n", method)
 	tagName := svc.Name
 	if svc.DisplayName != "" {

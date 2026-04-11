@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/mrs1lentcz/protobridge/runtime"
 	{{ range .Services -}}
@@ -93,8 +94,30 @@ func main() {
 	{{ end }}
 
 	{{ if .HasAuth -}}
-	// Auth function
-	authFn := runtime.NewAuthFunc({{ .AuthConnVar }})
+	// Auth function: calls {{ .AuthServiceName }}.{{ .AuthMethodName }} on every request.
+	authFn := runtime.AuthFunc(func(ctx context.Context, r *http.Request) ([]byte, error) {
+		conn, err := pool.ConnectScaled({{ .AuthAddrVar }}, scalingCfg)
+		if err != nil {
+			return nil, err
+		}
+		defer pool.Release({{ .AuthAddrVar }}, conn)
+
+		client := {{ .AuthPkgAlias }}.New{{ .AuthServiceName }}Client(conn)
+
+		headers := make(map[string]string)
+		for k, v := range r.Header {
+			if len(v) > 0 {
+				headers[k] = v[0]
+			}
+		}
+
+		resp, err := client.{{ .AuthMethodName }}(ctx, &{{ .AuthPkgAlias }}.{{ .AuthInputType }}{Headers: headers})
+		if err != nil {
+			return nil, err
+		}
+
+		return proto.Marshal(resp)
+	})
 	{{ else -}}
 	authFn := runtime.NoAuth()
 	{{ end }}
@@ -220,9 +243,14 @@ func dialOpts(tlsEnvKey, grpcOptsEnvKey string) []grpc.DialOption {
 `))
 
 type mainData struct {
-	Services    []mainServiceData
-	HasAuth     bool
-	AuthConnVar string
+	Services        []mainServiceData
+	HasAuth         bool
+	AuthConnVar     string
+	AuthAddrVar     string // e.g. "authServiceAddr"
+	AuthServiceName string // e.g. "AuthService"
+	AuthMethodName  string // e.g. "Authenticate"
+	AuthPkgAlias    string // e.g. "authServicepb"
+	AuthInputType   string // e.g. "AuthRequest"
 }
 
 type mainServiceData struct {
@@ -244,7 +272,7 @@ func generateMain(api *parser.ParsedAPI) (string, error) {
 		sd := mainServiceData{
 			ServiceName: svc.Name,
 			PkgAlias:    toLowerCamel(svc.Name) + "pb",
-			ProtoImport: guessProtoImport(svc),
+			ProtoImport: protoImportPath(svc),
 			EnvAddr:     toLowerCamel(svc.Name) + "Addr",
 			EnvAddrKey:  "PROTOBRIDGE_" + screaming + "_ADDR",
 			EnvTLSKey:      "PROTOBRIDGE_" + screaming + "_TLS",
@@ -256,10 +284,18 @@ func generateMain(api *parser.ParsedAPI) (string, error) {
 
 	if api.AuthMethod != nil {
 		data.HasAuth = true
-		// Find the connection variable for the auth service.
+		data.AuthServiceName = api.AuthMethod.ServiceName
+		data.AuthMethodName = api.AuthMethod.MethodName
+		data.AuthInputType = api.AuthMethod.InputType.Name
+		data.AuthPkgAlias = toLowerCamel(api.AuthMethod.ServiceName) + "pb"
+		data.AuthAddrVar = toLowerCamel(api.AuthMethod.ServiceName) + "Addr"
+
+		// Find the service data for the auth service.
 		for _, sd := range data.Services {
 			if sd.ServiceName == api.AuthMethod.ServiceName {
 				data.AuthConnVar = sd.ConnVar
+				data.AuthAddrVar = sd.EnvAddr
+				data.AuthPkgAlias = sd.PkgAlias
 				break
 			}
 		}
@@ -271,7 +307,7 @@ func generateMain(api *parser.ParsedAPI) (string, error) {
 			data.Services = append(data.Services, mainServiceData{
 				ServiceName:    api.AuthMethod.ServiceName,
 				PkgAlias:       toLowerCamel(api.AuthMethod.ServiceName) + "pb",
-				ProtoImport:    api.AuthMethod.ServiceName, // placeholder
+				ProtoImport:    api.AuthMethod.GoPackage,
 				EnvAddr:        toLowerCamel(api.AuthMethod.ServiceName) + "Addr",
 				EnvAddrKey:     "PROTOBRIDGE_" + screaming + "_ADDR",
 				EnvTLSKey:      "PROTOBRIDGE_" + screaming + "_TLS",

@@ -35,6 +35,32 @@ paths:
           description: Unauthorized
         '422':
           description: Validation Error
+    get:
+      operationId: TaskService_ListTasks
+      tags:
+        - Tasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: user_id
+          in: header
+          required: true
+          schema:
+            type: string
+        # query params from paging
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTasksResponse'
+        '400':
+          description: Bad Request
+        '401':
+          description: Unauthorized
+        '422':
+          description: Validation Error
   /api/v1/tasks/{task_id}:
     get:
       operationId: TaskService_GetTask
@@ -66,7 +92,6 @@ paths:
           description: Unauthorized
         '422':
           description: Validation Error
-  /api/v1/tasks/{task_id}:
     put:
       operationId: TaskService_UpdateTask
       tags:
@@ -103,7 +128,6 @@ paths:
           description: Unauthorized
         '422':
           description: Validation Error
-  /api/v1/tasks/{task_id}:
     delete:
       operationId: TaskService_DeleteTask
       tags:
@@ -128,33 +152,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteTaskResponse'
-        '400':
-          description: Bad Request
-        '401':
-          description: Unauthorized
-        '422':
-          description: Validation Error
-  /api/v1/tasks:
-    get:
-      operationId: TaskService_ListTasks
-      tags:
-        - Tasks
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: user_id
-          in: header
-          required: true
-          schema:
-            type: string
-        # query params from paging
-      responses:
-        '200':
-          description: Successful response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListTasksResponse'
         '400':
           description: Bad Request
         '401':

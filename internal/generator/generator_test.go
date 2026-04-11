@@ -248,7 +248,7 @@ func TestGenerateMain(t *testing.T) {
 		"ScalingConfig",
 		"registerChatService(r,",
 		// Auth service should be wired
-		"runtime.NewAuthFunc",
+		"Authenticate",
 		"PROTOBRIDGE_AUTH_SERVICE_ADDR",
 		// Environment variables
 		"PROTOBRIDGE_PORT",
@@ -301,8 +301,8 @@ func TestGenerateMainNoAuth(t *testing.T) {
 	if !strings.Contains(content, "runtime.NoAuth()") {
 		t.Error("expected NoAuth() when no auth method is set")
 	}
-	if strings.Contains(content, "runtime.NewAuthFunc") {
-		t.Error("should not contain NewAuthFunc when no auth method")
+	if strings.Contains(content, "Authenticate") {
+		t.Error("should not contain auth method call when no auth method")
 	}
 }
 
@@ -642,6 +642,7 @@ func TestGenerateK8sManifestAuthServiceInServices(t *testing.T) {
 		AuthMethod: &parser.AuthMethod{
 			ServiceName: "AuthService",
 			MethodName:  "Authenticate",
+			InputType:   &parser.MessageType{Name: "AuthReq", FullName: ".auth.v1.AuthReq"},
 		},
 	}
 
@@ -897,11 +898,19 @@ func TestChiMethodName(t *testing.T) {
 	}
 }
 
-func TestGuessProtoImport(t *testing.T) {
-	svc := &parser.Service{ProtoPackage: "chat.v1"}
-	got := guessProtoImport(svc)
-	if got != "chat/v1" {
-		t.Errorf("guessProtoImport() = %q, want chat/v1", got)
+func TestProtoImportPath(t *testing.T) {
+	// With GoPackage set, use it directly.
+	svc := &parser.Service{GoPackage: "github.com/foo/gen/chat/v1", ProtoPackage: "chat.v1"}
+	got := protoImportPath(svc)
+	if got != "github.com/foo/gen/chat/v1" {
+		t.Errorf("protoImportPath() = %q, want full go_package", got)
+	}
+
+	// Without GoPackage, fall back to proto package conversion.
+	svc2 := &parser.Service{ProtoPackage: "chat.v1"}
+	got2 := protoImportPath(svc2)
+	if got2 != "chat/v1" {
+		t.Errorf("protoImportPath() fallback = %q, want chat/v1", got2)
 	}
 }
 
@@ -1356,6 +1365,7 @@ func TestGenerateMainAuthServiceNotInServicesList(t *testing.T) {
 		AuthMethod: &parser.AuthMethod{
 			ServiceName: "AuthService",
 			MethodName:  "Authenticate",
+			InputType:   &parser.MessageType{Name: "AuthReq", FullName: ".auth.v1.AuthReq"},
 		},
 	}
 
@@ -1364,15 +1374,15 @@ func TestGenerateMainAuthServiceNotInServicesList(t *testing.T) {
 		t.Fatalf("generateMain() error: %v", err)
 	}
 
-	// Auth service should get its own connection
-	if !strings.Contains(content, "authServiceConn") {
-		t.Error("expected authServiceConn for fallback auth connection")
+	// Auth service should get its own address variable
+	if !strings.Contains(content, "authServiceAddr") {
+		t.Error("expected authServiceAddr for fallback auth connection")
 	}
 	if !strings.Contains(content, "PROTOBRIDGE_AUTH_SERVICE_ADDR") {
 		t.Error("expected PROTOBRIDGE_AUTH_SERVICE_ADDR")
 	}
-	if !strings.Contains(content, "runtime.NewAuthFunc") {
-		t.Error("expected NewAuthFunc")
+	if !strings.Contains(content, "Authenticate") {
+		t.Error("expected Authenticate")
 	}
 }
 
@@ -1455,6 +1465,7 @@ func TestGenerateEnvExampleAuthServiceNotInList(t *testing.T) {
 		AuthMethod: &parser.AuthMethod{
 			ServiceName: "AuthService",
 			MethodName:  "Authenticate",
+			InputType:   &parser.MessageType{Name: "AuthReq", FullName: ".auth.v1.AuthReq"},
 		},
 	}
 
@@ -1487,6 +1498,7 @@ func TestGenerateK8sManifestAuthServiceNotInList(t *testing.T) {
 		AuthMethod: &parser.AuthMethod{
 			ServiceName: "AuthService",
 			MethodName:  "Authenticate",
+			InputType:   &parser.MessageType{Name: "AuthReq", FullName: ".auth.v1.AuthReq"},
 		},
 	}
 
@@ -1606,6 +1618,7 @@ func TestGenerateMainAuthServiceInServicesList(t *testing.T) {
 		AuthMethod: &parser.AuthMethod{
 			ServiceName: "AuthService",
 			MethodName:  "Authenticate",
+			InputType:   &parser.MessageType{Name: "AuthReq", FullName: ".auth.v1.AuthReq"},
 		},
 	}
 
@@ -1613,11 +1626,14 @@ func TestGenerateMainAuthServiceInServicesList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateMain() error: %v", err)
 	}
-	if !strings.Contains(content, "authServiceConn") {
-		t.Error("expected authServiceConn")
+	if !strings.Contains(content, "AuthService") {
+		t.Error("expected AuthService in auth function")
 	}
-	if !strings.Contains(content, "runtime.NewAuthFunc") {
-		t.Error("expected NewAuthFunc")
+	if !strings.Contains(content, "Authenticate") {
+		t.Error("expected Authenticate method call")
+	}
+	if !strings.Contains(content, "AuthReq") {
+		t.Error("expected AuthReq input type")
 	}
 	// Should only have one service entry (not duplicated)
 	count := strings.Count(content, "PROTOBRIDGE_AUTH_SERVICE_ADDR")
@@ -1652,6 +1668,7 @@ func TestGenerateEnvExampleAuthServiceInList(t *testing.T) {
 		AuthMethod: &parser.AuthMethod{
 			ServiceName: "AuthService",
 			MethodName:  "Authenticate",
+			InputType:   &parser.MessageType{Name: "AuthReq", FullName: ".auth.v1.AuthReq"},
 		},
 	}
 

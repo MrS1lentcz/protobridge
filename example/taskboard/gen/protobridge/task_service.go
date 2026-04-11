@@ -6,35 +6,48 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 
+	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/mrs1lentcz/gox/grpcx"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/mrs1lentcz/protobridge/runtime"
-	pb "taskboard/v1"
+	pb "github.com/mrs1lentcz/protobridge/example/taskboard/gen/grpc/taskboard/v1"
 )
 
-func registerTaskService(r chi.Router, conn *grpc.ClientConn, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) {
-	client := pb.NewTaskServiceClient(conn)
+func registerTaskService(r chi.Router, addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConfig, auth runtime.AuthFunc) {
 	
-	r.Post("/api/v1/tasks", createTaskHandler(client, addr, pool, auth))
-	r.Get("/api/v1/tasks/{task_id}", getTaskHandler(client, addr, pool, auth))
-	r.Put("/api/v1/tasks/{task_id}", updateTaskHandler(client, addr, pool, auth))
-	r.Delete("/api/v1/tasks/{task_id}", deleteTaskHandler(client, addr, pool, auth))
-	r.Get("/api/v1/tasks", listTasksHandler(client, addr, pool, auth))
-	r.Get("/api/v1/tasks/watch", watchTasksHandler(client, addr, pool, auth))
-	r.Get("/api/v1/tasks/notifications", taskNotificationsHandler(client, addr, pool, auth))
-	r.Post("/api/v1/tasks/bulk", bulkCreateTasksHandler(client, addr, pool, auth))
-	r.Get("/api/v1/tasks/{task_id}/chat", taskChatHandler(client, addr, pool, auth))
-	r.Get("/api/v1/tasks/feed", activityFeedHandler(client, addr, pool, auth))
+	r.Post("/api/v1/tasks", createTaskHandler(addr, pool, scalingCfg, auth))
+	r.Get("/api/v1/tasks/{task_id}", getTaskHandler(addr, pool, scalingCfg, auth))
+	r.Put("/api/v1/tasks/{task_id}", updateTaskHandler(addr, pool, scalingCfg, auth))
+	r.Delete("/api/v1/tasks/{task_id}", deleteTaskHandler(addr, pool, scalingCfg, auth))
+	r.Get("/api/v1/tasks", listTasksHandler(addr, pool, scalingCfg, auth))
+	r.Get("/api/v1/tasks/watch", watchTasksHandler(addr, pool, scalingCfg, auth))
+	r.Get("/api/v1/tasks/notifications", taskNotificationsHandler(addr, pool, scalingCfg, auth))
+	r.Post("/api/v1/tasks/bulk", bulkCreateTasksHandler(addr, pool, scalingCfg, auth))
+	r.Get("/api/v1/tasks/{task_id}/chat", taskChatHandler(addr, pool, scalingCfg, auth))
+	r.Get("/api/v1/tasks/feed", activityFeedHandler(addr, pool, scalingCfg, auth))
 }
 
-func createTaskHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
+func createTaskHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConfig, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+
+		// Acquire a scaled connection (auto-scales based on load).
+		conn, err := pool.ConnectScaled(addr, scalingCfg)
+		if err != nil {
+			runtime.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "connection pool exhausted")
+			return
+		}
+		defer pool.Release(addr, conn)
+
+		client := pb.NewTaskServiceClient(conn)
 		
 		// Auth
 		userData, err := auth(ctx, r)
@@ -86,9 +99,19 @@ func createTaskHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Poo
 	}
 }
 
-func getTaskHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
+func getTaskHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConfig, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+
+		// Acquire a scaled connection (auto-scales based on load).
+		conn, err := pool.ConnectScaled(addr, scalingCfg)
+		if err != nil {
+			runtime.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "connection pool exhausted")
+			return
+		}
+		defer pool.Release(addr, conn)
+
+		client := pb.NewTaskServiceClient(conn)
 		
 		// Auth
 		userData, err := auth(ctx, r)
@@ -133,9 +156,19 @@ func getTaskHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, 
 	}
 }
 
-func updateTaskHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
+func updateTaskHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConfig, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+
+		// Acquire a scaled connection (auto-scales based on load).
+		conn, err := pool.ConnectScaled(addr, scalingCfg)
+		if err != nil {
+			runtime.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "connection pool exhausted")
+			return
+		}
+		defer pool.Release(addr, conn)
+
+		client := pb.NewTaskServiceClient(conn)
 		
 		// Auth
 		userData, err := auth(ctx, r)
@@ -184,9 +217,19 @@ func updateTaskHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Poo
 	}
 }
 
-func deleteTaskHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
+func deleteTaskHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConfig, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+
+		// Acquire a scaled connection (auto-scales based on load).
+		conn, err := pool.ConnectScaled(addr, scalingCfg)
+		if err != nil {
+			runtime.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "connection pool exhausted")
+			return
+		}
+		defer pool.Release(addr, conn)
+
+		client := pb.NewTaskServiceClient(conn)
 		
 		// Auth
 		userData, err := auth(ctx, r)
@@ -231,9 +274,19 @@ func deleteTaskHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Poo
 	}
 }
 
-func listTasksHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
+func listTasksHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConfig, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+
+		// Acquire a scaled connection (auto-scales based on load).
+		conn, err := pool.ConnectScaled(addr, scalingCfg)
+		if err != nil {
+			runtime.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "connection pool exhausted")
+			return
+		}
+		defer pool.Release(addr, conn)
+
+		client := pb.NewTaskServiceClient(conn)
 		
 		// Auth
 		userData, err := auth(ctx, r)
@@ -281,9 +334,19 @@ func listTasksHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool
 	}
 }
 
-func watchTasksHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
+func watchTasksHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConfig, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+
+		// Acquire a scaled connection (auto-scales based on load).
+		conn, err := pool.ConnectScaled(addr, scalingCfg)
+		if err != nil {
+			runtime.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "connection pool exhausted")
+			return
+		}
+		defer pool.Release(addr, conn)
+
+		client := pb.NewTaskServiceClient(conn)
 		
 		// Auth
 		userData, err := auth(ctx, r)
@@ -306,12 +369,49 @@ func watchTasksHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Poo
 		
 		ctx = metadata.NewOutgoingContext(ctx, md)
 		
+		// WebSocket: server → client streaming.
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.CloseNow()
+
+		stream, err := client.WatchTasks(ctx, &pb.WatchTasksRequest{})
+		if err != nil {
+			ws.Close(websocket.StatusInternalError, "stream open failed")
+			return
+		}
+
+		for {
+			msg, err := stream.Recv()
+			if err == io.EOF {
+				ws.Close(websocket.StatusNormalClosure, "stream ended")
+				return
+			}
+			if err != nil {
+				ws.Close(websocket.StatusInternalError, "stream error")
+				return
+			}
+			data, _ := protojson.Marshal(msg)
+			ws.Write(ctx, websocket.MessageText, data)
+		}
+		
 	}
 }
 
-func taskNotificationsHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
+func taskNotificationsHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConfig, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+
+		// Acquire a scaled connection (auto-scales based on load).
+		conn, err := pool.ConnectScaled(addr, scalingCfg)
+		if err != nil {
+			runtime.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "connection pool exhausted")
+			return
+		}
+		defer pool.Release(addr, conn)
+
+		client := pb.NewTaskServiceClient(conn)
 		
 		// Auth
 		userData, err := auth(ctx, r)
@@ -334,12 +434,55 @@ func taskNotificationsHandler(client pb.TaskServiceClient, addr string, pool *gr
 		
 		ctx = metadata.NewOutgoingContext(ctx, md)
 		
+		// SSE: server → client streaming via text/event-stream.
+		stream, err := client.TaskNotifications(ctx, &pb.WatchTasksRequest{})
+		if err != nil {
+			runtime.WriteGRPCError(w, err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			runtime.WriteError(w, http.StatusInternalServerError, "INTERNAL", "streaming not supported")
+			return
+		}
+
+		for {
+			msg, err := stream.Recv()
+			if err == io.EOF {
+				fmt.Fprintf(w, "event: close\ndata: {}\n\n")
+				flusher.Flush()
+				return
+			}
+			if err != nil {
+				return
+			}
+			data, _ := protojson.Marshal(msg)
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		}
+		
 	}
 }
 
-func bulkCreateTasksHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
+func bulkCreateTasksHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConfig, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+
+		// Acquire a scaled connection (auto-scales based on load).
+		conn, err := pool.ConnectScaled(addr, scalingCfg)
+		if err != nil {
+			runtime.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "connection pool exhausted")
+			return
+		}
+		defer pool.Release(addr, conn)
+
+		client := pb.NewTaskServiceClient(conn)
 		
 		// Auth
 		userData, err := auth(ctx, r)
@@ -362,12 +505,59 @@ func bulkCreateTasksHandler(client pb.TaskServiceClient, addr string, pool *grpc
 		
 		ctx = metadata.NewOutgoingContext(ctx, md)
 		
+		// WebSocket: client → server streaming.
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.CloseNow()
+
+		stream, err := client.BulkCreateTasks(ctx)
+		if err != nil {
+			ws.Close(websocket.StatusInternalError, "stream open failed")
+			return
+		}
+
+		for {
+			_, data, err := ws.Read(ctx)
+			if err != nil {
+				resp, err := stream.CloseAndRecv()
+				if err != nil {
+					ws.Close(websocket.StatusInternalError, "close error")
+					return
+				}
+				result, _ := protojson.Marshal(resp)
+				ws.Write(ctx, websocket.MessageText, result)
+				ws.Close(websocket.StatusNormalClosure, "done")
+				return
+			}
+			msg := &pb.BulkCreateTaskRequest{}
+			if err := protojson.Unmarshal(data, msg); err != nil {
+				ws.Close(websocket.StatusInvalidFramePayloadData, "invalid JSON")
+				return
+			}
+			if err := stream.Send(msg); err != nil {
+				ws.Close(websocket.StatusInternalError, "send error")
+				return
+			}
+		}
+		
 	}
 }
 
-func taskChatHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
+func taskChatHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConfig, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+
+		// Acquire a scaled connection (auto-scales based on load).
+		conn, err := pool.ConnectScaled(addr, scalingCfg)
+		if err != nil {
+			runtime.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "connection pool exhausted")
+			return
+		}
+		defer pool.Release(addr, conn)
+
+		client := pb.NewTaskServiceClient(conn)
 		
 		// Auth
 		userData, err := auth(ctx, r)
@@ -391,12 +581,67 @@ func taskChatHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool,
 		
 		ctx = metadata.NewOutgoingContext(ctx, md)
 		
+		// WebSocket: bidirectional streaming.
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.CloseNow()
+
+		stream, err := client.TaskChat(ctx)
+		if err != nil {
+			ws.Close(websocket.StatusInternalError, "stream open failed")
+			return
+		}
+
+		// gRPC → WS
+		go func() {
+			for {
+				msg, err := stream.Recv()
+				if err != nil {
+					ws.Close(websocket.StatusNormalClosure, "stream ended")
+					return
+				}
+				data, _ := protojson.Marshal(msg)
+				if err := ws.Write(ctx, websocket.MessageText, data); err != nil {
+					return
+				}
+			}
+		}()
+
+		// WS → gRPC
+		for {
+			_, data, err := ws.Read(ctx)
+			if err != nil {
+				stream.CloseSend()
+				return
+			}
+			msg := &pb.ChatMessage{}
+			if err := protojson.Unmarshal(data, msg); err != nil {
+				ws.Close(websocket.StatusInvalidFramePayloadData, "invalid JSON")
+				return
+			}
+			if err := stream.Send(msg); err != nil {
+				return
+			}
+		}
+		
 	}
 }
 
-func activityFeedHandler(client pb.TaskServiceClient, addr string, pool *grpcx.Pool, auth runtime.AuthFunc) http.HandlerFunc {
+func activityFeedHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConfig, auth runtime.AuthFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+
+		// Acquire a scaled connection (auto-scales based on load).
+		conn, err := pool.ConnectScaled(addr, scalingCfg)
+		if err != nil {
+			runtime.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "connection pool exhausted")
+			return
+		}
+		defer pool.Release(addr, conn)
+
+		client := pb.NewTaskServiceClient(conn)
 		
 		// Auth
 		userData, err := auth(ctx, r)
@@ -412,6 +657,33 @@ func activityFeedHandler(client pb.TaskServiceClient, addr string, pool *grpcx.P
 		// Required headers
 		
 		ctx = metadata.NewOutgoingContext(ctx, md)
+		
+		// WebSocket: server → client streaming.
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.CloseNow()
+
+		stream, err := client.ActivityFeed(ctx, &pb.WatchTasksRequest{})
+		if err != nil {
+			ws.Close(websocket.StatusInternalError, "stream open failed")
+			return
+		}
+
+		for {
+			msg, err := stream.Recv()
+			if err == io.EOF {
+				ws.Close(websocket.StatusNormalClosure, "stream ended")
+				return
+			}
+			if err != nil {
+				ws.Close(websocket.StatusInternalError, "stream error")
+				return
+			}
+			data, _ := protojson.Marshal(msg)
+			ws.Write(ctx, websocket.MessageText, data)
+		}
 		
 	}
 }

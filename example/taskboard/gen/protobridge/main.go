@@ -24,10 +24,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/mrs1lentcz/protobridge/runtime"
-	taskServicepb "taskboard/v1"
-	authServicepb "AuthService"
+	taskServicepb "github.com/mrs1lentcz/protobridge/example/taskboard/gen/grpc/taskboard/v1"
+	authServicepb "github.com/mrs1lentcz/protobridge/example/taskboard/gen/grpc/taskboard/v1"
 	
 )
 
@@ -66,25 +67,53 @@ func main() {
 	authServiceAddr := requireEnv("PROTOBRIDGE_AUTH_SERVICE_ADDR")
 	
 
-	// gRPC connection pool with health monitoring
+	// gRPC connection pool with adaptive scaling and health monitoring.
+	// Each service scales from 1 to MaxConns connections based on load.
+	// Default: 100 concurrent streams per connection, max 10 connections.
 	pool := grpcx.NewPool()
 	pool.EnableHealthWatch(30 * time.Second)
 	defer pool.Close()
 
+	scalingCfg := grpcx.ScalingConfig{
+		StreamsPerConn: 100,
+		MaxConns:       10,
+	}
+
+	// Pre-create first connection per service (fail-fast on bad addresses).
 	
-	taskServiceConn, err := pool.Connect(taskServiceAddr, dialOpts("PROTOBRIDGE_TASK_SERVICE_TLS", "PROTOBRIDGE_TASK_SERVICE_GRPC_OPTIONS")...)
-	if err != nil {
+	if _, err := pool.ConnectScaled(taskServiceAddr, scalingCfg, dialOpts("PROTOBRIDGE_TASK_SERVICE_TLS", "PROTOBRIDGE_TASK_SERVICE_GRPC_OPTIONS")...); err != nil {
 		log.Fatalf("connecting to %s: %v", taskServiceAddr, err)
 	}
 	
-	authServiceConn, err := pool.Connect(authServiceAddr, dialOpts("PROTOBRIDGE_AUTH_SERVICE_TLS", "PROTOBRIDGE_AUTH_SERVICE_GRPC_OPTIONS")...)
-	if err != nil {
+	if _, err := pool.ConnectScaled(authServiceAddr, scalingCfg, dialOpts("PROTOBRIDGE_AUTH_SERVICE_TLS", "PROTOBRIDGE_AUTH_SERVICE_GRPC_OPTIONS")...); err != nil {
 		log.Fatalf("connecting to %s: %v", authServiceAddr, err)
 	}
 	
 
-	// Auth function
-	authFn := runtime.NewAuthFunc(authServiceConn)
+	// Auth function: calls AuthService.Authenticate on every request.
+	authFn := runtime.AuthFunc(func(ctx context.Context, r *http.Request) ([]byte, error) {
+		conn, err := pool.ConnectScaled(authServiceAddr, scalingCfg)
+		if err != nil {
+			return nil, err
+		}
+		defer pool.Release(authServiceAddr, conn)
+
+		client := authServicepb.NewAuthServiceClient(conn)
+
+		headers := make(map[string]string)
+		for k, v := range r.Header {
+			if len(v) > 0 {
+				headers[k] = v[0]
+			}
+		}
+
+		resp, err := client.Authenticate(ctx, &authServicepb.AuthRequest{Headers: headers})
+		if err != nil {
+			return nil, err
+		}
+
+		return proto.Marshal(resp)
+	})
 	
 
 	// Router
@@ -96,8 +125,8 @@ func main() {
 	// Proxy health endpoint (always available, independent of backend services)
 	r.Get("/healthz", runtime.HealthHandler())
 
-	registerTaskService(r, taskServiceConn, "PROTOBRIDGE_TASK_SERVICE_ADDR", pool, authFn)
-	registerAuthService(r, authServiceConn, "PROTOBRIDGE_AUTH_SERVICE_ADDR", pool, authFn)
+	registerTaskService(r, "PROTOBRIDGE_TASK_SERVICE_ADDR", pool, scalingCfg, authFn)
+	registerAuthService(r, "PROTOBRIDGE_AUTH_SERVICE_ADDR", pool, scalingCfg, authFn)
 	
 
 	// Prometheus metrics endpoint

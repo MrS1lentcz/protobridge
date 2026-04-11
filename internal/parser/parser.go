@@ -44,11 +44,14 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 			continue
 		}
 
+		goPackage := extractGoPackage(file)
+
 		for _, svc := range file.Service {
 			pathPrefix := getPathPrefix(svc)
 			service := &Service{
 				Name:         svc.GetName(),
 				ProtoPackage: file.GetPackage(),
+				GoPackage:    goPackage,
 				DisplayName:  getDisplayName(svc),
 				PathPrefix:   pathPrefix,
 			}
@@ -63,6 +66,7 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 					api.AuthMethod = &AuthMethod{
 						ServiceName: svc.GetName(),
 						MethodName:  m.GetName(),
+						GoPackage:   goPackage,
 						InputType:   resolveMessageType(msgMap, enumMap, m.GetInputType()),
 						OutputType:  resolveMessageType(msgMap, enumMap, m.GetOutputType()),
 					}
@@ -239,6 +243,20 @@ func resolveStreamType(m *descriptorpb.MethodDescriptorProto) StreamType {
 	default:
 		return StreamUnary
 	}
+}
+
+// extractGoPackage returns the Go import path from the file's go_package option.
+// Handles both "github.com/foo/bar" and "github.com/foo/bar;alias" formats.
+func extractGoPackage(file *descriptorpb.FileDescriptorProto) string {
+	goPkg := file.GetOptions().GetGoPackage()
+	if goPkg == "" {
+		return ""
+	}
+	// go_package may contain ";alias" suffix – strip it.
+	if idx := strings.Index(goPkg, ";"); idx != -1 {
+		goPkg = goPkg[:idx]
+	}
+	return goPkg
 }
 
 func lastSegment(fqn string) string {

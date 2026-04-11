@@ -11,7 +11,8 @@ type ParsedAPI struct {
 
 type Service struct {
 	Name         string // e.g. "VoiceChatService"
-	ProtoPackage string
+	ProtoPackage string // proto package, e.g. "taskboard.v1"
+	GoPackage    string // Go import path from go_package option, e.g. "github.com/foo/gen/taskboard/v1"
 	DisplayName  string // from (protobridge.display_name), used as OpenAPI tag
 	PathPrefix   string // from (protobridge.path_prefix), prepended to all HTTP paths
 	Methods      []*Method
@@ -44,6 +45,7 @@ const (
 type AuthMethod struct {
 	ServiceName string
 	MethodName  string
+	GoPackage   string // Go import path of the service's proto package
 	InputType   *MessageType
 	OutputType  *MessageType
 }

@@ -15,12 +15,16 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 
+	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/mrs1lentcz/gox/grpcx"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/mrs1lentcz/protobridge/runtime"
 	pb "{{ .ProtoImport }}"
@@ -102,6 +106,148 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		}
 
 		runtime.WriteResponse(w, http.StatusOK, resp)
+		{{ else if .IsSSE }}
+		// SSE: server → client streaming via text/event-stream.
+		stream, err := client.{{ .MethodName }}(ctx, &pb.{{ .InputTypeName }}{})
+		if err != nil {
+			runtime.WriteGRPCError(w, err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			runtime.WriteError(w, http.StatusInternalServerError, "INTERNAL", "streaming not supported")
+			return
+		}
+
+		for {
+			msg, err := stream.Recv()
+			if err == io.EOF {
+				fmt.Fprintf(w, "event: close\ndata: {}\n\n")
+				flusher.Flush()
+				return
+			}
+			if err != nil {
+				return
+			}
+			data, _ := protojson.Marshal(msg)
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		}
+		{{ else if .IsServerStream }}
+		// WebSocket: server → client streaming.
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.CloseNow()
+
+		stream, err := client.{{ .MethodName }}(ctx, &pb.{{ .InputTypeName }}{})
+		if err != nil {
+			ws.Close(websocket.StatusInternalError, "stream open failed")
+			return
+		}
+
+		for {
+			msg, err := stream.Recv()
+			if err == io.EOF {
+				ws.Close(websocket.StatusNormalClosure, "stream ended")
+				return
+			}
+			if err != nil {
+				ws.Close(websocket.StatusInternalError, "stream error")
+				return
+			}
+			data, _ := protojson.Marshal(msg)
+			ws.Write(ctx, websocket.MessageText, data)
+		}
+		{{ else if .IsClientStream }}
+		// WebSocket: client → server streaming.
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.CloseNow()
+
+		stream, err := client.{{ .MethodName }}(ctx)
+		if err != nil {
+			ws.Close(websocket.StatusInternalError, "stream open failed")
+			return
+		}
+
+		for {
+			_, data, err := ws.Read(ctx)
+			if err != nil {
+				resp, err := stream.CloseAndRecv()
+				if err != nil {
+					ws.Close(websocket.StatusInternalError, "close error")
+					return
+				}
+				result, _ := protojson.Marshal(resp)
+				ws.Write(ctx, websocket.MessageText, result)
+				ws.Close(websocket.StatusNormalClosure, "done")
+				return
+			}
+			msg := &pb.{{ .InputTypeName }}{}
+			if err := protojson.Unmarshal(data, msg); err != nil {
+				ws.Close(websocket.StatusInvalidFramePayloadData, "invalid JSON")
+				return
+			}
+			if err := stream.Send(msg); err != nil {
+				ws.Close(websocket.StatusInternalError, "send error")
+				return
+			}
+		}
+		{{ else if .IsBidiStream }}
+		// WebSocket: bidirectional streaming.
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.CloseNow()
+
+		stream, err := client.{{ .MethodName }}(ctx)
+		if err != nil {
+			ws.Close(websocket.StatusInternalError, "stream open failed")
+			return
+		}
+
+		// gRPC → WS
+		go func() {
+			for {
+				msg, err := stream.Recv()
+				if err != nil {
+					ws.Close(websocket.StatusNormalClosure, "stream ended")
+					return
+				}
+				data, _ := protojson.Marshal(msg)
+				if err := ws.Write(ctx, websocket.MessageText, data); err != nil {
+					return
+				}
+			}
+		}()
+
+		// WS → gRPC
+		for {
+			_, data, err := ws.Read(ctx)
+			if err != nil {
+				stream.CloseSend()
+				return
+			}
+			msg := &pb.{{ .InputTypeName }}{}
+			if err := protojson.Unmarshal(data, msg); err != nil {
+				ws.Close(websocket.StatusInvalidFramePayloadData, "invalid JSON")
+				return
+			}
+			if err := stream.Send(msg); err != nil {
+				return
+			}
+		}
 		{{ end }}
 	}
 }
@@ -125,6 +271,10 @@ type methodData struct {
 	OutputTypeName    string
 	ExcludeAuth       bool
 	IsUnary           bool
+	IsServerStream    bool
+	IsClientStream    bool
+	IsBidiStream      bool
+	IsSSE             bool
 	HasBody           bool
 	QueryParamsTarget string
 	HasRequiredFields bool
@@ -139,7 +289,7 @@ type headerData struct {
 func generateServiceFile(svc *parser.Service, api *parser.ParsedAPI) (string, error) {
 	data := serviceFileData{
 		ServiceName: svc.Name,
-		ProtoImport: guessProtoImport(svc),
+		ProtoImport: protoImportPath(svc),
 	}
 
 	for _, m := range svc.Methods {
@@ -153,6 +303,10 @@ func generateServiceFile(svc *parser.Service, api *parser.ParsedAPI) (string, er
 			OutputTypeName:  m.OutputType.Name,
 			ExcludeAuth:     m.ExcludeAuth,
 			IsUnary:         m.StreamType == parser.StreamUnary,
+			IsServerStream:  m.StreamType == parser.StreamServer,
+			IsClientStream:  m.StreamType == parser.StreamClient,
+			IsBidiStream:    m.StreamType == parser.StreamBidi,
+			IsSSE:           m.SSE,
 			HasBody:         m.HTTPMethod == "POST" || m.HTTPMethod == "PUT" || m.HTTPMethod == "PATCH",
 			QueryParamsTarget: m.QueryParamsTarget,
 		}
@@ -204,12 +358,15 @@ func chiMethodName(httpMethod string) string {
 	}
 }
 
-func guessProtoImport(svc *parser.Service) string {
-	// Convert proto package "assistant_api.v1" → Go import path.
-	// This is a heuristic – users configure via protoc flags.
-	// The generated code uses the package alias "pb".
-	pkg := strings.ReplaceAll(svc.ProtoPackage, ".", "/")
-	return pkg
+// protoImportPath returns the Go import path for a service's proto package.
+// Uses go_package from the proto file when available, falls back to
+// converting the proto package name.
+func protoImportPath(svc *parser.Service) string {
+	if svc.GoPackage != "" {
+		return svc.GoPackage
+	}
+	// Fallback: convert proto package "assistant_api.v1" → "assistant_api/v1".
+	return strings.ReplaceAll(svc.ProtoPackage, ".", "/")
 }
 
 func toPascalCase(s string) string {
