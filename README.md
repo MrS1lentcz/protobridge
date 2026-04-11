@@ -12,6 +12,24 @@ Existing gRPC-REST gateways (grpc-gateway, etc.) fall short in areas that fronte
 - **No observability out of the box** -- grpc-gateway leaves tracing, metrics, and error reporting as an exercise for the reader. protobridge generates OpenTelemetry integration from day one: W3C trace propagation (`traceparent` from nginx/Envoy → gRPC backends), Prometheus metrics (`/metrics` endpoint), Sentry error reporting, and automatic connection health monitoring with transparent retry on transient failures.
 - **Boilerplate everywhere** -- even with a gateway, you still write middleware, auth wiring, connection management, error mapping, validation, and a `main.go`. protobridge generates all of it -- including a Dockerfile and Kubernetes manifest. The output compiles and runs with zero handwritten Go.
 
+## Performance
+
+Benchmarked on Apple M1 Pro in Docker Desktop with strict resource limits. Full results in [`bench/results/benchmark.txt`](bench/results/benchmark.txt).
+
+| Scenario | Concurrency | Throughput | Success | p50 | p99 |
+|---|---|---|---|---|---|
+| `GET /healthz` (baseline) | 50 | **51,500 req/s** | 100% | 380µs | 15ms |
+| Unary POST (no auth) | 50 | **20,400 req/s** | 100% | 1.2ms | 41ms |
+| Unary POST (with auth) | 50 | **14,200 req/s** | 100% | 2.0ms | 46ms |
+| Unary POST (no auth) | 100 | **23,400 req/s** | 100% | 2.3ms | 48ms |
+| Unary POST (no auth) | 500 | **23,300 req/s** | 100% | 12ms | 71ms |
+
+Proxy container: **1 CPU, 2GB RAM**. gRPC backend: 2 CPUs, 4GB RAM. At 500 concurrent connections on a single CPU core, the proxy sustains **23k req/s with zero errors**. Auth adds ~30% overhead (two sequential gRPC calls per request). gRPC connections scale automatically from 1 to N based on load.
+
+```bash
+cd bench && make isolated   # run it yourself
+```
+
 ## How it works
 
 ```
@@ -520,43 +538,6 @@ Running `protoc-gen-protobridge` produces a complete, self-contained directory:
 | `k8s.yaml` | Kubernetes Deployment + Service with health probes and ENV stubs |
 
 The `Dockerfile` and `k8s.yaml` are starting points -- adjust image names, resource limits, and service addresses for your environment.
-
-## Benchmark
-
-Benchmarked on Apple M1 Pro in Docker Desktop with resource limits per container. Full results in [`bench/results/benchmark.txt`](bench/results/benchmark.txt).
-
-**Setup:**
-- REST proxy: 1 CPU, 2GB RAM
-- gRPC backend: 2 CPUs, 4GB RAM
-- Benchmark runner: 3 CPUs, 2GB RAM
-- Network: Docker Compose bridge
-
-**Results (proxy on 1 CPU, 2GB RAM):**
-
-| Scenario | Concurrency | Throughput | Success | p50 | p99 |
-|---|---|---|---|---|---|
-| `GET /healthz` (baseline) | 50 | **51,500 req/s** | 100% | 380µs | 15ms |
-| Unary POST (no auth) | 50 | **20,400 req/s** | 100% | 1.2ms | 41ms |
-| Unary POST (with auth) | 50 | **14,200 req/s** | 100% | 2.0ms | 46ms |
-| Unary POST (no auth) | 100 | **23,400 req/s** | 100% | 2.3ms | 48ms |
-| Unary POST (no auth) | 500 | **23,300 req/s** | 100% | 12ms | 71ms |
-
-Auth requests involve two sequential gRPC calls (auth RPC + business RPC), hence ~30% lower throughput. At 500 concurrent connections on a single CPU, the proxy maintains **23k req/s with zero errors**. Connection scaling (1→N gRPC connections) kicks in automatically as load increases.
-
-**Run the benchmark yourself:**
-
-```bash
-cd bench
-
-# Isolated benchmark (Docker Compose, resource-limited containers)
-make isolated
-
-# Standard Go benchmark (in-process, no Docker)
-make inprocess
-
-# Monitor resource usage (run in separate terminal while benchmark runs)
-make stats
-```
 
 ## Design principles
 
