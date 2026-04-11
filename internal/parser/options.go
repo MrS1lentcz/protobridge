@@ -22,61 +22,97 @@ func getQueryParamsTarget(m *descriptorpb.MethodDescriptorProto) string {
 	if m.Options == nil {
 		return ""
 	}
-	return proto.GetExtension(m.Options, optionspb.E_QueryParamsTarget).(string)
+	val, ok := proto.GetExtension(m.Options, optionspb.E_QueryParamsTarget).(string)
+	if !ok {
+		return ""
+	}
+	return val
 }
 
 func getExcludeAuth(m *descriptorpb.MethodDescriptorProto) bool {
 	if m.Options == nil {
 		return false
 	}
-	return proto.GetExtension(m.Options, optionspb.E_ExcludeAuth).(bool)
+	val, ok := proto.GetExtension(m.Options, optionspb.E_ExcludeAuth).(bool)
+	if !ok {
+		return false
+	}
+	return val
 }
 
 func getAuthMethod(m *descriptorpb.MethodDescriptorProto) bool {
 	if m.Options == nil {
 		return false
 	}
-	return proto.GetExtension(m.Options, optionspb.E_AuthMethod).(bool)
+	val, ok := proto.GetExtension(m.Options, optionspb.E_AuthMethod).(bool)
+	if !ok {
+		return false
+	}
+	return val
 }
 
 func getFieldRequired(f *descriptorpb.FieldDescriptorProto) bool {
 	if f.Options == nil {
 		return false
 	}
-	return proto.GetExtension(f.Options, optionspb.E_Required).(bool)
+	val, ok := proto.GetExtension(f.Options, optionspb.E_Required).(bool)
+	if !ok {
+		return false
+	}
+	return val
 }
 
 func getSSE(m *descriptorpb.MethodDescriptorProto) bool {
 	if m.Options == nil {
 		return false
 	}
-	return proto.GetExtension(m.Options, optionspb.E_Sse).(bool)
+	val, ok := proto.GetExtension(m.Options, optionspb.E_Sse).(bool)
+	if !ok {
+		return false
+	}
+	return val
 }
 
 func getWSMode(m *descriptorpb.MethodDescriptorProto) string {
 	if m.Options == nil {
 		return ""
 	}
-	return proto.GetExtension(m.Options, optionspb.E_WsMode).(string)
+	val, ok := proto.GetExtension(m.Options, optionspb.E_WsMode).(string)
+	if !ok {
+		return ""
+	}
+	return val
 }
 
 func getDisplayName(s *descriptorpb.ServiceDescriptorProto) string {
 	if s.Options == nil {
 		return ""
 	}
-	return proto.GetExtension(s.Options, optionspb.E_DisplayName).(string)
+	val, ok := proto.GetExtension(s.Options, optionspb.E_DisplayName).(string)
+	if !ok {
+		return ""
+	}
+	return val
 }
 
 func getPathPrefix(s *descriptorpb.ServiceDescriptorProto) string {
 	if s.Options == nil {
 		return ""
 	}
-	return proto.GetExtension(s.Options, optionspb.E_PathPrefix).(string)
+	val, ok := proto.GetExtension(s.Options, optionspb.E_PathPrefix).(string)
+	if !ok {
+		return ""
+	}
+	return val
 }
 
 func getXVarName(v *descriptorpb.EnumValueDescriptorProto) string {
 	if v.Options == nil {
 		return ""
 	}
-	return proto.GetExtension(v.Options, optionspb.E_XVarName).(string)
+	val, ok := proto.GetExtension(v.Options, optionspb.E_XVarName).(string)
+	if !ok {
+		return ""
+	}
+	return val
 }

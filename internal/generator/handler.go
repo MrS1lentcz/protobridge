@@ -128,7 +128,9 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		for {
 			msg, err := stream.Recv()
 			if err == io.EOF {
-				fmt.Fprintf(w, "event: close\ndata: {}\n\n")
+				if _, err := fmt.Fprintf(w, "event: close\ndata: {}\n\n"); err != nil {
+					return
+				}
 				flusher.Flush()
 				return
 			}
@@ -141,7 +143,9 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 				flusher.Flush()
 				return
 			}
-			fmt.Fprintf(w, "data: %s\n\n", data)
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+				return
+			}
 			flusher.Flush()
 		}
 		{{ else if .IsServerStream }}

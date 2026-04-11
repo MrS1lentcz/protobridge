@@ -15,7 +15,12 @@ type healthResponse struct {
 //
 // Registered automatically at /healthz in every generated proxy.
 func HealthHandler() http.HandlerFunc {
-	body, _ := json.Marshal(healthResponse{Status: "ok"})
+	// Pre-marshal at init time. This struct is trivial and cannot fail,
+	// but we handle the error for correctness.
+	body, err := json.Marshal(healthResponse{Status: "ok"})
+	if err != nil {
+		body = []byte(`{"status":"ok"}`)
+	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

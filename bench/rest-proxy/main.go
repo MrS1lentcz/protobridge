@@ -74,7 +74,11 @@ func main() {
 			runtime.WriteAuthError(w, err)
 			return
 		}
-		userData, _ := proto.Marshal(authResp)
+		userData, err := proto.Marshal(authResp)
+		if err != nil {
+			runtime.WriteError(w, http.StatusInternalServerError, "INTERNAL", "auth marshal error")
+			return
+		}
 		ctx = runtime.SetUserMetadata(ctx, userData)
 
 		// Decode + validate
