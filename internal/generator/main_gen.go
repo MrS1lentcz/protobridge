@@ -13,6 +13,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net/http"
@@ -78,7 +79,7 @@ func main() {
 	defer pool.Close()
 
 	{{ range .Services }}
-	{{ .ConnVar }}, err := pool.Connect({{ .EnvAddr }}, dialOpts("{{ .EnvTLSKey }}")...)
+	{{ .ConnVar }}, err := pool.Connect({{ .EnvAddr }}, dialOpts("{{ .EnvTLSKey }}", "{{ .EnvGRPCOptsKey }}")...)
 	if err != nil {
 		log.Fatalf("connecting to %s: %v", {{ .EnvAddr }}, err)
 	}
@@ -93,6 +94,7 @@ func main() {
 
 	// Router
 	r := chi.NewRouter()
+	r.Use(runtime.CORSMiddleware(runtime.CORSConfigFromEnv()))
 	r.Use(runtime.OTelMiddleware(serviceName))
 	r.Use(runtime.SentryMiddleware())
 
@@ -124,19 +126,32 @@ func main() {
 		Handler: r,
 	}
 
+	// TLS configuration
+	tlsCert := os.Getenv("PROTOBRIDGE_TLS_CERT")
+	tlsKey := os.Getenv("PROTOBRIDGE_TLS_KEY")
+	tlsServerName := os.Getenv("PROTOBRIDGE_TLS_SERVER_NAME")
+	useTLS := tlsCert != "" && tlsKey != ""
+
+	if useTLS {
+		tlsCfg := &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+		if tlsServerName != "" {
+			tlsCfg.ServerName = tlsServerName
+		}
+		srv.TLSConfig = tlsCfg
+	}
+
 	// Graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	go func() {
-		cert := os.Getenv("PROTOBRIDGE_TLS_CERT")
-		key := os.Getenv("PROTOBRIDGE_TLS_KEY")
-
-		log.Printf("protobridge listening on :%s", port)
-		var err error
-		if cert != "" && key != "" {
-			err = srv.ListenAndServeTLS(cert, key)
+		if useTLS {
+			log.Printf("protobridge listening on :%s (TLS)", port)
+			err = srv.ListenAndServeTLS(tlsCert, tlsKey)
 		} else {
+			log.Printf("protobridge listening on :%s", port)
 			err = srv.ListenAndServe()
 		}
 		if err != nil && err != http.ErrServerClosed {
@@ -162,7 +177,7 @@ func requireEnv(key string) string {
 	return val
 }
 
-func dialOpts(tlsEnvKey string) []grpc.DialOption {
+func dialOpts(tlsEnvKey, grpcOptsEnvKey string) []grpc.DialOption {
 	opts := []grpc.DialOption{
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	}
@@ -171,6 +186,25 @@ func dialOpts(tlsEnvKey string) []grpc.DialOption {
 	} else {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
+
+	// Global gRPC options
+	if globalOpts := os.Getenv("PROTOBRIDGE_GRPC_OPTIONS"); globalOpts != "" {
+		parsed, err := runtime.ParseGRPCOptions(globalOpts)
+		if err != nil {
+			log.Fatalf("PROTOBRIDGE_GRPC_OPTIONS: %v", err)
+		}
+		opts = append(opts, parsed...)
+	}
+
+	// Per-service gRPC options override
+	if serviceOpts := os.Getenv(grpcOptsEnvKey); serviceOpts != "" {
+		parsed, err := runtime.ParseGRPCOptions(serviceOpts)
+		if err != nil {
+			log.Fatalf("%s: %v", grpcOptsEnvKey, err)
+		}
+		opts = append(opts, parsed...)
+	}
+
 	return opts
 }
 `))
@@ -182,13 +216,14 @@ type mainData struct {
 }
 
 type mainServiceData struct {
-	ServiceName string
-	PkgAlias    string
-	ProtoImport string
-	EnvAddr     string // variable name, e.g. "voiceChatServiceAddr"
-	EnvAddrKey  string // env key, e.g. "PROTOBRIDGE_VOICE_CHAT_SERVICE_ADDR"
-	EnvTLSKey   string // env key, e.g. "PROTOBRIDGE_VOICE_CHAT_SERVICE_TLS"
-	ConnVar     string // variable name, e.g. "voiceChatServiceConn"
+	ServiceName    string
+	PkgAlias       string
+	ProtoImport    string
+	EnvAddr        string // variable name, e.g. "voiceChatServiceAddr"
+	EnvAddrKey     string // env key, e.g. "PROTOBRIDGE_VOICE_CHAT_SERVICE_ADDR"
+	EnvTLSKey      string // env key, e.g. "PROTOBRIDGE_VOICE_CHAT_SERVICE_TLS"
+	EnvGRPCOptsKey string // env key, e.g. "PROTOBRIDGE_VOICE_CHAT_SERVICE_GRPC_OPTIONS"
+	ConnVar        string // variable name, e.g. "voiceChatServiceConn"
 }
 
 func generateMain(api *parser.ParsedAPI) (string, error) {
@@ -202,8 +237,9 @@ func generateMain(api *parser.ParsedAPI) (string, error) {
 			ProtoImport: guessProtoImport(svc),
 			EnvAddr:     toLowerCamel(svc.Name) + "Addr",
 			EnvAddrKey:  "PROTOBRIDGE_" + screaming + "_ADDR",
-			EnvTLSKey:   "PROTOBRIDGE_" + screaming + "_TLS",
-			ConnVar:     toLowerCamel(svc.Name) + "Conn",
+			EnvTLSKey:      "PROTOBRIDGE_" + screaming + "_TLS",
+			EnvGRPCOptsKey: "PROTOBRIDGE_" + screaming + "_GRPC_OPTIONS",
+			ConnVar:        toLowerCamel(svc.Name) + "Conn",
 		}
 		data.Services = append(data.Services, sd)
 	}
@@ -223,13 +259,14 @@ func generateMain(api *parser.ParsedAPI) (string, error) {
 			connVar := toLowerCamel(api.AuthMethod.ServiceName) + "Conn"
 			data.AuthConnVar = connVar
 			data.Services = append(data.Services, mainServiceData{
-				ServiceName: api.AuthMethod.ServiceName,
-				PkgAlias:    toLowerCamel(api.AuthMethod.ServiceName) + "pb",
-				ProtoImport: api.AuthMethod.ServiceName, // placeholder
-				EnvAddr:     toLowerCamel(api.AuthMethod.ServiceName) + "Addr",
-				EnvAddrKey:  "PROTOBRIDGE_" + screaming + "_ADDR",
-				EnvTLSKey:   "PROTOBRIDGE_" + screaming + "_TLS",
-				ConnVar:     connVar,
+				ServiceName:    api.AuthMethod.ServiceName,
+				PkgAlias:       toLowerCamel(api.AuthMethod.ServiceName) + "pb",
+				ProtoImport:    api.AuthMethod.ServiceName, // placeholder
+				EnvAddr:        toLowerCamel(api.AuthMethod.ServiceName) + "Addr",
+				EnvAddrKey:     "PROTOBRIDGE_" + screaming + "_ADDR",
+				EnvTLSKey:      "PROTOBRIDGE_" + screaming + "_TLS",
+				EnvGRPCOptsKey: "PROTOBRIDGE_" + screaming + "_GRPC_OPTIONS",
+				ConnVar:        connVar,
 			})
 		}
 	}

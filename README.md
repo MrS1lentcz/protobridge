@@ -336,19 +336,51 @@ PROTOBRIDGE_AUTH_SERVICE_ADDR=auth-service:50051
 # HTTP server
 PROTOBRIDGE_PORT=8080                           # default: 8080
 
-# TLS
-PROTOBRIDGE_TLS_CERT=/certs/cert.pem            # optional
-PROTOBRIDGE_TLS_KEY=/certs/key.pem              # optional
-PROTOBRIDGE_TASK_SERVICE_TLS=true               # optional, per service
+# TLS (HTTPS)
+PROTOBRIDGE_TLS_CERT=/certs/cert.pem            # optional, enables HTTPS
+PROTOBRIDGE_TLS_KEY=/certs/key.pem              # optional, required with TLS_CERT
+PROTOBRIDGE_TLS_SERVER_NAME=api.example.com     # optional, TLS server name
+PROTOBRIDGE_TASK_SERVICE_TLS=true               # optional, per-service gRPC TLS
+
+# CORS
+PROTOBRIDGE_CORS_ORIGINS=https://app.example.com,https://admin.example.com  # default: *
+PROTOBRIDGE_CORS_METHODS=GET,POST,PUT,DELETE     # default: GET,POST,PUT,DELETE,PATCH,OPTIONS
+PROTOBRIDGE_CORS_HEADERS=Content-Type,Authorization,X-Request-ID  # default: Content-Type,Authorization
+PROTOBRIDGE_CORS_MAX_AGE=3600                    # default: 86400 (seconds)
 
 # Observability
 PROTOBRIDGE_SENTRY_DSN=https://...@sentry.io/1  # optional
 PROTOBRIDGE_OTEL_ENDPOINT=otel-collector:4317    # optional, OTLP gRPC endpoint
 PROTOBRIDGE_OTEL_SERVICE_NAME=protobridge        # optional, default: "protobridge"
 PROTOBRIDGE_METRICS_PORT=9090                    # optional, Prometheus /metrics
+
+# gRPC client options (global)
+PROTOBRIDGE_GRPC_OPTIONS=max_recv_msg_size=16mb,keepalive_time=30s,compression=gzip
+
+# gRPC client options (per-service override)
+PROTOBRIDGE_TASK_SERVICE_GRPC_OPTIONS=max_recv_msg_size=64mb
 ```
 
 The proxy fails fast on startup if any required variable is missing.
+
+### gRPC client options
+
+The `PROTOBRIDGE_GRPC_OPTIONS` variable configures gRPC dial options for all services. Per-service overrides (`PROTOBRIDGE_<SERVICE>_GRPC_OPTIONS`) are applied on top of global options.
+
+Supported keys:
+
+| Key | Type | Example | Description |
+|---|---|---|---|
+| `max_recv_msg_size` | size | `16mb` | Max inbound message size |
+| `max_send_msg_size` | size | `16mb` | Max outbound message size |
+| `keepalive_time` | duration | `30s` | Interval between keepalive pings |
+| `keepalive_timeout` | duration | `10s` | Timeout for keepalive ping ack |
+| `keepalive_permit_without_stream` | bool | `true` | Allow pings without active streams |
+| `initial_window_size` | size | `1mb` | Per-stream flow control window |
+| `initial_conn_window_size` | size | `2mb` | Per-connection flow control window |
+| `compression` | string | `gzip` | Default compressor (`gzip` or `none`) |
+
+Size values accept human-readable suffixes: `kb`, `mb`, `gb`. Values without suffix are bytes. Durations use Go format (`30s`, `5m`, `1h`).
 
 ## JSON / oneof marshalling
 

@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net/http"
@@ -73,17 +74,17 @@ func main() {
 	defer pool.Close()
 
 	
-	taskServiceConn, err := pool.Connect(taskServiceAddr, dialOpts("PROTOBRIDGE_TASK_SERVICE_TLS")...)
+	taskServiceConn, err := pool.Connect(taskServiceAddr, dialOpts("PROTOBRIDGE_TASK_SERVICE_TLS", "PROTOBRIDGE_TASK_SERVICE_GRPC_OPTIONS")...)
 	if err != nil {
 		log.Fatalf("connecting to %s: %v", taskServiceAddr, err)
 	}
 	
-	healthServiceConn, err := pool.Connect(healthServiceAddr, dialOpts("PROTOBRIDGE_HEALTH_SERVICE_TLS")...)
+	healthServiceConn, err := pool.Connect(healthServiceAddr, dialOpts("PROTOBRIDGE_HEALTH_SERVICE_TLS", "PROTOBRIDGE_HEALTH_SERVICE_GRPC_OPTIONS")...)
 	if err != nil {
 		log.Fatalf("connecting to %s: %v", healthServiceAddr, err)
 	}
 	
-	authServiceConn, err := pool.Connect(authServiceAddr, dialOpts("PROTOBRIDGE_AUTH_SERVICE_TLS")...)
+	authServiceConn, err := pool.Connect(authServiceAddr, dialOpts("PROTOBRIDGE_AUTH_SERVICE_TLS", "PROTOBRIDGE_AUTH_SERVICE_GRPC_OPTIONS")...)
 	if err != nil {
 		log.Fatalf("connecting to %s: %v", authServiceAddr, err)
 	}
@@ -95,6 +96,7 @@ func main() {
 
 	// Router
 	r := chi.NewRouter()
+	r.Use(runtime.CORSMiddleware(runtime.CORSConfigFromEnv()))
 	r.Use(runtime.OTelMiddleware(serviceName))
 	r.Use(runtime.SentryMiddleware())
 
@@ -127,19 +129,32 @@ func main() {
 		Handler: r,
 	}
 
+	// TLS configuration
+	tlsCert := os.Getenv("PROTOBRIDGE_TLS_CERT")
+	tlsKey := os.Getenv("PROTOBRIDGE_TLS_KEY")
+	tlsServerName := os.Getenv("PROTOBRIDGE_TLS_SERVER_NAME")
+	useTLS := tlsCert != "" && tlsKey != ""
+
+	if useTLS {
+		tlsCfg := &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+		if tlsServerName != "" {
+			tlsCfg.ServerName = tlsServerName
+		}
+		srv.TLSConfig = tlsCfg
+	}
+
 	// Graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	go func() {
-		cert := os.Getenv("PROTOBRIDGE_TLS_CERT")
-		key := os.Getenv("PROTOBRIDGE_TLS_KEY")
-
-		log.Printf("protobridge listening on :%s", port)
-		var err error
-		if cert != "" && key != "" {
-			err = srv.ListenAndServeTLS(cert, key)
+		if useTLS {
+			log.Printf("protobridge listening on :%s (TLS)", port)
+			err = srv.ListenAndServeTLS(tlsCert, tlsKey)
 		} else {
+			log.Printf("protobridge listening on :%s", port)
 			err = srv.ListenAndServe()
 		}
 		if err != nil && err != http.ErrServerClosed {
@@ -165,7 +180,7 @@ func requireEnv(key string) string {
 	return val
 }
 
-func dialOpts(tlsEnvKey string) []grpc.DialOption {
+func dialOpts(tlsEnvKey, grpcOptsEnvKey string) []grpc.DialOption {
 	opts := []grpc.DialOption{
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	}
@@ -174,5 +189,24 @@ func dialOpts(tlsEnvKey string) []grpc.DialOption {
 	} else {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
+
+	// Global gRPC options
+	if globalOpts := os.Getenv("PROTOBRIDGE_GRPC_OPTIONS"); globalOpts != "" {
+		parsed, err := runtime.ParseGRPCOptions(globalOpts)
+		if err != nil {
+			log.Fatalf("PROTOBRIDGE_GRPC_OPTIONS: %v", err)
+		}
+		opts = append(opts, parsed...)
+	}
+
+	// Per-service gRPC options override
+	if serviceOpts := os.Getenv(grpcOptsEnvKey); serviceOpts != "" {
+		parsed, err := runtime.ParseGRPCOptions(serviceOpts)
+		if err != nil {
+			log.Fatalf("%s: %v", grpcOptsEnvKey, err)
+		}
+		opts = append(opts, parsed...)
+	}
+
 	return opts
 }
