@@ -18,13 +18,18 @@ Benchmarked on Apple M1 Pro in Docker Desktop with strict resource limits. Full 
 
 | Scenario | Concurrency | Throughput | Success | p50 | p99 |
 |---|---|---|---|---|---|
-| `GET /healthz` (baseline) | 50 | **51,500 req/s** | 100% | 380µs | 15ms |
-| Unary POST (no auth) | 50 | **20,400 req/s** | 100% | 1.2ms | 41ms |
-| Unary POST (with auth) | 50 | **14,200 req/s** | 100% | 2.0ms | 46ms |
-| Unary POST (no auth) | 100 | **23,400 req/s** | 100% | 2.3ms | 48ms |
-| Unary POST (no auth) | 500 | **23,300 req/s** | 100% | 12ms | 71ms |
+| `GET /healthz` (baseline) | 50 | **47,300 req/s** | 100% | 426µs | 22ms |
+| Unary POST (no auth) | 50 | **22,800 req/s** | 100% | 1.1ms | 44ms |
+| Unary POST (with auth) | 50 | **14,400 req/s** | 100% | 2.0ms | 43ms |
+| Unary POST (no auth) | 100 | **25,000 req/s** | 100% | 2.1ms | 50ms |
+| Unary POST (no auth) | 500 | **21,800 req/s** | 100% | 12ms | 77ms |
 
-Proxy container: **1 CPU, 2GB RAM**. gRPC backend: 2 CPUs, 4GB RAM. At 500 concurrent connections on a single CPU core, the proxy sustains **23k req/s with zero errors**. Auth adds ~30% overhead (two sequential gRPC calls per request). gRPC connections scale automatically from 1 to N based on load.
+**Resource usage** (proxy on 1 CPU, 2GB RAM limit):
+- Peak CPU: **103%** (saturated single core under load)
+- Peak RAM: **34 MiB** (1.7% of 2GB limit)
+- Avg RAM: **6 MiB** during benchmark
+
+At 500 concurrent connections on a single CPU core, the proxy sustains **22k req/s with zero errors** using only 34 MiB of memory. Auth adds ~30% overhead (two sequential gRPC calls per request). gRPC connections scale automatically from 1 to N based on load.
 
 ```bash
 cd bench && make isolated   # run it yourself

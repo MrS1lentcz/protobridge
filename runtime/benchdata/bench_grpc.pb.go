@@ -22,6 +22,7 @@ const (
 	BenchService_CreateItem_FullMethodName   = "/benchdata.BenchService/CreateItem"
 	BenchService_Authenticate_FullMethodName = "/benchdata.BenchService/Authenticate"
 	BenchService_Subscribe_FullMethodName    = "/benchdata.BenchService/Subscribe"
+	BenchService_Chat_FullMethodName         = "/benchdata.BenchService/Chat"
 )
 
 // BenchServiceClient is the client API for BenchService service.
@@ -31,6 +32,7 @@ type BenchServiceClient interface {
 	CreateItem(ctx context.Context, in *CreateItemRequest, opts ...grpc.CallOption) (*Item, error)
 	Authenticate(ctx context.Context, in *AuthRequest, opts ...grpc.CallOption) (*AuthResponse, error)
 	Subscribe(ctx context.Context, in *CreateItemRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamMessage], error)
+	Chat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[StreamMessage, StreamMessage], error)
 }
 
 type benchServiceClient struct {
@@ -80,6 +82,19 @@ func (c *benchServiceClient) Subscribe(ctx context.Context, in *CreateItemReques
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type BenchService_SubscribeClient = grpc.ServerStreamingClient[StreamMessage]
 
+func (c *benchServiceClient) Chat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[StreamMessage, StreamMessage], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &BenchService_ServiceDesc.Streams[1], BenchService_Chat_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[StreamMessage, StreamMessage]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type BenchService_ChatClient = grpc.BidiStreamingClient[StreamMessage, StreamMessage]
+
 // BenchServiceServer is the server API for BenchService service.
 // All implementations must embed UnimplementedBenchServiceServer
 // for forward compatibility.
@@ -87,6 +102,7 @@ type BenchServiceServer interface {
 	CreateItem(context.Context, *CreateItemRequest) (*Item, error)
 	Authenticate(context.Context, *AuthRequest) (*AuthResponse, error)
 	Subscribe(*CreateItemRequest, grpc.ServerStreamingServer[StreamMessage]) error
+	Chat(grpc.BidiStreamingServer[StreamMessage, StreamMessage]) error
 	mustEmbedUnimplementedBenchServiceServer()
 }
 
@@ -105,6 +121,9 @@ func (UnimplementedBenchServiceServer) Authenticate(context.Context, *AuthReques
 }
 func (UnimplementedBenchServiceServer) Subscribe(*CreateItemRequest, grpc.ServerStreamingServer[StreamMessage]) error {
 	return status.Errorf(codes.Unimplemented, "method Subscribe not implemented")
+}
+func (UnimplementedBenchServiceServer) Chat(grpc.BidiStreamingServer[StreamMessage, StreamMessage]) error {
+	return status.Errorf(codes.Unimplemented, "method Chat not implemented")
 }
 func (UnimplementedBenchServiceServer) mustEmbedUnimplementedBenchServiceServer() {}
 func (UnimplementedBenchServiceServer) testEmbeddedByValue()                      {}
@@ -174,6 +193,13 @@ func _BenchService_Subscribe_Handler(srv interface{}, stream grpc.ServerStream) 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type BenchService_SubscribeServer = grpc.ServerStreamingServer[StreamMessage]
 
+func _BenchService_Chat_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(BenchServiceServer).Chat(&grpc.GenericServerStream[StreamMessage, StreamMessage]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type BenchService_ChatServer = grpc.BidiStreamingServer[StreamMessage, StreamMessage]
+
 // BenchService_ServiceDesc is the grpc.ServiceDesc for BenchService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -195,6 +221,12 @@ var BenchService_ServiceDesc = grpc.ServiceDesc{
 			StreamName:    "Subscribe",
 			Handler:       _BenchService_Subscribe_Handler,
 			ServerStreams: true,
+		},
+		{
+			StreamName:    "Chat",
+			Handler:       _BenchService_Chat_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
 		},
 	},
 	Metadata: "bench.proto",

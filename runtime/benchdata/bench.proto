@@ -38,4 +38,5 @@ service BenchService {
   rpc CreateItem(CreateItemRequest) returns (Item);
   rpc Authenticate(AuthRequest) returns (AuthResponse);
   rpc Subscribe(CreateItemRequest) returns (stream StreamMessage);
+  rpc Chat(stream StreamMessage) returns (stream StreamMessage);
 }

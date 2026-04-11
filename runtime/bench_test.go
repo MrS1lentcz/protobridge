@@ -57,6 +57,18 @@ func (s *benchServer) Subscribe(req *pb.CreateItemRequest, stream pb.BenchServic
 	return nil
 }
 
+func (s *benchServer) Chat(stream pb.BenchService_ChatServer) error {
+	for {
+		msg, err := stream.Recv()
+		if err != nil {
+			return nil
+		}
+		if err := stream.Send(&pb.StreamMessage{Data: "echo:" + msg.Data}); err != nil {
+			return err
+		}
+	}
+}
+
 // startBenchGRPC starts an in-process gRPC server and returns the client
 // connection. The server is stopped when cleanup runs.
 func startBenchGRPC(tb testing.TB) *grpc.ClientConn {

@@ -12,7 +12,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -68,7 +70,96 @@ func buildE2ERouter(t *testing.T, conn *grpc.ClientConn) chi.Router {
 	// GET /subscribe -- SSE
 	r.Get("/subscribe", buildSSEHandler(client))
 
+	// GET /ws/subscribe -- WebSocket server stream
+	r.Get("/ws/subscribe", buildWSServerStreamHandler(client))
+
+	// GET /ws/chat -- WebSocket bidi stream
+	r.Get("/ws/chat", buildWSBidiHandler(client))
+
 	return r
+}
+
+func buildWSServerStreamHandler(client pb.BenchServiceClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.CloseNow()
+
+		ctx := r.Context()
+		stream, err := client.Subscribe(ctx, &pb.CreateItemRequest{Name: "ws-test"})
+		if err != nil {
+			ws.Close(websocket.StatusInternalError, "stream open failed")
+			return
+		}
+
+		for {
+			msg, err := stream.Recv()
+			if err == io.EOF {
+				ws.Close(websocket.StatusNormalClosure, "stream ended")
+				return
+			}
+			if err != nil {
+				ws.Close(websocket.StatusInternalError, "stream error")
+				return
+			}
+			data, _ := protojson.Marshal(msg)
+			if err := ws.Write(ctx, websocket.MessageText, data); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func buildWSBidiHandler(client pb.BenchServiceClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.CloseNow()
+
+		ctx := r.Context()
+		stream, err := client.Chat(ctx)
+		if err != nil {
+			ws.Close(websocket.StatusInternalError, "stream open failed")
+			return
+		}
+
+		// gRPC → WS
+		go func() {
+			defer func() { recover() }()
+			for {
+				msg, err := stream.Recv()
+				if err != nil {
+					ws.Close(websocket.StatusNormalClosure, "done")
+					return
+				}
+				data, _ := protojson.Marshal(msg)
+				if err := ws.Write(ctx, websocket.MessageText, data); err != nil {
+					return
+				}
+			}
+		}()
+
+		// WS → gRPC
+		for {
+			_, data, err := ws.Read(ctx)
+			if err != nil {
+				stream.CloseSend()
+				return
+			}
+			msg := &pb.StreamMessage{}
+			if err := protojson.Unmarshal(data, msg); err != nil {
+				ws.Close(websocket.StatusInvalidFramePayloadData, "bad json")
+				return
+			}
+			if err := stream.Send(msg); err != nil {
+				return
+			}
+		}
+	}
 }
 
 func TestE2E_HealthEndpoint(t *testing.T) {
@@ -288,4 +379,89 @@ func TestE2E_MultipleRequestsSequential(t *testing.T) {
 			t.Fatalf("request %d: expected 200, got %d", i, resp.StatusCode)
 		}
 	}
+}
+
+func TestE2E_WS_ServerStream(t *testing.T) {
+	conn := startE2EGRPC(t)
+	router := buildE2ERouter(t, conn)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	// Connect via WebSocket.
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/subscribe"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ws, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("WS dial error: %v", err)
+	}
+	defer ws.CloseNow()
+
+	// Receive 100 messages from server stream.
+	received := 0
+	for i := 0; i < 100; i++ {
+		_, data, err := ws.Read(ctx)
+		if err != nil {
+			t.Fatalf("WS read error at message %d: %v", i, err)
+		}
+
+		var msg pb.StreamMessage
+		if err := protojson.Unmarshal(data, &msg); err != nil {
+			t.Fatalf("invalid JSON at message %d: %v", i, err)
+		}
+		if msg.Data == "" {
+			t.Fatalf("empty data at message %d", i)
+		}
+		received++
+	}
+
+	if received != 100 {
+		t.Fatalf("expected 100 WS messages, got %d", received)
+	}
+}
+
+func TestE2E_WS_Bidi(t *testing.T) {
+	conn := startE2EGRPC(t)
+	router := buildE2ERouter(t, conn)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/chat"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ws, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("WS dial error: %v", err)
+	}
+	defer ws.CloseNow()
+
+	// Send 5 messages and verify echo responses.
+	for i := 0; i < 5; i++ {
+		msg := &pb.StreamMessage{Data: fmt.Sprintf("hello-%d", i)}
+		data, _ := protojson.Marshal(msg)
+
+		if err := ws.Write(ctx, websocket.MessageText, data); err != nil {
+			t.Fatalf("WS write error at %d: %v", i, err)
+		}
+
+		_, respData, err := ws.Read(ctx)
+		if err != nil {
+			t.Fatalf("WS read error at %d: %v", i, err)
+		}
+
+		var resp pb.StreamMessage
+		if err := protojson.Unmarshal(respData, &resp); err != nil {
+			t.Fatalf("invalid echo JSON at %d: %v", i, err)
+		}
+
+		expected := fmt.Sprintf("echo:hello-%d", i)
+		if resp.Data != expected {
+			t.Fatalf("expected %q, got %q", expected, resp.Data)
+		}
+	}
+
+	// Clean close.
+	ws.Close(websocket.StatusNormalClosure, "done")
 }

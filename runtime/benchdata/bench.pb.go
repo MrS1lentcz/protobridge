@@ -347,12 +347,13 @@ const file_bench_proto_rawDesc = "" +
 	"\bPriority\x12\x18\n" +
 	"\x14PRIORITY_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fPRIORITY_LOW\x10\x01\x12\x11\n" +
-	"\rPRIORITY_HIGH\x10\x022\xd3\x01\n" +
+	"\rPRIORITY_HIGH\x10\x022\x93\x02\n" +
 	"\fBenchService\x12;\n" +
 	"\n" +
 	"CreateItem\x12\x1c.benchdata.CreateItemRequest\x1a\x0f.benchdata.Item\x12?\n" +
 	"\fAuthenticate\x12\x16.benchdata.AuthRequest\x1a\x17.benchdata.AuthResponse\x12E\n" +
-	"\tSubscribe\x12\x1c.benchdata.CreateItemRequest\x1a\x18.benchdata.StreamMessage0\x01B5Z3github.com/mrs1lentcz/protobridge/runtime/benchdatab\x06proto3"
+	"\tSubscribe\x12\x1c.benchdata.CreateItemRequest\x1a\x18.benchdata.StreamMessage0\x01\x12>\n" +
+	"\x04Chat\x12\x18.benchdata.StreamMessage\x1a\x18.benchdata.StreamMessage(\x010\x01B5Z3github.com/mrs1lentcz/protobridge/runtime/benchdatab\x06proto3"
 
 var (
 	file_bench_proto_rawDescOnce sync.Once
@@ -384,11 +385,13 @@ var file_bench_proto_depIdxs = []int32{
 	1, // 3: benchdata.BenchService.CreateItem:input_type -> benchdata.CreateItemRequest
 	3, // 4: benchdata.BenchService.Authenticate:input_type -> benchdata.AuthRequest
 	1, // 5: benchdata.BenchService.Subscribe:input_type -> benchdata.CreateItemRequest
-	2, // 6: benchdata.BenchService.CreateItem:output_type -> benchdata.Item
-	4, // 7: benchdata.BenchService.Authenticate:output_type -> benchdata.AuthResponse
-	5, // 8: benchdata.BenchService.Subscribe:output_type -> benchdata.StreamMessage
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
+	5, // 6: benchdata.BenchService.Chat:input_type -> benchdata.StreamMessage
+	2, // 7: benchdata.BenchService.CreateItem:output_type -> benchdata.Item
+	4, // 8: benchdata.BenchService.Authenticate:output_type -> benchdata.AuthResponse
+	5, // 9: benchdata.BenchService.Subscribe:output_type -> benchdata.StreamMessage
+	5, // 10: benchdata.BenchService.Chat:output_type -> benchdata.StreamMessage
+	7, // [7:11] is the sub-list for method output_type
+	3, // [3:7] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name
 	3, // [3:3] is the sub-list for extension extendee
 	0, // [0:3] is the sub-list for field type_name
