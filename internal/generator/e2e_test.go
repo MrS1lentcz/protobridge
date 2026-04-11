@@ -187,3 +187,76 @@ func TestE2E_GeneratedCodeIsSyntacticallyValid(t *testing.T) {
 		}
 	}
 }
+
+func TestE2E_StreamingHandlersHaveErrorChecks(t *testing.T) {
+	// Regression: generated code for streaming handlers must check protojson.Marshal
+	// errors instead of using `data, _ := protojson.Marshal(msg)`.
+	api := &internalparser.ParsedAPI{
+		Services: []*internalparser.Service{
+			{
+				Name:         "EventService",
+				ProtoPackage: "events.v1",
+				GoPackage:    "github.com/example/events/v1",
+				Methods: []*internalparser.Method{
+					{
+						Name:       "StreamEvents",
+						InputType:  &internalparser.MessageType{Name: "StreamReq", FullName: ".events.v1.StreamReq"},
+						OutputType: &internalparser.MessageType{Name: "Event", FullName: ".events.v1.Event"},
+						HTTPMethod: "GET",
+						HTTPPath:   "/events/stream",
+						StreamType: internalparser.StreamServer,
+						SSE:        true,
+					},
+					{
+						Name:       "WatchEvents",
+						InputType:  &internalparser.MessageType{Name: "WatchReq", FullName: ".events.v1.WatchReq"},
+						OutputType: &internalparser.MessageType{Name: "Event", FullName: ".events.v1.Event"},
+						HTTPMethod: "GET",
+						HTTPPath:   "/events/watch",
+						StreamType: internalparser.StreamServer,
+						WSMode:     "broadcast",
+					},
+					{
+						Name:       "Chat",
+						InputType:  &internalparser.MessageType{Name: "ChatMsg", FullName: ".events.v1.ChatMsg"},
+						OutputType: &internalparser.MessageType{Name: "ChatReply", FullName: ".events.v1.ChatReply"},
+						HTTPMethod: "GET",
+						HTTPPath:   "/events/chat",
+						StreamType: internalparser.StreamBidi,
+					},
+				},
+			},
+		},
+	}
+
+	resp, err := Generate(api)
+	if err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+
+	// Find the service file.
+	var svcContent string
+	for _, f := range resp.File {
+		if f.GetName() == "event_service.go" {
+			svcContent = f.GetContent()
+			break
+		}
+	}
+	if svcContent == "" {
+		t.Fatal("event_service.go not generated")
+	}
+
+	// The generated code must NOT use `data, _ :=` pattern for protojson.Marshal.
+	if strings.Contains(svcContent, "data, _ :=") {
+		t.Error("generated streaming handler uses 'data, _ :=' which ignores marshal errors")
+	}
+
+	// The generated code must check the error from protojson.Marshal.
+	// Look for the pattern where data is used with an error check.
+	marshalCount := strings.Count(svcContent, "protojson.Marshal(")
+	errCheckCount := strings.Count(svcContent, "data, err := protojson.Marshal(") +
+		strings.Count(svcContent, "result, err := protojson.Marshal(")
+	if marshalCount > 0 && errCheckCount == 0 {
+		t.Error("generated code calls protojson.Marshal but never checks the error")
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	goruntime "runtime"
 	"testing"
 	"time"
 
@@ -450,4 +451,46 @@ func TestWSHandler_StreamSendError(t *testing.T) {
 	// Give time for server to process and close.
 	time.Sleep(100 * time.Millisecond)
 	close(block)
+}
+
+func TestWSHandler_GoroutineCleanupOnDisconnect(t *testing.T) {
+	// Regression: verify that when a WS client disconnects, the recv goroutine
+	// exits and does not leak.
+	block := make(chan struct{})
+	proxy := &blockingStreamProxy{
+		mockStreamProxy: &mockStreamProxy{},
+		block:           block,
+	}
+	factory := &mockStreamFactory{proxy: proxy}
+
+	handler := runtime.WSHandler(nil, factory, runtime.NoAuth(), true)
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	// Snapshot goroutine count before opening the WS connection.
+	goroutinesBefore := goruntime.NumGoroutine()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	ws, _, err := websocket.Dial(ctx, "ws"+srv.URL[4:], nil)
+	if err != nil {
+		t.Fatalf("dial error: %v", err)
+	}
+
+	// Close WS client immediately to trigger disconnect.
+	ws.CloseNow()
+
+	// Unblock the recv goroutine so it can detect the context cancellation.
+	close(block)
+
+	// Give goroutines time to clean up.
+	time.Sleep(300 * time.Millisecond)
+
+	goroutinesAfter := goruntime.NumGoroutine()
+
+	// Allow a tolerance of 5 goroutines for background runtime activity.
+	if goroutinesAfter > goroutinesBefore+5 {
+		t.Fatalf("possible goroutine leak: before=%d, after=%d", goroutinesBefore, goroutinesAfter)
+	}
 }

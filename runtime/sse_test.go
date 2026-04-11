@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
@@ -225,6 +226,57 @@ func TestSSEHandler_NonFlusherWriter(t *testing.T) {
 	if !strings.Contains(w.body.String(), "streaming not supported") {
 		t.Fatalf("expected 'streaming not supported' error, got: %s", w.body.String())
 	}
+}
+
+func TestSSEHandler_WriterDisconnect(t *testing.T) {
+	// Regression: when the request context is cancelled mid-stream (client
+	// disconnects), the handler should return promptly and not hang.
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Stream that delivers messages slowly and cancels context after 2nd msg.
+	msgCount := 0
+	stream := &slowCancelStream{
+		cancel: cancel,
+		count:  &msgCount,
+	}
+
+	opener := &mockServerStreamOpener{stream: stream}
+	handler := runtime.SSEHandler(nil, opener, runtime.NoAuth(), true)
+
+	r := httptest.NewRequest(http.MethodGet, "/stream", nil)
+	r = r.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(w, r)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Handler returned -- not hanging. Good.
+	case <-time.After(3 * time.Second):
+		t.Fatal("SSE handler hung after context cancellation")
+	}
+}
+
+// slowCancelStream delivers one message, then cancels the context, then returns another.
+type slowCancelStream struct {
+	cancel context.CancelFunc
+	count  *int
+}
+
+func (s *slowCancelStream) Recv() (proto.Message, error) {
+	*s.count++
+	if *s.count == 1 {
+		return &pb.SimpleResponse{Id: "msg1"}, nil
+	}
+	// Cancel context before returning second message.
+	s.cancel()
+	// Simulate a slight delay.
+	time.Sleep(10 * time.Millisecond)
+	return &pb.SimpleResponse{Id: "msg2"}, nil
 }
 
 func TestSSEHandler_AuthSuccess(t *testing.T) {

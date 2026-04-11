@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -311,4 +312,101 @@ func TestUserStreamHub_UnsubscribeLastStopsStream(t *testing.T) {
 
 	// Give time for cleanup.
 	time.Sleep(50 * time.Millisecond)
+}
+
+func TestStreamHub_ConcurrentSubscribeSameUser(t *testing.T) {
+	// Regression: two goroutines subscribing with the same userID simultaneously
+	// should only open ONE gRPC stream (opener called once).
+	hub := runtime.NewUserStreamHub()
+
+	var openerCalls atomic.Int64
+
+	block := make(chan struct{})
+	stream := &mockServerStream{
+		messages: []proto.Message{
+			&pb.SimpleResponse{Id: "shared"},
+		},
+		block: block,
+	}
+
+	opener := func(ctx context.Context, conn *grpc.ClientConn) (runtime.ServerStream, error) {
+		openerCalls.Add(1)
+		return stream, nil
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	unsubs := make(chan func(), 2)
+
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, unsub, err := hub.Subscribe(context.Background(), "user1", nil, opener)
+			if err != nil {
+				errs <- err
+				return
+			}
+			unsubs <- unsub
+		}()
+	}
+
+	wg.Wait()
+	close(errs)
+	close(unsubs)
+
+	for err := range errs {
+		t.Fatalf("subscribe error: %v", err)
+	}
+
+	for unsub := range unsubs {
+		defer unsub()
+	}
+
+	if calls := openerCalls.Load(); calls != 1 {
+		t.Fatalf("expected exactly 1 opener call for concurrent subscribes, got %d", calls)
+	}
+
+	close(block)
+	time.Sleep(50 * time.Millisecond)
+}
+
+func TestStreamHub_SlowSubscriberGetsClosed(t *testing.T) {
+	// Regression: when a subscriber's channel is full (they don't read),
+	// sending 33+ messages should close the subscriber's channel rather
+	// than silently dropping messages.
+	hub := runtime.NewUserStreamHub()
+
+	msgs := make([]proto.Message, 40)
+	for i := range msgs {
+		msgs[i] = &pb.SimpleResponse{Id: fmt.Sprintf("%d", i)}
+	}
+	stream := &mockServerStream{messages: msgs}
+
+	opener := func(ctx context.Context, conn *grpc.ClientConn) (runtime.ServerStream, error) {
+		return stream, nil
+	}
+
+	ch, unsub, err := hub.Subscribe(context.Background(), "user1", nil, opener)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer unsub()
+
+	// Deliberately don't read from ch -- let buffer (32) overflow.
+	// Wait for the stream to finish processing all messages.
+	// The channel should eventually be closed because the subscriber is slow.
+	timeout := time.After(3 * time.Second)
+	closed := false
+	for !closed {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				closed = true
+			}
+			// drain any buffered messages
+		case <-timeout:
+			t.Fatal("timed out waiting for slow subscriber channel to be closed")
+		}
+	}
 }

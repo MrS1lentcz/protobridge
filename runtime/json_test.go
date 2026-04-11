@@ -219,6 +219,38 @@ func TestMarshalOneofField_MarshalError(t *testing.T) {
 	_ = err
 }
 
+// errWriter is an http.ResponseWriter whose Write always returns an error.
+type errWriter struct {
+	header http.Header
+	code   int
+}
+
+func (e *errWriter) Header() http.Header        { return e.header }
+func (e *errWriter) WriteHeader(code int)        { e.code = code }
+func (e *errWriter) Write(b []byte) (int, error) { return 0, errors.New("write failed") }
+
+func TestWriteResponse_WriterError(t *testing.T) {
+	// Regression: when the underlying ResponseWriter returns an error on
+	// Write, WriteResponse should not panic. It calls reportError internally.
+	w := &errWriter{header: make(http.Header)}
+	msg := &pb.SimpleResponse{Id: "123", Name: "test"}
+
+	// This must not panic. The function calls reportError on write failure.
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("WriteResponse panicked on write error: %v", r)
+			}
+		}()
+		runtime.WriteResponse(w, http.StatusOK, msg)
+	}()
+
+	// Verify headers were set before the write attempt.
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("expected Content-Type application/json, got %q", ct)
+	}
+}
+
 // Verify DecodeRequest with an io.Reader that fails after partial read.
 func TestDecodeRequest_BodyReadIOError(t *testing.T) {
 	// Create a request with a body that fails on read.
