@@ -25,11 +25,11 @@ func TestOTelMiddleware_ReturnsHandler(t *testing.T) {
 	}
 }
 
-func TestMetricsHandler_ReturnsNil(t *testing.T) {
-	// MetricsHandler is a placeholder that returns nil.
+func TestMetricsHandler_ReturnsHandler(t *testing.T) {
+	// MetricsHandler returns a real promhttp handler.
 	h := runtime.MetricsHandler()
-	if h != nil {
-		t.Fatal("expected nil handler from placeholder")
+	if h == nil {
+		t.Fatal("expected non-nil handler from MetricsHandler")
 	}
 }
 

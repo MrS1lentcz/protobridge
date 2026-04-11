@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"google.golang.org/protobuf/proto"
@@ -13,7 +14,8 @@ func main() {
 
 	out, err := proto.Marshal(resp)
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "protoc-gen-protobridge: failed to marshal response: %v\n", err)
+		os.Exit(1)
 	}
 	os.Stdout.Write(out)
 }

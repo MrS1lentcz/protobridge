@@ -68,10 +68,19 @@ func WSHandler(conn *grpc.ClientConn, factory StreamFactory, auth AuthFunc, excl
 		go func() {
 			defer cancel()
 			for {
+				// Check if the context has been cancelled (e.g. WS client disconnected).
+				if ctx.Err() != nil {
+					return
+				}
 				msg, err := stream.Recv()
 				if err != nil {
 					if err == io.EOF {
 						ws.Close(websocket.StatusNormalClosure, "stream ended")
+						return
+					}
+					// If context was cancelled while blocked in Recv, don't
+					// attempt to write an error frame back to the closed WS.
+					if ctx.Err() != nil {
 						return
 					}
 					ws.Close(websocket.StatusInternalError, "stream error")

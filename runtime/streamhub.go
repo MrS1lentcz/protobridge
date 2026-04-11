@@ -21,11 +21,25 @@ type UserStreamHub struct {
 	streams map[string]*userStream // user_id → active stream
 }
 
+// subscriber wraps a message channel with safe-close semantics.
+type subscriber struct {
+	ch   chan proto.Message
+	once sync.Once
+}
+
+// closeCh safely closes the message channel exactly once.
+func (s *subscriber) closeCh() {
+	s.once.Do(func() {
+		close(s.ch)
+	})
+}
+
 type userStream struct {
 	mu          sync.Mutex
-	subscribers map[int64]chan proto.Message
+	subscribers map[int64]*subscriber
 	nextID      int64
 	cancel      context.CancelFunc
+	starting    bool // true while opener() is in progress, prevents duplicate opens
 }
 
 // NewUserStreamHub creates a new hub.
@@ -52,7 +66,7 @@ func (h *UserStreamHub) Subscribe(
 	us, exists := h.streams[userID]
 	if !exists {
 		us = &userStream{
-			subscribers: make(map[int64]chan proto.Message),
+			subscribers: make(map[int64]*subscriber),
 		}
 		h.streams[userID] = us
 	}
@@ -61,15 +75,24 @@ func (h *UserStreamHub) Subscribe(
 	us.mu.Lock()
 	id := us.nextID
 	us.nextID++
-	ch := make(chan proto.Message, 32)
-	us.subscribers[id] = ch
+	sub := &subscriber{ch: make(chan proto.Message, 32)}
+	us.subscribers[id] = sub
 	subscriberCount := len(us.subscribers)
+
+	// Determine if we need to start the stream. Use the starting flag
+	// to prevent a race where multiple goroutines release h.mu and all
+	// call opener() concurrently.
+	needStart := false
+	if (!exists || subscriberCount == 1) && !us.starting {
+		us.starting = true
+		needStart = true
+	}
 	us.mu.Unlock()
 
 	h.mu.Unlock()
 
 	// If this is the first subscriber, start the gRPC stream
-	if !exists || subscriberCount == 1 {
+	if needStart {
 		streamCtx, cancel := context.WithCancel(ctx)
 		us.mu.Lock()
 		us.cancel = cancel
@@ -78,6 +101,9 @@ func (h *UserStreamHub) Subscribe(
 		stream, err := opener(streamCtx, conn)
 		if err != nil {
 			// Cleanup on failure
+			us.mu.Lock()
+			us.starting = false
+			us.mu.Unlock()
 			h.unsubscribe(userID, id)
 			cancel()
 			return nil, nil, err
@@ -90,7 +116,7 @@ func (h *UserStreamHub) Subscribe(
 		h.unsubscribe(userID, id)
 	}
 
-	return ch, unsub, nil
+	return sub.ch, unsub, nil
 }
 
 func (h *UserStreamHub) receiveLoop(userID string, us *userStream, stream ServerStream) {
@@ -103,8 +129,8 @@ func (h *UserStreamHub) receiveLoop(userID string, us *userStream, stream Server
 		h.mu.Unlock()
 
 		us.mu.Lock()
-		for _, ch := range us.subscribers {
-			close(ch)
+		for _, sub := range us.subscribers {
+			sub.closeCh()
 		}
 		us.subscribers = nil
 		if us.cancel != nil {
@@ -123,11 +149,14 @@ func (h *UserStreamHub) receiveLoop(userID string, us *userStream, stream Server
 		}
 
 		us.mu.Lock()
-		for _, ch := range us.subscribers {
+		for id, sub := range us.subscribers {
 			select {
-			case ch <- msg:
+			case sub.ch <- msg:
 			default:
-				// Slow subscriber, drop message
+				// Slow subscriber: close its channel to force reconnect
+				// instead of silently dropping messages.
+				sub.closeCh()
+				delete(us.subscribers, id)
 			}
 		}
 		us.mu.Unlock()
@@ -143,8 +172,8 @@ func (h *UserStreamHub) unsubscribe(userID string, subID int64) {
 	}
 
 	us.mu.Lock()
-	if ch, ok := us.subscribers[subID]; ok {
-		close(ch)
+	if sub, ok := us.subscribers[subID]; ok {
+		sub.closeCh()
 		delete(us.subscribers, subID)
 	}
 	remaining := len(us.subscribers)

@@ -81,7 +81,10 @@ func SSEHandler(conn *grpc.ClientConn, opener ServerStreamOpener, auth AuthFunc,
 				continue
 			}
 
-			fmt.Fprintf(w, "data: %s\n\n", data)
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+				// Client disconnected.
+				return
+			}
 			flusher.Flush()
 
 			// Check if client disconnected.

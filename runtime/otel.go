@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -106,14 +107,10 @@ func OTelMiddleware(serviceName string) func(http.Handler) http.Handler {
 }
 
 // MetricsHandler returns an HTTP handler that serves Prometheus metrics
-// at /metrics.
+// at /metrics. The OTel Prometheus exporter registered a global collector;
+// promhttp.Handler() serves it.
 func MetricsHandler() http.Handler {
-	// prometheus.New() registered a global collector – the default
-	// promhttp.Handler serves it.
-	//
-	// Import is deferred to avoid pulling promhttp into every binary.
-	// The generated main.go imports promhttp directly.
-	return nil // placeholder – generated code uses promhttp.Handler() directly
+	return promhttp.Handler()
 }
 
 // ActiveConnections provides a gauge for tracking active WS/SSE connections.

@@ -70,7 +70,11 @@ func CORSMiddleware(cfg CORSConfig) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Set CORS headers
+			// Set CORS headers.
+			// Note: We intentionally do NOT set Access-Control-Allow-Credentials.
+			// Using Allow-Origin: "*" with Allow-Credentials: true is forbidden
+			// by the CORS spec and would be rejected by browsers. Since we rely
+			// on Authorization headers (not cookies), credentials mode is not needed.
 			if len(cfg.AllowOrigins) == 1 && cfg.AllowOrigins[0] == "*" {
 				w.Header().Set("Access-Control-Allow-Origin", "*")
 			} else {
