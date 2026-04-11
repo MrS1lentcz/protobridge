@@ -45,8 +45,10 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: go vet
-        run: go vet ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.11.4
 
       - name: go mod tidy check
         run: |
