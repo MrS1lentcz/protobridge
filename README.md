@@ -298,6 +298,31 @@ Error response body:
 
 Server-side errors (5xx) are automatically reported to Sentry.
 
+## Observability
+
+protobridge has built-in OpenTelemetry support for distributed tracing and Prometheus metrics.
+
+### Distributed tracing
+
+Every incoming HTTP request is automatically instrumented:
+- If an upstream proxy (nginx, Envoy) sends a `traceparent` header (W3C TraceContext), protobridge continues the trace
+- If no trace context arrives, a new root span is created
+- Trace context is propagated to all downstream gRPC calls via `otelgrpc` client interceptor
+- Spans include HTTP method, route, status code, and duration
+
+Traces are exported via OTLP (gRPC) to any compatible collector (Jaeger, Tempo, Datadog, etc.).
+
+### Prometheus metrics
+
+When `PROTOBRIDGE_METRICS_PORT` is set, a separate HTTP server exposes `/metrics` in Prometheus format:
+- `http_server_duration` – request latency histogram (method, route, status)
+- `http_server_request_count` – request counter
+- `protobridge.active_connections` – active WS/SSE connections gauge
+
+### Connection health
+
+gRPC connections are automatically monitored via `grpcx.Pool.EnableHealthWatch`. Unhealthy connections (TransientFailure/Shutdown) are reconnected transparently. Unary RPC calls retry once on transient gRPC errors (`Unavailable`, `Aborted`, `ResourceExhausted`).
+
 ## Environment variables
 
 Generated from proto service names in `SCREAMING_SNAKE_CASE`:
@@ -317,6 +342,9 @@ PROTOBRIDGE_TASK_SERVICE_TLS=true               # optional, per service
 
 # Observability
 PROTOBRIDGE_SENTRY_DSN=https://...@sentry.io/1  # optional
+PROTOBRIDGE_OTEL_ENDPOINT=otel-collector:4317    # optional, OTLP gRPC endpoint
+PROTOBRIDGE_OTEL_SERVICE_NAME=protobridge        # optional, default: "protobridge"
+PROTOBRIDGE_METRICS_PORT=9090                    # optional, Prometheus /metrics
 ```
 
 The proxy fails fast on startup if any required variable is missing.

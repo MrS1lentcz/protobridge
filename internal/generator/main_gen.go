@@ -25,6 +25,8 @@ import (
 	"github.com/mrs1lentcz/gox/errorx"
 	"github.com/mrs1lentcz/gox/grpcx"
 	"github.com/mrs1lentcz/gox/sentryx"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -36,6 +38,20 @@ import (
 )
 
 func main() {
+	// OpenTelemetry (tracing + metrics)
+	serviceName := os.Getenv("PROTOBRIDGE_OTEL_SERVICE_NAME")
+	if serviceName == "" {
+		serviceName = "protobridge"
+	}
+	otelShutdown, err := runtime.InitOTel(context.Background(), runtime.OTelConfig{
+		ServiceName:  serviceName,
+		OTLPEndpoint: os.Getenv("PROTOBRIDGE_OTEL_ENDPOINT"),
+	})
+	if err != nil {
+		log.Fatalf("otel init: %v", err)
+	}
+	defer runtime.GracefulShutdownOTel(otelShutdown)
+
 	// Sentry
 	dsn := os.Getenv("PROTOBRIDGE_SENTRY_DSN")
 	if err := sentryx.Init(sentryx.DefaultClientOptions(dsn, "protobridge")); err != nil {
@@ -77,11 +93,25 @@ func main() {
 
 	// Router
 	r := chi.NewRouter()
+	r.Use(runtime.OTelMiddleware(serviceName))
 	r.Use(runtime.SentryMiddleware())
 
 	{{ range .Services -}}
 	register{{ .ServiceName }}(r, {{ .ConnVar }}, "{{ .EnvAddrKey }}", pool, authFn)
 	{{ end }}
+
+	// Prometheus metrics endpoint
+	metricsPort := os.Getenv("PROTOBRIDGE_METRICS_PORT")
+	if metricsPort != "" {
+		go func() {
+			mux := http.NewServeMux()
+			mux.Handle("/metrics", promhttp.Handler())
+			log.Printf("prometheus metrics on :%s/metrics", metricsPort)
+			if err := http.ListenAndServe(":"+metricsPort, mux); err != nil {
+				log.Printf("metrics server error: %v", err)
+			}
+		}()
+	}
 
 	// HTTP server
 	port := os.Getenv("PROTOBRIDGE_PORT")
@@ -133,10 +163,15 @@ func requireEnv(key string) string {
 }
 
 func dialOpts(tlsEnvKey string) []grpc.DialOption {
-	if os.Getenv(tlsEnvKey) == "true" {
-		return []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(nil))}
+	opts := []grpc.DialOption{
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	}
-	return []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	if os.Getenv(tlsEnvKey) == "true" {
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(nil)))
+	} else {
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+	return opts
 }
 `))
 
