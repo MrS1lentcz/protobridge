@@ -89,12 +89,6 @@ func withWSMode(opts *descriptorpb.MethodOptions, mode string) *descriptorpb.Met
 	return opts
 }
 
-func serviceOptsDisplayName(name string) *descriptorpb.ServiceOptions {
-	opts := &descriptorpb.ServiceOptions{}
-	proto.SetExtension(opts, optionspb.E_DisplayName, name)
-	return opts
-}
-
 func serviceOptsPathPrefix(prefix string) *descriptorpb.ServiceOptions {
 	opts := &descriptorpb.ServiceOptions{}
 	proto.SetExtension(opts, optionspb.E_PathPrefix, prefix)

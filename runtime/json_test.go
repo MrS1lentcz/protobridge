@@ -119,7 +119,7 @@ func TestMarshalOneofField_AddsDiscriminator(t *testing.T) {
 	}
 
 	// Verify original field is present.
-	raw, ok = m["body"]
+	_, ok = m["body"]
 	if !ok {
 		t.Fatal("expected body field in output")
 	}

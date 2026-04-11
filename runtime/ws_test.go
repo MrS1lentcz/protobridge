@@ -194,7 +194,7 @@ func TestWSHandler_SendMessage(t *testing.T) {
 
 	// Verify message was sent to stream.
 	time.Sleep(100 * time.Millisecond)
-	if len(blockingProxy.mockStreamProxy.sentMessages) == 0 {
+	if len(blockingProxy.sentMessages) == 0 {
 		t.Fatal("expected at least one sent message")
 	}
 }

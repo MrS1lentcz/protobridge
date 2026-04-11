@@ -73,7 +73,7 @@ func TestReconnectOnTransient_NonTransientError(t *testing.T) {
 func TestUnaryCallWithRetry_TransientError_ReconnectFails(t *testing.T) {
 	// Use a real pool that has no connection for "addr", so Reconnect will fail.
 	pool := grpcx.NewPool()
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	callCount := 0
 	call := func(ctx context.Context, req *pb.SimpleRequest) (*pb.SimpleResponse, error) {
@@ -93,7 +93,7 @@ func TestUnaryCallWithRetry_TransientError_ReconnectFails(t *testing.T) {
 
 func TestUnaryCallWithRetry_TransientError_ReconnectSucceeds(t *testing.T) {
 	pool := grpcx.NewPool()
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	// Pre-connect to an address so Reconnect can succeed.
 	addr := "localhost:0"
@@ -122,7 +122,7 @@ func TestUnaryCallWithRetry_TransientError_ReconnectSucceeds(t *testing.T) {
 
 func TestReconnectOnTransient_TransientError_ReconnectFails(t *testing.T) {
 	pool := grpcx.NewPool()
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	err := status.Error(codes.Unavailable, "down")
 	conn, ok := runtime.ReconnectOnTransient(pool, "nonexistent-addr", err)
@@ -136,7 +136,7 @@ func TestReconnectOnTransient_TransientError_ReconnectFails(t *testing.T) {
 
 func TestReconnectOnTransient_TransientError_ReconnectSucceeds(t *testing.T) {
 	pool := grpcx.NewPool()
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	addr := "localhost:0"
 	_, _ = pool.Connect(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))

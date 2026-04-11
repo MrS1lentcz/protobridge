@@ -143,5 +143,7 @@ func GracefulShutdownOTel(shutdown OTelShutdown) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	shutdown(ctx)
+	if err := shutdown(ctx); err != nil {
+		logError(err)
+	}
 }

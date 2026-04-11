@@ -36,7 +36,7 @@ func startE2EGRPC(t *testing.T) *grpc.ClientConn {
 	srv := grpc.NewServer()
 	pb.RegisterBenchServiceServer(srv, &benchServer{})
 
-	go srv.Serve(lis)
+	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(func() { srv.Stop() })
 
 	conn, err := grpc.NewClient(lis.Addr().String(),
@@ -45,7 +45,7 @@ func startE2EGRPC(t *testing.T) *grpc.ClientConn {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 
 	return conn
 }
@@ -85,7 +85,7 @@ func buildWSServerStreamHandler(client pb.BenchServiceClient) http.HandlerFunc {
 		if err != nil {
 			return
 		}
-		defer ws.CloseNow()
+		defer func() { _ = ws.CloseNow() }()
 
 		ctx := r.Context()
 		stream, err := client.Subscribe(ctx, &pb.CreateItemRequest{Name: "ws-test"})
@@ -118,7 +118,7 @@ func buildWSBidiHandler(client pb.BenchServiceClient) http.HandlerFunc {
 		if err != nil {
 			return
 		}
-		defer ws.CloseNow()
+		defer func() { _ = ws.CloseNow() }()
 
 		ctx := r.Context()
 		stream, err := client.Chat(ctx)
@@ -129,7 +129,7 @@ func buildWSBidiHandler(client pb.BenchServiceClient) http.HandlerFunc {
 
 		// gRPC → WS
 		go func() {
-			defer func() { recover() }()
+			defer func() { _ = recover() }()
 			for {
 				msg, err := stream.Recv()
 				if err != nil {
@@ -147,7 +147,7 @@ func buildWSBidiHandler(client pb.BenchServiceClient) http.HandlerFunc {
 		for {
 			_, data, err := ws.Read(ctx)
 			if err != nil {
-				stream.CloseSend()
+				_ = stream.CloseSend()
 				return
 			}
 			msg := &pb.StreamMessage{}

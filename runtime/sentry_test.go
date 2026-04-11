@@ -27,7 +27,7 @@ func TestSentryMiddleware_PanicRecovery(t *testing.T) {
 func TestSentryMiddleware_NoPanic(t *testing.T) {
 	handler := runtime.SentryMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 
 	w := httptest.NewRecorder()

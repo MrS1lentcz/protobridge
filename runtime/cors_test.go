@@ -3,7 +3,6 @@ package runtime_test
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/mrs1lentcz/protobridge/runtime"
@@ -11,10 +10,10 @@ import (
 
 func TestCORSConfigFromEnv_Defaults(t *testing.T) {
 	// Clear all CORS env vars to ensure defaults.
-	os.Unsetenv("PROTOBRIDGE_CORS_ORIGINS")
-	os.Unsetenv("PROTOBRIDGE_CORS_METHODS")
-	os.Unsetenv("PROTOBRIDGE_CORS_HEADERS")
-	os.Unsetenv("PROTOBRIDGE_CORS_MAX_AGE")
+	t.Setenv("PROTOBRIDGE_CORS_ORIGINS", "")
+	t.Setenv("PROTOBRIDGE_CORS_METHODS", "")
+	t.Setenv("PROTOBRIDGE_CORS_HEADERS", "")
+	t.Setenv("PROTOBRIDGE_CORS_MAX_AGE", "")
 
 	cfg := runtime.CORSConfigFromEnv()
 
@@ -33,8 +32,7 @@ func TestCORSConfigFromEnv_Defaults(t *testing.T) {
 }
 
 func TestCORSConfigFromEnv_CustomOrigins(t *testing.T) {
-	os.Setenv("PROTOBRIDGE_CORS_ORIGINS", "https://a.com, https://b.com")
-	defer os.Unsetenv("PROTOBRIDGE_CORS_ORIGINS")
+	t.Setenv("PROTOBRIDGE_CORS_ORIGINS", "https://a.com, https://b.com")
 
 	cfg := runtime.CORSConfigFromEnv()
 	if len(cfg.AllowOrigins) != 2 {
@@ -46,8 +44,7 @@ func TestCORSConfigFromEnv_CustomOrigins(t *testing.T) {
 }
 
 func TestCORSConfigFromEnv_CustomMethods(t *testing.T) {
-	os.Setenv("PROTOBRIDGE_CORS_METHODS", "GET,POST")
-	defer os.Unsetenv("PROTOBRIDGE_CORS_METHODS")
+	t.Setenv("PROTOBRIDGE_CORS_METHODS", "GET,POST")
 
 	cfg := runtime.CORSConfigFromEnv()
 	if len(cfg.AllowMethods) != 2 {
@@ -56,8 +53,7 @@ func TestCORSConfigFromEnv_CustomMethods(t *testing.T) {
 }
 
 func TestCORSConfigFromEnv_CustomHeaders(t *testing.T) {
-	os.Setenv("PROTOBRIDGE_CORS_HEADERS", "X-Custom, Authorization")
-	defer os.Unsetenv("PROTOBRIDGE_CORS_HEADERS")
+	t.Setenv("PROTOBRIDGE_CORS_HEADERS", "X-Custom, Authorization")
 
 	cfg := runtime.CORSConfigFromEnv()
 	if len(cfg.AllowHeaders) != 2 {
@@ -69,8 +65,7 @@ func TestCORSConfigFromEnv_CustomHeaders(t *testing.T) {
 }
 
 func TestCORSConfigFromEnv_CustomMaxAge(t *testing.T) {
-	os.Setenv("PROTOBRIDGE_CORS_MAX_AGE", "3600")
-	defer os.Unsetenv("PROTOBRIDGE_CORS_MAX_AGE")
+	t.Setenv("PROTOBRIDGE_CORS_MAX_AGE", "3600")
 
 	cfg := runtime.CORSConfigFromEnv()
 	if cfg.MaxAge != 3600 {
@@ -79,8 +74,7 @@ func TestCORSConfigFromEnv_CustomMaxAge(t *testing.T) {
 }
 
 func TestCORSConfigFromEnv_InvalidMaxAge(t *testing.T) {
-	os.Setenv("PROTOBRIDGE_CORS_MAX_AGE", "not-a-number")
-	defer os.Unsetenv("PROTOBRIDGE_CORS_MAX_AGE")
+	t.Setenv("PROTOBRIDGE_CORS_MAX_AGE", "not-a-number")
 
 	cfg := runtime.CORSConfigFromEnv()
 	// Should keep default on parse error.

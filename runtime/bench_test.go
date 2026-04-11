@@ -82,7 +82,7 @@ func startBenchGRPC(tb testing.TB) *grpc.ClientConn {
 	srv := grpc.NewServer()
 	pb.RegisterBenchServiceServer(srv, &benchServer{})
 
-	go srv.Serve(lis)
+	go func() { _ = srv.Serve(lis) }()
 	tb.Cleanup(func() { srv.Stop() })
 
 	conn, err := grpc.NewClient(lis.Addr().String(),
@@ -91,7 +91,7 @@ func startBenchGRPC(tb testing.TB) *grpc.ClientConn {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	tb.Cleanup(func() { conn.Close() })
+	tb.Cleanup(func() { _ = conn.Close() })
 
 	return conn
 }
@@ -202,7 +202,7 @@ func buildSSEHandler(client pb.BenchServiceClient) http.HandlerFunc {
 		for {
 			msg, err := stream.Recv()
 			if err == io.EOF {
-				fmt.Fprintf(w, "event: close\ndata: {}\n\n")
+				_, _ = fmt.Fprintf(w, "event: close\ndata: {}\n\n")
 				flusher.Flush()
 				return
 			}
@@ -210,7 +210,7 @@ func buildSSEHandler(client pb.BenchServiceClient) http.HandlerFunc {
 				return
 			}
 			data, _ := protojson.Marshal(msg)
-			fmt.Fprintf(w, "data: %s\n\n", data)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
 		}
 	}
@@ -242,8 +242,8 @@ func BenchmarkUnaryRequest(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
 			if resp.StatusCode != 200 {
 				b.Fatalf("expected 200, got %d", resp.StatusCode)
 			}
@@ -278,8 +278,8 @@ func BenchmarkUnaryWithAuth(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
 			if resp.StatusCode != 200 {
 				b.Fatalf("expected 200, got %d", resp.StatusCode)
 			}
@@ -305,8 +305,8 @@ func BenchmarkSSEStream(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
 	}
 	b.ReportMetric(float64(b.N)*100, "events")
 }
@@ -338,7 +338,7 @@ func BenchmarkConcurrentConnections(b *testing.B) {
 				return
 			}
 			data, _ := protojson.Marshal(msg)
-			fmt.Fprintf(w, "data: %s\n\n", data)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
 		}
 	}
@@ -377,7 +377,7 @@ func BenchmarkConcurrentConnections(b *testing.B) {
 						contexts[j]()
 					}
 					if responses[j] != nil {
-						responses[j].Body.Close()
+						_ = responses[j].Body.Close()
 					}
 				}
 			}

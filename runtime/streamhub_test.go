@@ -359,9 +359,15 @@ func TestStreamHub_ConcurrentSubscribeSameUser(t *testing.T) {
 		t.Fatalf("subscribe error: %v", err)
 	}
 
+	var unsubFuncs []func()
 	for unsub := range unsubs {
-		defer unsub()
+		unsubFuncs = append(unsubFuncs, unsub)
 	}
+	defer func() {
+		for _, unsub := range unsubFuncs {
+			unsub()
+		}
+	}()
 
 	if calls := openerCalls.Load(); calls != 1 {
 		t.Fatalf("expected exactly 1 opener call for concurrent subscribes, got %d", calls)

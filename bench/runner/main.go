@@ -26,7 +26,7 @@ func main() {
 	if info, err := os.Stat("/results"); err == nil && info.IsDir() {
 		f, err := os.Create("/results/benchmark.txt")
 		if err == nil {
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 			output = io.MultiWriter(os.Stdout, f)
 		}
 	}
