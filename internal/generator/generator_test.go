@@ -762,7 +762,7 @@ func TestGenerateFullPipeline(t *testing.T) {
 	expected := []string{
 		"chat_service.go",
 		"main.go",
-		"openapi.yaml",
+		"schema/openapi.yaml",
 		"Dockerfile",
 		"k8s.yaml",
 		".env.example",
@@ -776,7 +776,7 @@ func TestGenerateFullPipeline(t *testing.T) {
 	}
 
 	// asyncapi.yaml should NOT be present (no streaming).
-	if fileNames["asyncapi.yaml"] {
+	if fileNames["schema/asyncapi.yaml"] {
 		t.Error("asyncapi.yaml should not be generated when there are no streaming methods")
 	}
 }
@@ -794,7 +794,7 @@ func TestGenerateFullPipelineWithStreaming(t *testing.T) {
 		fileNames[f.GetName()] = true
 	}
 
-	if !fileNames["asyncapi.yaml"] {
+	if !fileNames["schema/asyncapi.yaml"] {
 		t.Error("asyncapi.yaml should be generated when streaming methods exist")
 	}
 }

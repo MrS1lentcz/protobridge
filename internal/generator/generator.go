@@ -73,7 +73,7 @@ func Generate(api *parser.ParsedAPI) (*pluginpb.CodeGeneratorResponse, error) {
 
 	// Generate OpenAPI spec.
 	openapiContent := GenerateOpenAPI(api)
-	openapiName := "openapi.yaml"
+	openapiName := "schema/openapi.yaml"
 	resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
 		Name:    &openapiName,
 		Content: &openapiContent,
@@ -82,7 +82,7 @@ func Generate(api *parser.ParsedAPI) (*pluginpb.CodeGeneratorResponse, error) {
 	// Generate AsyncAPI spec for WebSocket endpoints (if any).
 	asyncapiContent := GenerateAsyncAPI(api)
 	if asyncapiContent != "" {
-		asyncapiName := "asyncapi.yaml"
+		asyncapiName := "schema/asyncapi.yaml"
 		resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
 			Name:    &asyncapiName,
 			Content: &asyncapiContent,
