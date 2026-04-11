@@ -1344,3 +1344,35 @@ func TestValidateOneofUniqueness_OutputTypeConflict(t *testing.T) {
 		t.Fatal("expected error for oneof uniqueness conflict via output type")
 	}
 }
+
+func TestExtractGoPackage_WithAlias(t *testing.T) {
+	opts := &descriptorpb.FileOptions{}
+	pkg := "github.com/foo/bar;barpb"
+	opts.GoPackage = &pkg
+	file := &descriptorpb.FileDescriptorProto{Options: opts}
+
+	got := extractGoPackage(file)
+	if got != "github.com/foo/bar" {
+		t.Errorf("extractGoPackage() = %q, want github.com/foo/bar", got)
+	}
+}
+
+func TestExtractGoPackage_WithoutAlias(t *testing.T) {
+	opts := &descriptorpb.FileOptions{}
+	pkg := "github.com/foo/bar"
+	opts.GoPackage = &pkg
+	file := &descriptorpb.FileDescriptorProto{Options: opts}
+
+	got := extractGoPackage(file)
+	if got != "github.com/foo/bar" {
+		t.Errorf("extractGoPackage() = %q, want github.com/foo/bar", got)
+	}
+}
+
+func TestExtractGoPackage_Empty(t *testing.T) {
+	file := &descriptorpb.FileDescriptorProto{}
+	got := extractGoPackage(file)
+	if got != "" {
+		t.Errorf("extractGoPackage() = %q, want empty", got)
+	}
+}
