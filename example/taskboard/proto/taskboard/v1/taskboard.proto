@@ -1,0 +1,239 @@
+syntax = "proto3";
+
+package taskboard.v1;
+
+option go_package = "github.com/mrs1lentcz/protobridge/example/taskboard/gen/grpc/taskboard/v1";
+
+import "google/api/annotations.proto";
+import "protobridge/options.proto";
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+enum TaskPriority {
+  TASK_PRIORITY_UNSPECIFIED = 0;
+  TASK_PRIORITY_LOW = 1 [(protobridge.x_var_name) = "low"];
+  TASK_PRIORITY_MEDIUM = 2 [(protobridge.x_var_name) = "medium"];
+  TASK_PRIORITY_HIGH = 3 [(protobridge.x_var_name) = "high"];
+  TASK_PRIORITY_CRITICAL = 4 [(protobridge.x_var_name) = "critical"];
+}
+
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_TODO = 1 [(protobridge.x_var_name) = "todo"];
+  TASK_STATUS_IN_PROGRESS = 2 [(protobridge.x_var_name) = "in_progress"];
+  TASK_STATUS_DONE = 3 [(protobridge.x_var_name) = "done"];
+}
+
+// =============================================================================
+// Messages – Common
+// =============================================================================
+
+message Task {
+  string id = 1;
+  string title = 2;
+  string description = 3;
+  TaskPriority priority = 4;
+  TaskStatus status = 5;
+  string assignee_id = 6;
+  repeated string tags = 7;
+  oneof attachment {
+    FileAttachment file = 8;
+    LinkAttachment link = 9;
+  }
+  string created_by = 10;
+  string updated_by = 11;
+}
+
+message FileAttachment {
+  string filename = 1;
+  int64 size_bytes = 2;
+  string mime_type = 3;
+}
+
+message LinkAttachment {
+  string url = 1;
+  string title = 2;
+}
+
+// =============================================================================
+// Messages – Auth
+// =============================================================================
+
+message AuthRequest {
+  map<string, string> headers = 1;
+}
+
+message AuthResponse {
+  string user_id = 1;
+  string username = 2;
+  string role = 3;
+}
+
+// =============================================================================
+// Messages – CRUD
+// =============================================================================
+
+message CreateTaskRequest {
+  string title = 1 [(protobridge.required) = true];
+  string description = 2;
+  TaskPriority priority = 3 [(protobridge.required) = true];
+  string assignee_id = 4;
+  repeated string tags = 5;
+}
+
+message GetTaskRequest {
+  // chat_id comes from path param, but we still need the message.
+}
+
+message UpdateTaskRequest {
+  // task_id comes from path param.
+  string title = 1;
+  string description = 2;
+  TaskPriority priority = 3;
+  TaskStatus status = 4;
+  string assignee_id = 5;
+  repeated string tags = 6;
+}
+
+message DeleteTaskRequest {
+  // task_id comes from path param.
+}
+
+message DeleteTaskResponse {
+  bool success = 1;
+  string deleted_by = 2;
+}
+
+message ListTasksRequest {
+  Paging paging = 1;
+  TaskStatus status_filter = 2;
+  TaskPriority priority_filter = 3;
+}
+
+message Paging {
+  int32 page = 1;
+  int32 limit = 2;
+}
+
+message ListTasksResponse {
+  repeated Task tasks = 1;
+  int32 total = 2;
+}
+
+// =============================================================================
+// Messages – Streaming
+// =============================================================================
+
+message TaskEvent {
+  string event_type = 1; // "created", "updated", "deleted"
+  Task task = 2;
+}
+
+message WatchTasksRequest {
+  // Empty – subscribes to all events.
+}
+
+message BulkCreateTaskRequest {
+  string title = 1;
+  string description = 2;
+  TaskPriority priority = 3;
+}
+
+message BulkCreateTaskResponse {
+  int32 created_count = 1;
+  repeated string ids = 2;
+}
+
+message ChatMessage {
+  string content = 1;
+  string sender = 2;
+}
+
+// =============================================================================
+// Messages – Health (no auth)
+// =============================================================================
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  int64 task_count = 2;
+}
+
+// =============================================================================
+// Services
+// =============================================================================
+
+service AuthService {
+  // The auth method – not exposed as REST.
+  rpc Authenticate(AuthRequest) returns (AuthResponse) {
+    option (protobridge.auth_method) = true;
+  }
+}
+
+service TaskService {
+  option (protobridge.display_name) = "Tasks";
+  option (protobridge.path_prefix) = "/api/v1";
+
+  // --- Unary CRUD ---
+
+  rpc CreateTask(CreateTaskRequest) returns (Task) {
+    option (google.api.http) = {post: "/tasks"};
+    option (protobridge.required_headers) = "user_id";
+  }
+
+  rpc GetTask(GetTaskRequest) returns (Task) {
+    option (google.api.http) = {get: "/tasks/{task_id}"};
+    option (protobridge.required_headers) = "user_id";
+  }
+
+  rpc UpdateTask(UpdateTaskRequest) returns (Task) {
+    option (google.api.http) = {put: "/tasks/{task_id}"};
+    option (protobridge.required_headers) = "user_id";
+  }
+
+  rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse) {
+    option (google.api.http) = {delete: "/tasks/{task_id}"};
+    option (protobridge.required_headers) = "user_id";
+  }
+
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse) {
+    option (google.api.http) = {get: "/tasks"};
+    option (protobridge.required_headers) = "user_id";
+    option (protobridge.query_params_target) = "paging";
+  }
+
+  // --- Server streaming: watch task events ---
+
+  rpc WatchTasks(WatchTasksRequest) returns (stream TaskEvent) {
+    option (google.api.http) = {get: "/tasks/watch"};
+    option (protobridge.required_headers) = "user_id";
+  }
+
+  // --- Client streaming: bulk create ---
+
+  rpc BulkCreateTasks(stream BulkCreateTaskRequest) returns (BulkCreateTaskResponse) {
+    option (google.api.http) = {post: "/tasks/bulk"};
+    option (protobridge.required_headers) = "user_id";
+  }
+
+  // --- Bidi streaming: task chat ---
+
+  rpc TaskChat(stream ChatMessage) returns (stream ChatMessage) {
+    option (google.api.http) = {get: "/tasks/{task_id}/chat"};
+    option (protobridge.required_headers) = "user_id";
+  }
+}
+
+service HealthService {
+  option (protobridge.display_name) = "System";
+
+  // --- No auth endpoint ---
+
+  rpc GetHealth(HealthRequest) returns (HealthResponse) {
+    option (google.api.http) = {get: "/health"};
+    option (protobridge.exclude_auth) = true;
+  }
+}

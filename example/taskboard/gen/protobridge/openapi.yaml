@@ -1,0 +1,354 @@
+openapi: '3.1.0'
+info:
+  title: protobridge API
+  version: '1.0.0'
+paths:
+  /api/v1/tasks:
+    post:
+      operationId: TaskService_CreateTask
+      tags:
+        - Tasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: user_id
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          description: Bad Request
+        '401':
+          description: Unauthorized
+        '422':
+          description: Validation Error
+  /api/v1/tasks/{task_id}:
+    get:
+      operationId: TaskService_GetTask
+      tags:
+        - Tasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: user_id
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          description: Bad Request
+        '401':
+          description: Unauthorized
+        '422':
+          description: Validation Error
+  /api/v1/tasks/{task_id}:
+    put:
+      operationId: TaskService_UpdateTask
+      tags:
+        - Tasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: user_id
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskRequest'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          description: Bad Request
+        '401':
+          description: Unauthorized
+        '422':
+          description: Validation Error
+  /api/v1/tasks/{task_id}:
+    delete:
+      operationId: TaskService_DeleteTask
+      tags:
+        - Tasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: user_id
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteTaskResponse'
+        '400':
+          description: Bad Request
+        '401':
+          description: Unauthorized
+        '422':
+          description: Validation Error
+  /api/v1/tasks:
+    get:
+      operationId: TaskService_ListTasks
+      tags:
+        - Tasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: user_id
+          in: header
+          required: true
+          schema:
+            type: string
+        # query params from paging
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTasksResponse'
+        '400':
+          description: Bad Request
+        '401':
+          description: Unauthorized
+        '422':
+          description: Validation Error
+  /health:
+    get:
+      operationId: HealthService_GetHealth
+      tags:
+        - System
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '400':
+          description: Bad Request
+        '401':
+          description: Unauthorized
+        '422':
+          description: Validation Error
+components:
+  schemas:
+    CreateTaskRequest:
+      type: object
+      required:
+        - title
+        - priority
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum:
+            - low
+            - medium
+            - high
+            - critical
+        assignee_id:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum:
+            - low
+            - medium
+            - high
+            - critical
+        status:
+          type: string
+          enum:
+            - todo
+            - in_progress
+            - done
+        assignee_id:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        created_by:
+          type: string
+        updated_by:
+          type: string
+      # oneof: attachment
+    GetTaskRequest:
+      type: object
+    UpdateTaskRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum:
+            - low
+            - medium
+            - high
+            - critical
+        status:
+          type: string
+          enum:
+            - todo
+            - in_progress
+            - done
+        assignee_id:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+    DeleteTaskRequest:
+      type: object
+    DeleteTaskResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        deleted_by:
+          type: string
+    ListTasksRequest:
+      type: object
+      properties:
+        paging:
+          $ref: '#/components/schemas/Paging'
+        status_filter:
+          type: string
+          enum:
+            - todo
+            - in_progress
+            - done
+        priority_filter:
+          type: string
+          enum:
+            - low
+            - medium
+            - high
+            - critical
+    ListTasksResponse:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+        total:
+          type: integer
+          format: int32
+    WatchTasksRequest:
+      type: object
+    TaskEvent:
+      type: object
+      properties:
+        event_type:
+          type: string
+        task:
+          $ref: '#/components/schemas/Task'
+    BulkCreateTaskRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum:
+            - low
+            - medium
+            - high
+            - critical
+    BulkCreateTaskResponse:
+      type: object
+      properties:
+        created_count:
+          type: integer
+          format: int32
+        ids:
+          type: array
+          items:
+            type: string
+    ChatMessage:
+      type: object
+      properties:
+        content:
+          type: string
+        sender:
+          type: string
+    HealthRequest:
+      type: object
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        task_count:
+          type: integer
+          format: int64

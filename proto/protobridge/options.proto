@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package protobridge;
+
+option go_package = "github.com/mrs1lentcz/protobridge/proto/protobridge";
+
+import "google/protobuf/descriptor.proto";
+
+// --- Field options ---
+
+extend google.protobuf.FieldOptions {
+  // Marks a field as required. Validation is enforced at the REST layer.
+  bool required = 50001;
+}
+
+// --- Method options ---
+
+extend google.protobuf.MethodOptions {
+  // Headers that will be extracted from the HTTP request and forwarded
+  // as gRPC metadata. Repeated to allow multiple headers per method.
+  repeated string required_headers = 50010;
+
+  // Field name in the request message that all query params map into.
+  // All query param keys must match fields inside that nested message.
+  string query_params_target = 50011;
+
+  // If true, this method does not require authentication.
+  bool exclude_auth = 50012;
+
+  // Marks this RPC as the authentication method for the entire API.
+  // Input must accept HTTP headers, output must be a serializable User proto.
+  // Exactly one method across all services must have this annotation.
+  bool auth_method = 50020;
+}
+
+// --- Service options ---
+
+extend google.protobuf.ServiceOptions {
+  // Human-readable name for this service group. Used as the OpenAPI tag name.
+  // If not set, the proto service name is used.
+  string display_name = 50040;
+
+  // Path prefix prepended to all HTTP paths in this service.
+  // Must start with "/" and not end with "/". Example: "/api/v1"
+  string path_prefix = 50041;
+}
+
+// --- Enum value options ---
+
+extend google.protobuf.EnumValueOptions {
+  // Override the enum value name in OpenAPI / JSON output.
+  string x_var_name = 50030;
+}

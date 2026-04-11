@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package testdata;
+
+option go_package = "github.com/mrs1lentcz/protobridge/runtime/testdata";
+
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_ACTIVE = 1;
+  STATUS_INACTIVE = 2;
+}
+
+message SimpleRequest {
+  string name = 1;
+  int32 age = 2;
+  Status status = 3;
+}
+
+message NestedRequest {
+  string title = 1;
+  Paging paging = 2;
+}
+
+message Paging {
+  int32 page = 1;
+  int32 limit = 2;
+}
+
+message OneofResponse {
+  string id = 1;
+  oneof content {
+    TextContent text = 2;
+    ImageContent image = 3;
+  }
+}
+
+message TextContent {
+  string body = 1;
+}
+
+message ImageContent {
+  string url = 1;
+  int32 width = 2;
+}
+
+message SimpleResponse {
+  string id = 1;
+  string name = 2;
+  Status status = 3;
+}
