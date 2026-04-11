@@ -1,5 +1,8 @@
 # Binaries
 bin/
+/rest-proxy
+/runner
+/grpc-server
 *.exe
 *.exe~
 *.dll
