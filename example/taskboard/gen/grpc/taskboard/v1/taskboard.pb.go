@@ -1201,94 +1201,6 @@ func (x *ChatMessage) GetSender() string {
 	return ""
 }
 
-type HealthRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *HealthRequest) Reset() {
-	*x = HealthRequest{}
-	mi := &file_taskboard_v1_taskboard_proto_msgTypes[18]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *HealthRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*HealthRequest) ProtoMessage() {}
-
-func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_taskboard_v1_taskboard_proto_msgTypes[18]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
-func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_taskboard_v1_taskboard_proto_rawDescGZIP(), []int{18}
-}
-
-type HealthResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	TaskCount     int64                  `protobuf:"varint,2,opt,name=task_count,json=taskCount,proto3" json:"task_count,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *HealthResponse) Reset() {
-	*x = HealthResponse{}
-	mi := &file_taskboard_v1_taskboard_proto_msgTypes[19]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *HealthResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*HealthResponse) ProtoMessage() {}
-
-func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_taskboard_v1_taskboard_proto_msgTypes[19]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
-func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_taskboard_v1_taskboard_proto_rawDescGZIP(), []int{19}
-}
-
-func (x *HealthResponse) GetStatus() string {
-	if x != nil {
-		return x.Status
-	}
-	return ""
-}
-
-func (x *HealthResponse) GetTaskCount() int64 {
-	if x != nil {
-		return x.TaskCount
-	}
-	return 0
-}
-
 var File_taskboard_v1_taskboard_proto protoreflect.FileDescriptor
 
 const file_taskboard_v1_taskboard_proto_rawDesc = "" +
@@ -1374,12 +1286,7 @@ const file_taskboard_v1_taskboard_proto_rawDesc = "" +
 	"\x03ids\x18\x02 \x03(\tR\x03ids\"?\n" +
 	"\vChatMessage\x12\x18\n" +
 	"\acontent\x18\x01 \x01(\tR\acontent\x12\x16\n" +
-	"\x06sender\x18\x02 \x01(\tR\x06sender\"\x0f\n" +
-	"\rHealthRequest\"G\n" +
-	"\x0eHealthResponse\x12\x16\n" +
-	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1d\n" +
-	"\n" +
-	"task_count\x18\x02 \x01(\x03R\ttaskCount*\xbf\x01\n" +
+	"\x06sender\x18\x02 \x01(\tR\x06sender*\xbf\x01\n" +
 	"\fTaskPriority\x12\x1d\n" +
 	"\x19TASK_PRIORITY_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x11TASK_PRIORITY_LOW\x10\x01\x1a\a\xf2\xb6\x18\x03low\x12$\n" +
@@ -1409,10 +1316,7 @@ const file_taskboard_v1_taskboard_proto_rawDesc = "" +
 	"\x11TaskNotifications\x12\x1f.taskboard.v1.WatchTasksRequest\x1a\x17.taskboard.v1.TaskEvent\"6ҵ\x18\auser_id\xa8\xb6\x18\x01\xb2\xb6\x18\aprivate\x82\xd3\xe4\x93\x02\x16\x12\x14/tasks/notifications0\x01\x12\x89\x01\n" +
 	"\x0fBulkCreateTasks\x12#.taskboard.v1.BulkCreateTaskRequest\x1a$.taskboard.v1.BulkCreateTaskResponse\")ҵ\x18\auser_id\xb2\xb6\x18\aprivate\x82\xd3\xe4\x93\x02\r\"\v/tasks/bulk(\x01\x12y\n" +
 	"\bTaskChat\x12\x19.taskboard.v1.ChatMessage\x1a\x19.taskboard.v1.ChatMessage\"3ҵ\x18\auser_id\xb2\xb6\x18\aprivate\x82\xd3\xe4\x93\x02\x17\x12\x15/tasks/{task_id}/chat(\x010\x01\x12l\n" +
-	"\fActivityFeed\x12\x1f.taskboard.v1.WatchTasksRequest\x1a\x17.taskboard.v1.TaskEvent\" \xb2\xb6\x18\tbroadcast\x82\xd3\xe4\x93\x02\r\x12\v/tasks/feed0\x01\x1a\x14·\x18\x05Tasksʷ\x18\a/api/v12x\n" +
-	"\rHealthService\x12[\n" +
-	"\tGetHealth\x12\x1b.taskboard.v1.HealthRequest\x1a\x1c.taskboard.v1.HealthResponse\"\x13\xe0\xb5\x18\x01\x82\xd3\xe4\x93\x02\t\x12\a/health\x1a\n" +
-	"·\x18\x06SystemBKZIgithub.com/mrs1lentcz/protobridge/example/taskboard/gen/grpc/taskboard/v1b\x06proto3"
+	"\fActivityFeed\x12\x1f.taskboard.v1.WatchTasksRequest\x1a\x17.taskboard.v1.TaskEvent\" \xb2\xb6\x18\tbroadcast\x82\xd3\xe4\x93\x02\r\x12\v/tasks/feed0\x01\x1a\x14·\x18\x05Tasksʷ\x18\a/api/v1BKZIgithub.com/mrs1lentcz/protobridge/example/taskboard/gen/grpc/taskboard/v1b\x06proto3"
 
 var (
 	file_taskboard_v1_taskboard_proto_rawDescOnce sync.Once
@@ -1427,7 +1331,7 @@ func file_taskboard_v1_taskboard_proto_rawDescGZIP() []byte {
 }
 
 var file_taskboard_v1_taskboard_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_taskboard_v1_taskboard_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_taskboard_v1_taskboard_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_taskboard_v1_taskboard_proto_goTypes = []any{
 	(TaskPriority)(0),              // 0: taskboard.v1.TaskPriority
 	(TaskStatus)(0),                // 1: taskboard.v1.TaskStatus
@@ -1449,16 +1353,14 @@ var file_taskboard_v1_taskboard_proto_goTypes = []any{
 	(*BulkCreateTaskRequest)(nil),  // 17: taskboard.v1.BulkCreateTaskRequest
 	(*BulkCreateTaskResponse)(nil), // 18: taskboard.v1.BulkCreateTaskResponse
 	(*ChatMessage)(nil),            // 19: taskboard.v1.ChatMessage
-	(*HealthRequest)(nil),          // 20: taskboard.v1.HealthRequest
-	(*HealthResponse)(nil),         // 21: taskboard.v1.HealthResponse
-	nil,                            // 22: taskboard.v1.AuthRequest.HeadersEntry
+	nil,                            // 20: taskboard.v1.AuthRequest.HeadersEntry
 }
 var file_taskboard_v1_taskboard_proto_depIdxs = []int32{
 	0,  // 0: taskboard.v1.Task.priority:type_name -> taskboard.v1.TaskPriority
 	1,  // 1: taskboard.v1.Task.status:type_name -> taskboard.v1.TaskStatus
 	3,  // 2: taskboard.v1.Task.file:type_name -> taskboard.v1.FileAttachment
 	4,  // 3: taskboard.v1.Task.link:type_name -> taskboard.v1.LinkAttachment
-	22, // 4: taskboard.v1.AuthRequest.headers:type_name -> taskboard.v1.AuthRequest.HeadersEntry
+	20, // 4: taskboard.v1.AuthRequest.headers:type_name -> taskboard.v1.AuthRequest.HeadersEntry
 	0,  // 5: taskboard.v1.CreateTaskRequest.priority:type_name -> taskboard.v1.TaskPriority
 	0,  // 6: taskboard.v1.UpdateTaskRequest.priority:type_name -> taskboard.v1.TaskPriority
 	1,  // 7: taskboard.v1.UpdateTaskRequest.status:type_name -> taskboard.v1.TaskStatus
@@ -1479,21 +1381,19 @@ var file_taskboard_v1_taskboard_proto_depIdxs = []int32{
 	17, // 22: taskboard.v1.TaskService.BulkCreateTasks:input_type -> taskboard.v1.BulkCreateTaskRequest
 	19, // 23: taskboard.v1.TaskService.TaskChat:input_type -> taskboard.v1.ChatMessage
 	16, // 24: taskboard.v1.TaskService.ActivityFeed:input_type -> taskboard.v1.WatchTasksRequest
-	20, // 25: taskboard.v1.HealthService.GetHealth:input_type -> taskboard.v1.HealthRequest
-	6,  // 26: taskboard.v1.AuthService.Authenticate:output_type -> taskboard.v1.AuthResponse
-	2,  // 27: taskboard.v1.TaskService.CreateTask:output_type -> taskboard.v1.Task
-	2,  // 28: taskboard.v1.TaskService.GetTask:output_type -> taskboard.v1.Task
-	2,  // 29: taskboard.v1.TaskService.UpdateTask:output_type -> taskboard.v1.Task
-	11, // 30: taskboard.v1.TaskService.DeleteTask:output_type -> taskboard.v1.DeleteTaskResponse
-	14, // 31: taskboard.v1.TaskService.ListTasks:output_type -> taskboard.v1.ListTasksResponse
-	15, // 32: taskboard.v1.TaskService.WatchTasks:output_type -> taskboard.v1.TaskEvent
-	15, // 33: taskboard.v1.TaskService.TaskNotifications:output_type -> taskboard.v1.TaskEvent
-	18, // 34: taskboard.v1.TaskService.BulkCreateTasks:output_type -> taskboard.v1.BulkCreateTaskResponse
-	19, // 35: taskboard.v1.TaskService.TaskChat:output_type -> taskboard.v1.ChatMessage
-	15, // 36: taskboard.v1.TaskService.ActivityFeed:output_type -> taskboard.v1.TaskEvent
-	21, // 37: taskboard.v1.HealthService.GetHealth:output_type -> taskboard.v1.HealthResponse
-	26, // [26:38] is the sub-list for method output_type
-	14, // [14:26] is the sub-list for method input_type
+	6,  // 25: taskboard.v1.AuthService.Authenticate:output_type -> taskboard.v1.AuthResponse
+	2,  // 26: taskboard.v1.TaskService.CreateTask:output_type -> taskboard.v1.Task
+	2,  // 27: taskboard.v1.TaskService.GetTask:output_type -> taskboard.v1.Task
+	2,  // 28: taskboard.v1.TaskService.UpdateTask:output_type -> taskboard.v1.Task
+	11, // 29: taskboard.v1.TaskService.DeleteTask:output_type -> taskboard.v1.DeleteTaskResponse
+	14, // 30: taskboard.v1.TaskService.ListTasks:output_type -> taskboard.v1.ListTasksResponse
+	15, // 31: taskboard.v1.TaskService.WatchTasks:output_type -> taskboard.v1.TaskEvent
+	15, // 32: taskboard.v1.TaskService.TaskNotifications:output_type -> taskboard.v1.TaskEvent
+	18, // 33: taskboard.v1.TaskService.BulkCreateTasks:output_type -> taskboard.v1.BulkCreateTaskResponse
+	19, // 34: taskboard.v1.TaskService.TaskChat:output_type -> taskboard.v1.ChatMessage
+	15, // 35: taskboard.v1.TaskService.ActivityFeed:output_type -> taskboard.v1.TaskEvent
+	25, // [25:36] is the sub-list for method output_type
+	14, // [14:25] is the sub-list for method input_type
 	14, // [14:14] is the sub-list for extension type_name
 	14, // [14:14] is the sub-list for extension extendee
 	0,  // [0:14] is the sub-list for field type_name
@@ -1514,9 +1414,9 @@ func file_taskboard_v1_taskboard_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_taskboard_v1_taskboard_proto_rawDesc), len(file_taskboard_v1_taskboard_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   21,
+			NumMessages:   19,
 			NumExtensions: 0,
-			NumServices:   3,
+			NumServices:   2,
 		},
 		GoTypes:           file_taskboard_v1_taskboard_proto_goTypes,
 		DependencyIndexes: file_taskboard_v1_taskboard_proto_depIdxs,

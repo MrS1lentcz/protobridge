@@ -25,19 +25,17 @@ spec:
               value: "8080"
             - name: PROTOBRIDGE_TASK_SERVICE_ADDR
               value: "task_service:50051"  # TODO: set actual address
-            - name: PROTOBRIDGE_HEALTH_SERVICE_ADDR
-              value: "health_service:50051"  # TODO: set actual address
             - name: PROTOBRIDGE_AUTH_SERVICE_ADDR
               value: "auth_service:50051"  # TODO: set actual address
           readinessProbe:
             httpGet:
-              path: /health
+              path: /healthz
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /health
+              path: /healthz
               port: 8080
             initialDelaySeconds: 10
             periodSeconds: 30

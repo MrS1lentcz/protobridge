@@ -152,17 +152,6 @@ message ChatMessage {
 }
 
 // =============================================================================
-// Messages – Health (no auth)
-// =============================================================================
-
-message HealthRequest {}
-
-message HealthResponse {
-  string status = 1;
-  int64 task_count = 2;
-}
-
-// =============================================================================
 // Services
 // =============================================================================
 
@@ -246,13 +235,3 @@ service TaskService {
   }
 }
 
-service HealthService {
-  option (protobridge.display_name) = "System";
-
-  // --- No auth endpoint ---
-
-  rpc GetHealth(HealthRequest) returns (HealthResponse) {
-    option (google.api.http) = {get: "/health"};
-    option (protobridge.exclude_auth) = true;
-  }
-}

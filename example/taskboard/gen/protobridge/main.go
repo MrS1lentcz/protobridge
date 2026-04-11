@@ -27,7 +27,6 @@ import (
 
 	"github.com/mrs1lentcz/protobridge/runtime"
 	taskServicepb "taskboard/v1"
-	healthServicepb "taskboard/v1"
 	authServicepb "AuthService"
 	
 )
@@ -64,7 +63,6 @@ func main() {
 
 	// Validate required environment variables
 	taskServiceAddr := requireEnv("PROTOBRIDGE_TASK_SERVICE_ADDR")
-	healthServiceAddr := requireEnv("PROTOBRIDGE_HEALTH_SERVICE_ADDR")
 	authServiceAddr := requireEnv("PROTOBRIDGE_AUTH_SERVICE_ADDR")
 	
 
@@ -77,11 +75,6 @@ func main() {
 	taskServiceConn, err := pool.Connect(taskServiceAddr, dialOpts("PROTOBRIDGE_TASK_SERVICE_TLS", "PROTOBRIDGE_TASK_SERVICE_GRPC_OPTIONS")...)
 	if err != nil {
 		log.Fatalf("connecting to %s: %v", taskServiceAddr, err)
-	}
-	
-	healthServiceConn, err := pool.Connect(healthServiceAddr, dialOpts("PROTOBRIDGE_HEALTH_SERVICE_TLS", "PROTOBRIDGE_HEALTH_SERVICE_GRPC_OPTIONS")...)
-	if err != nil {
-		log.Fatalf("connecting to %s: %v", healthServiceAddr, err)
 	}
 	
 	authServiceConn, err := pool.Connect(authServiceAddr, dialOpts("PROTOBRIDGE_AUTH_SERVICE_TLS", "PROTOBRIDGE_AUTH_SERVICE_GRPC_OPTIONS")...)
@@ -100,8 +93,10 @@ func main() {
 	r.Use(runtime.OTelMiddleware(serviceName))
 	r.Use(runtime.SentryMiddleware())
 
+	// Proxy health endpoint (always available, independent of backend services)
+	r.Get("/healthz", runtime.HealthHandler())
+
 	registerTaskService(r, taskServiceConn, "PROTOBRIDGE_TASK_SERVICE_ADDR", pool, authFn)
-	registerHealthService(r, healthServiceConn, "PROTOBRIDGE_HEALTH_SERVICE_ADDR", pool, authFn)
 	registerAuthService(r, authServiceConn, "PROTOBRIDGE_AUTH_SERVICE_ADDR", pool, authFn)
 	
 

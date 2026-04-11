@@ -27,7 +27,6 @@ func main() {
 		watchers: make(map[string]chan *pb.TaskEvent),
 	}
 	authSvc := &authService{}
-	healthSvc := &healthService{tasks: svc}
 
 	log.Println("starting gRPC server on :50051")
 	if err := server.Run(context.Background(), server.Config{
@@ -36,7 +35,6 @@ func main() {
 		RegisterServices: func(s *grpc.Server) error {
 			pb.RegisterTaskServiceServer(s, svc)
 			pb.RegisterAuthServiceServer(s, authSvc)
-			pb.RegisterHealthServiceServer(s, healthSvc)
 			return nil
 		},
 	}); err != nil {
@@ -334,22 +332,6 @@ func (s *taskService) broadcast(event *pb.TaskEvent) {
 		default:
 		}
 	}
-}
-
-// =============================================================================
-// Health Service
-// =============================================================================
-
-type healthService struct {
-	pb.UnimplementedHealthServiceServer
-	tasks *taskService
-}
-
-func (s *healthService) GetHealth(ctx context.Context, req *pb.HealthRequest) (*pb.HealthResponse, error) {
-	return &pb.HealthResponse{
-		Status:    "ok",
-		TaskCount: int64(s.tasks.Count()),
-	}, nil
 }
 
 // =============================================================================
