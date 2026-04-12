@@ -15,6 +15,15 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+// Tuned client: default MaxConnsPerHost is 512 which caps concurrency.
+// We raise it to match our max benchmark concurrency.
+var client = &fasthttp.Client{
+	MaxConnsPerHost:     20000,
+	MaxIdleConnDuration: 90 * time.Second,
+	ReadTimeout:         30 * time.Second,
+	WriteTimeout:        30 * time.Second,
+}
+
 var output io.Writer = os.Stdout
 
 func main() {
@@ -82,7 +91,7 @@ func doGet(url string) int {
 	req.SetRequestURI(url)
 	req.Header.SetMethod("GET")
 
-	if err := fasthttp.Do(req, resp); err != nil {
+	if err := client.Do(req, resp); err != nil {
 		return -1
 	}
 	return resp.StatusCode()
@@ -102,7 +111,7 @@ func doPost(url string, body []byte, headers map[string]string) int {
 	}
 	req.SetBody(body)
 
-	if err := fasthttp.Do(req, resp); err != nil {
+	if err := client.Do(req, resp); err != nil {
 		return -1
 	}
 	return resp.StatusCode()
