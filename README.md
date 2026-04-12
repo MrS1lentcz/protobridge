@@ -23,18 +23,20 @@ Benchmarked on Apple M1 Pro in Docker Desktop with strict resource limits. Full 
 
 | Scenario | Concurrency | Throughput | Success | p50 | p99 |
 |---|---|---|---|---|---|
-| `GET /healthz` (baseline) | 50 | **47,300 req/s** | 100% | 426µs | 22ms |
-| Unary POST (no auth) | 50 | **22,800 req/s** | 100% | 1.1ms | 44ms |
-| Unary POST (with auth) | 50 | **14,400 req/s** | 100% | 2.0ms | 43ms |
-| Unary POST (no auth) | 100 | **25,000 req/s** | 100% | 2.1ms | 50ms |
-| Unary POST (no auth) | 500 | **21,800 req/s** | 100% | 12ms | 77ms |
+| Unary POST (no auth) | 50 | **20,800 req/s** | 100% | 1.3ms | 41ms |
+| Unary POST (with auth) | 50 | **12,000 req/s** | 100% | 2.3ms | 43ms |
+| Unary POST (no auth) | 100 | **21,200 req/s** | 100% | 2.3ms | 48ms |
+| Unary POST (no auth) | 500 | **19,300 req/s** | 100% | 14ms | 90ms |
+| Unary POST (no auth) | 1,000 | **18,900 req/s** | 100% | 55ms | 163ms |
+| Unary POST (no auth) | 5,000 | **15,900 req/s** | 100% | 294ms | 881ms |
+| Unary POST (no auth) | 10,000 | **18,200 req/s** | 100% | 514ms | 1.48s |
 
 **Resource usage** (proxy on 1 CPU, 2GB RAM limit):
-- Peak CPU: **103%** (saturated single core under load)
-- Peak RAM: **34 MiB** (1.7% of 2GB limit)
-- Avg RAM: **6 MiB** during benchmark
+- Peak CPU: **109%** (saturated single core under load)
+- Peak RAM: **488 MiB** while holding 10,000 concurrent connections
+- Avg RAM: **62 MiB** across the full run
 
-At 500 concurrent connections on a single CPU core, the proxy sustains **22k req/s with zero errors** using only 34 MiB of memory. Auth adds ~30% overhead (two sequential gRPC calls per request). gRPC connections scale automatically from 1 to N based on load.
+The proxy sustains **zero errors up to 10,000 concurrent connections** on a single CPU core. Throughput plateaus around 19k req/s as CPU saturates; latency grows proportionally with queue depth. Auth adds ~40% overhead (two sequential gRPC calls per request). gRPC connections scale automatically from 1 to N based on load.
 
 ```bash
 cd bench && make isolated   # run it yourself
