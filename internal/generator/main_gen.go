@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -155,8 +156,16 @@ func main() {
 	}
 
 	srv := &http.Server{
-		Addr:    ":" + port,
-		Handler: r,
+		Addr:              ":" + port,
+		Handler:           r,
+		ReadHeaderTimeout: envDuration("PROTOBRIDGE_READ_HEADER_TIMEOUT", 10*time.Second),
+		ReadTimeout:       envDuration("PROTOBRIDGE_READ_TIMEOUT", 30*time.Second),
+		// WriteTimeout is 0 by default to support long-lived WebSocket/SSE
+		// connections. Set PROTOBRIDGE_WRITE_TIMEOUT to enforce a limit for
+		// unary-only deployments.
+		WriteTimeout:   envDuration("PROTOBRIDGE_WRITE_TIMEOUT", 0),
+		IdleTimeout:    envDuration("PROTOBRIDGE_IDLE_TIMEOUT", 120*time.Second),
+		MaxHeaderBytes: envInt("PROTOBRIDGE_MAX_HEADER_BYTES", 1<<20), // 1 MiB
 	}
 
 	// TLS configuration
@@ -208,6 +217,30 @@ func requireEnv(key string) string {
 		log.Fatalf("required environment variable %s is not set", key)
 	}
 	return val
+}
+
+func envDuration(key string, def time.Duration) time.Duration {
+	val := os.Getenv(key)
+	if val == "" {
+		return def
+	}
+	d, err := time.ParseDuration(val)
+	if err != nil {
+		log.Fatalf("%s: invalid duration %q: %v", key, val, err)
+	}
+	return d
+}
+
+func envInt(key string, def int) int {
+	val := os.Getenv(key)
+	if val == "" {
+		return def
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		log.Fatalf("%s: invalid integer %q: %v", key, val, err)
+	}
+	return n
 }
 
 func dialOpts(tlsEnvKey, grpcOptsEnvKey string) []grpc.DialOption {

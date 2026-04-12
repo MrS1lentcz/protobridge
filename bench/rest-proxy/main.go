@@ -125,9 +125,18 @@ func main() {
 		runtime.WriteResponse(w, http.StatusOK, resp)
 	})
 
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+
 	log.Printf("bench REST proxy on :%s → gRPC %s (scaled: %d streams/conn, max %d conns)",
 		port, addr, scalingCfg.StreamsPerConn, scalingCfg.MaxConns)
-	if err := http.ListenAndServe(":"+port, r); err != nil {
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }

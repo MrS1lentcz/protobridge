@@ -40,6 +40,12 @@ func GenerateEnvExample(api *parser.ParsedAPI) string {
 	// HTTP server
 	b.WriteString("\n# --- HTTP server ---\n")
 	b.WriteString("PROTOBRIDGE_PORT=8080\n")
+	b.WriteString("\n# --- HTTP server timeouts (defense against Slowloris + resource leaks) ---\n")
+	b.WriteString("# PROTOBRIDGE_READ_HEADER_TIMEOUT=10s\n")
+	b.WriteString("# PROTOBRIDGE_READ_TIMEOUT=30s\n")
+	b.WriteString("# PROTOBRIDGE_WRITE_TIMEOUT=0s           # 0 = disabled (default, required for WS/SSE)\n")
+	b.WriteString("# PROTOBRIDGE_IDLE_TIMEOUT=120s          # keep-alive idle timeout\n")
+	b.WriteString("# PROTOBRIDGE_MAX_HEADER_BYTES=1048576   # 1 MiB\n")
 
 	// TLS
 	b.WriteString("\n# --- TLS (HTTPS) ---\n")

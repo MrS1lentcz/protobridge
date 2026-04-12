@@ -7,103 +7,103 @@ proxy is healthy
 --- warm-up ---
 --- warm-up ---
 requests: 5000, concurrency: 100
-duration:    322ms
-throughput:  15538 req/s
+duration:    1.005s
+throughput:  4977 req/s
 success:     5000 / 5000 (100.0%)
-latency p50: 4.115916ms
-latency p95: 15.947125ms
-latency p99: 39.318166ms
-latency max: 47.230209ms
+latency p50: 8.921958ms
+latency p95: 83.819125ms
+latency p99: 107.194334ms
+latency max: 167.113292ms
 
 --- GET /healthz (baseline) ---
 requests: 50000, concurrency: 50
-duration:    1.058s
-throughput:  47271 req/s
+duration:    1.035s
+throughput:  48305 req/s
 success:     50000 / 50000 (100.0%)
-latency p50: 426.209µs
-latency p95: 2.440042ms
-latency p99: 22.289917ms
-latency max: 54.434834ms
+latency p50: 395.25µs
+latency p95: 2.533459ms
+latency p99: 11.735417ms
+latency max: 49.795583ms
 
 --- POST /items/noauth (unary, no auth) ---
 requests: 50000, concurrency: 50
-duration:    2.188s
-throughput:  22849 req/s
+duration:    2.404s
+throughput:  20799 req/s
 success:     50000 / 50000 (100.0%)
-latency p50: 1.086792ms
-latency p95: 3.267541ms
-latency p99: 44.277917ms
-latency max: 49.854042ms
+latency p50: 1.266125ms
+latency p95: 4.2085ms
+latency p99: 40.946666ms
+latency max: 61.629333ms
 
 --- POST /items (unary, with auth) ---
 requests: 50000, concurrency: 50
-duration:    3.483s
-throughput:  14356 req/s
+duration:    4.168s
+throughput:  11995 req/s
 success:     50000 / 50000 (100.0%)
-latency p50: 1.963625ms
-latency p95: 6.437917ms
-latency p99: 43.445ms
-latency max: 59.515917ms
+latency p50: 2.275375ms
+latency p95: 12.062333ms
+latency p99: 43.178292ms
+latency max: 62.770209ms
 
 --- POST /items/noauth (100 concurrent) ---
 requests: 100000, concurrency: 100
-duration:    3.993s
-throughput:  25046 req/s
+duration:    4.776s
+throughput:  20939 req/s
 success:     100000 / 100000 (100.0%)
-latency p50: 2.099917ms
-latency p95: 6.149208ms
-latency p99: 50.160166ms
-latency max: 57.829625ms
+latency p50: 2.388625ms
+latency p95: 12.937292ms
+latency p99: 51.006042ms
+latency max: 187.1925ms
 
 --- POST /items/noauth (500 concurrent) ---
 requests: 100000, concurrency: 500
-duration:    4.58s
-throughput:  21832 req/s
+duration:    6.091s
+throughput:  16418 req/s
 success:     100000 / 100000 (100.0%)
-latency p50: 12.458792ms
-latency p95: 66.401417ms
-latency p99: 77.200833ms
-latency max: 153.045042ms
+latency p50: 15.283583ms
+latency p95: 75.929625ms
+latency p99: 160.2225ms
+latency max: 347.805292ms
 
 --- POST /items/noauth (1000 concurrent) ---
 requests: 100000, concurrency: 1000
-duration:    151ms
-throughput:  660242 req/s
-success:     3638 / 100000 (3.6%)
-errors:      96362 (conn: 96362, 4xx: 0, 5xx: 0)
-latency p50: 583ns
-latency p95: 2.917µs
-latency p99: 23.092708ms
-latency max: 51.124792ms
+duration:    111ms
+throughput:  904430 req/s
+success:     3043 / 100000 (3.0%)
+errors:      96957 (conn: 96957, 4xx: 0, 5xx: 0)
+latency p50: 666ns
+latency p95: 2.417µs
+latency p99: 19.50375ms
+latency max: 46.167375ms
 
 --- POST /items/noauth (5000 concurrent) ---
 requests: 100000, concurrency: 5000
-duration:    155ms
-throughput:  646529 req/s
-success:     2782 / 100000 (2.8%)
-errors:      97218 (conn: 97218, 4xx: 0, 5xx: 0)
+duration:    150ms
+throughput:  667859 req/s
+success:     2018 / 100000 (2.0%)
+errors:      97982 (conn: 97982, 4xx: 0, 5xx: 0)
 latency p50: 1.167µs
-latency p95: 4.083µs
-latency p99: 35.137459ms
-latency max: 58.104208ms
+latency p95: 3.042µs
+latency p99: 30.308084ms
+latency max: 79.0405ms
 
 --- POST /items/noauth (10000 concurrent) ---
 requests: 100000, concurrency: 10000
-duration:    160ms
-throughput:  625921 req/s
-success:     3506 / 100000 (3.5%)
-errors:      96494 (conn: 96494, 4xx: 0, 5xx: 0)
-latency p50: 1.375µs
-latency p95: 4.125µs
-latency p99: 27.232625ms
-latency max: 50.922375ms
+duration:    235ms
+throughput:  425137 req/s
+success:     3225 / 100000 (3.2%)
+errors:      96775 (conn: 96775, 4xx: 0, 5xx: 0)
+latency p50: 1.209µs
+latency p95: 15.875µs
+latency p99: 46.155916ms
+latency max: 106.60125ms
 
 
 === Resource Usage ===
 Container limits: rest-proxy 1 CPU/2GB, grpc-server 2 CPUs/4GB
-rest-proxy peak CPU:  103.5%
-rest-proxy avg CPU:   23.0%
-rest-proxy peak RAM:  33.6 MiB
-rest-proxy avg RAM:   6.3 MiB
-grpc-server peak CPU: 53.4%
-grpc-server peak RAM: 8.0 MiB
+rest-proxy peak CPU:  114.5%
+rest-proxy avg CPU:   21.4%
+rest-proxy peak RAM:  34.9 MiB
+rest-proxy avg RAM:   14.4 MiB
+grpc-server peak CPU: 52.4%
+grpc-server peak RAM: 11.7 MiB
