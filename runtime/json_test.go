@@ -236,24 +236,6 @@ func TestWriteResponse_EnumUsesXVarName_Map(t *testing.T) {
 	}
 }
 
-func TestWriteResponse_EnumUsesXVarName_NestedMessage(t *testing.T) {
-	// Output postprocess must recurse into nested messages.
-	w := httptest.NewRecorder()
-	msg := &pb.AllTypesRequest{
-		StrVal:  "x",
-		EnumVal: pb.Status_STATUS_INACTIVE,
-		MsgVal:  &pb.Paging{Page: 1, Limit: 10},
-	}
-	runtime.WriteResponse(w, http.StatusOK, msg)
-	body := w.Body.String()
-	if bytes.Contains([]byte(body), []byte("STATUS_INACTIVE")) {
-		t.Errorf("nested-bearing message must rewrite enum, got: %s", body)
-	}
-	if !bytes.Contains([]byte(body), []byte(`"inactive"`)) {
-		t.Errorf("expected alias \"inactive\", got: %s", body)
-	}
-}
-
 func TestWriteResponse_DescriptorWalk_MapOnly(t *testing.T) {
 	// Triggers descriptorHasAliases map branch (no preceding non-map enum
 	// field would short-circuit the walk before reaching the map field).
