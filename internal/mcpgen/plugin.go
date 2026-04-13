@@ -119,6 +119,21 @@ func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorRespo
 		Name: &mainName, Content: &mainContent,
 	})
 
+	// Schema artifacts: openrpc.json for client codegen (openrpc-generator
+	// produces TS/Go/Python wrappers), and mcp-tools.json as a cached
+	// `tools/list` response for MCP-native introspection tools.
+	openRPC := generateOpenRPC(api)
+	openRPCName := "schema/openrpc.json"
+	resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
+		Name: &openRPCName, Content: &openRPC,
+	})
+
+	mcpTools := generateMCPTools(api)
+	mcpToolsName := "schema/mcp-tools.json"
+	resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
+		Name: &mcpToolsName, Content: &mcpTools,
+	})
+
 	return resp, nil
 }
 

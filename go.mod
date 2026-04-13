@@ -6,6 +6,7 @@ require (
 	github.com/coder/websocket v1.8.14
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
+	github.com/mark3labs/mcp-go v0.47.1
 	github.com/mrs1lentcz/gox v0.6.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/valyala/fasthttp v1.70.0
@@ -32,7 +33,6 @@ require (
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
-	github.com/mark3labs/mcp-go v0.47.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.67.5 // indirect

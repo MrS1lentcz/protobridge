@@ -81,12 +81,43 @@ Optional: `--mcp_opt=forward=session_id;auth_token` overrides the identity keys 
 
 ```
 gen/mcp/
-├── main.go              # entry point, package main
-└── handler/             # one file per gRPC service, package handler
-    └── tool_service.go
+├── main.go                    # entry point, package main
+├── handler/                   # one file per gRPC service, package handler
+│   └── tool_service.go
+└── schema/
+    ├── openrpc.json           # OpenRPC 1.3.2 — for client codegen
+    └── mcp-tools.json         # cached `tools/list` response — for MCP introspection
 ```
 
 Connect to the backend the same way as the REST proxy (via `PROTOBRIDGE_<SERVICE>_ADDR` env vars). Then choose a transport.
+
+## Schema artifacts for client codegen
+
+Two schema files are emitted alongside the proxy so you don't have to boot the server to discover its tools.
+
+### `schema/openrpc.json` — for typed client codegen
+
+[OpenRPC](https://open-rpc.org/) is the JSON-RPC equivalent of OpenAPI. Each MCP tool is exposed as an OpenRPC method with named params (one per top-level proto field) and a typed result schema. Run [`openrpc-generator`](https://github.com/open-rpc/generator) against the file to scaffold typed wrappers in TypeScript, Go, Python, etc.
+
+```bash
+npx @open-rpc/generator generate \
+  --schema gen/mcp/schema/openrpc.json \
+  --type client \
+  --language typescript \
+  --output ./client
+```
+
+The generated client typically wraps each method in a strongly-typed function (`client.createTask({title, priority, ...})`) instead of forcing callers to hand-roll JSON-RPC envelopes. MCP's wire protocol is technically `tools/call` with `{name, arguments}` — most generated clients hide that wrapping at runtime.
+
+### `schema/mcp-tools.json` — native MCP introspection
+
+The same JSON shape an MCP server returns from a `tools/list` request. Wrapped as `{"tools": [...]}` so it can be served verbatim. Useful for:
+
+- Loading into [`mcp-cli`](https://github.com/wong2/mcp-cli) / `mcp-inspector` for manual exploration without booting the proxy
+- Feeding to MCP client libraries that accept tool definitions and produce typed call wrappers (`mark3labs/mcp-go`, `py-mcp`, `ts-mcp`, Anthropic SDKs)
+- Diff-checking tool surface changes in PR review
+
+Both files are deterministically ordered (alphabetical by tool name) so regeneration produces zero-diff output until the proto actually changes.
 
 ## Transports
 

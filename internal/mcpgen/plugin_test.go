@@ -2,6 +2,7 @@ package mcpgen
 
 import (
 	"bytes"
+	"encoding/json"
 	"go/parser"
 	"go/token"
 	"os"
@@ -124,12 +125,29 @@ func TestGenerate_ServiceWithMCPMethods(t *testing.T) {
 		t.Error("streaming method must not appear as a tool")
 	}
 
-	// Both files must be parseable Go (format.Source already ran inside the
-	// generator; this guards against template regressions producing valid
-	// gofmt output that's still semantically broken).
+	// All emitted .go files must be parseable Go (format.Source already
+	// ran inside the generator; this guards against template regressions
+	// producing valid gofmt output that's still semantically broken).
+	// Schema files (.json) are checked separately below.
 	for name, content := range files {
+		if !strings.HasSuffix(name, ".go") {
+			continue
+		}
 		if _, err := parser.ParseFile(token.NewFileSet(), name, content, parser.AllErrors); err != nil {
 			t.Errorf("%s not parseable Go: %v\n%s", name, err, content)
+		}
+	}
+
+	// Schema artifacts must be present and valid JSON.
+	for _, p := range []string{"schema/openrpc.json", "schema/mcp-tools.json"} {
+		body, ok := files[p]
+		if !ok {
+			t.Errorf("missing schema file %s; got %v", p, keys(files))
+			continue
+		}
+		var any map[string]any
+		if err := json.Unmarshal([]byte(body), &any); err != nil {
+			t.Errorf("%s is not valid JSON: %v", p, err)
 		}
 	}
 }
