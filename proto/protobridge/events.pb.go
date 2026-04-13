@@ -136,6 +136,51 @@ func (Visibility) EnumDescriptor() ([]byte, []int) {
 	return file_protobridge_events_proto_rawDescGZIP(), []int{1}
 }
 
+type BroadcastOptions struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// HTTP path where the WS endpoint is mounted. Must start with "/".
+	Route         string `protobuf:"bytes,1,opt,name=route,proto3" json:"route,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BroadcastOptions) Reset() {
+	*x = BroadcastOptions{}
+	mi := &file_protobridge_events_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BroadcastOptions) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BroadcastOptions) ProtoMessage() {}
+
+func (x *BroadcastOptions) ProtoReflect() protoreflect.Message {
+	mi := &file_protobridge_events_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BroadcastOptions.ProtoReflect.Descriptor instead.
+func (*BroadcastOptions) Descriptor() ([]byte, []int) {
+	return file_protobridge_events_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *BroadcastOptions) GetRoute() string {
+	if x != nil {
+		return x.Route
+	}
+	return ""
+}
+
 type EventOptions struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Subject / topic / routing key on the bus. Empty → derived from the
@@ -160,7 +205,7 @@ type EventOptions struct {
 
 func (x *EventOptions) Reset() {
 	*x = EventOptions{}
-	mi := &file_protobridge_events_proto_msgTypes[0]
+	mi := &file_protobridge_events_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -172,7 +217,7 @@ func (x *EventOptions) String() string {
 func (*EventOptions) ProtoMessage() {}
 
 func (x *EventOptions) ProtoReflect() protoreflect.Message {
-	mi := &file_protobridge_events_proto_msgTypes[0]
+	mi := &file_protobridge_events_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -185,7 +230,7 @@ func (x *EventOptions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventOptions.ProtoReflect.Descriptor instead.
 func (*EventOptions) Descriptor() ([]byte, []int) {
-	return file_protobridge_events_proto_rawDescGZIP(), []int{0}
+	return file_protobridge_events_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *EventOptions) GetSubject() string {
@@ -232,6 +277,14 @@ var file_protobridge_events_proto_extTypes = []protoimpl.ExtensionInfo{
 		Tag:           "bytes,51234,opt,name=event",
 		Filename:      "protobridge/events.proto",
 	},
+	{
+		ExtendedType:  (*descriptorpb.ServiceOptions)(nil),
+		ExtensionType: (*BroadcastOptions)(nil),
+		Field:         51235,
+		Name:          "protobridge.broadcast",
+		Tag:           "bytes,51235,opt,name=broadcast",
+		Filename:      "protobridge/events.proto",
+	},
 }
 
 // Extension fields to descriptorpb.MessageOptions.
@@ -240,11 +293,19 @@ var (
 	E_Event = &file_protobridge_events_proto_extTypes[0]
 )
 
+// Extension fields to descriptorpb.ServiceOptions.
+var (
+	// optional protobridge.BroadcastOptions broadcast = 51235;
+	E_Broadcast = &file_protobridge_events_proto_extTypes[1]
+)
+
 var File_protobridge_events_proto protoreflect.FileDescriptor
 
 const file_protobridge_events_proto_rawDesc = "" +
 	"\n" +
-	"\x18protobridge/events.proto\x12\vprotobridge\x1a google/protobuf/descriptor.proto\"\xd4\x01\n" +
+	"\x18protobridge/events.proto\x12\vprotobridge\x1a google/protobuf/descriptor.proto\"(\n" +
+	"\x10BroadcastOptions\x12\x14\n" +
+	"\x05route\x18\x01 \x01(\tR\x05route\"\xd4\x01\n" +
 	"\fEventOptions\x12\x18\n" +
 	"\asubject\x18\x01 \x01(\tR\asubject\x12*\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x16.protobridge.EventKindR\x04kind\x12#\n" +
@@ -264,7 +325,8 @@ const file_protobridge_events_proto_rawDesc = "" +
 	"\n" +
 	"\x06PUBLIC\x10\x01\x12\f\n" +
 	"\bINTERNAL\x10\x02:R\n" +
-	"\x05event\x12\x1f.google.protobuf.MessageOptions\x18\xa2\x90\x03 \x01(\v2\x19.protobridge.EventOptionsR\x05eventB5Z3github.com/mrs1lentcz/protobridge/proto/protobridgeb\x06proto3"
+	"\x05event\x12\x1f.google.protobuf.MessageOptions\x18\xa2\x90\x03 \x01(\v2\x19.protobridge.EventOptionsR\x05event:^\n" +
+	"\tbroadcast\x12\x1f.google.protobuf.ServiceOptions\x18\xa3\x90\x03 \x01(\v2\x1d.protobridge.BroadcastOptionsR\tbroadcastB5Z3github.com/mrs1lentcz/protobridge/proto/protobridgeb\x06proto3"
 
 var (
 	file_protobridge_events_proto_rawDescOnce sync.Once
@@ -279,22 +341,26 @@ func file_protobridge_events_proto_rawDescGZIP() []byte {
 }
 
 var file_protobridge_events_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_protobridge_events_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_protobridge_events_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_protobridge_events_proto_goTypes = []any{
 	(EventKind)(0),                      // 0: protobridge.EventKind
 	(Visibility)(0),                     // 1: protobridge.Visibility
-	(*EventOptions)(nil),                // 2: protobridge.EventOptions
-	(*descriptorpb.MessageOptions)(nil), // 3: google.protobuf.MessageOptions
+	(*BroadcastOptions)(nil),            // 2: protobridge.BroadcastOptions
+	(*EventOptions)(nil),                // 3: protobridge.EventOptions
+	(*descriptorpb.MessageOptions)(nil), // 4: google.protobuf.MessageOptions
+	(*descriptorpb.ServiceOptions)(nil), // 5: google.protobuf.ServiceOptions
 }
 var file_protobridge_events_proto_depIdxs = []int32{
 	0, // 0: protobridge.EventOptions.kind:type_name -> protobridge.EventKind
 	1, // 1: protobridge.EventOptions.visibility:type_name -> protobridge.Visibility
-	3, // 2: protobridge.event:extendee -> google.protobuf.MessageOptions
-	2, // 3: protobridge.event:type_name -> protobridge.EventOptions
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	3, // [3:4] is the sub-list for extension type_name
-	2, // [2:3] is the sub-list for extension extendee
+	4, // 2: protobridge.event:extendee -> google.protobuf.MessageOptions
+	5, // 3: protobridge.broadcast:extendee -> google.protobuf.ServiceOptions
+	3, // 4: protobridge.event:type_name -> protobridge.EventOptions
+	2, // 5: protobridge.broadcast:type_name -> protobridge.BroadcastOptions
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	4, // [4:6] is the sub-list for extension type_name
+	2, // [2:4] is the sub-list for extension extendee
 	0, // [0:2] is the sub-list for field type_name
 }
 
@@ -309,8 +375,8 @@ func file_protobridge_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protobridge_events_proto_rawDesc), len(file_protobridge_events_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   1,
-			NumExtensions: 1,
+			NumMessages:   2,
+			NumExtensions: 2,
 			NumServices:   0,
 		},
 		GoTypes:           file_protobridge_events_proto_goTypes,

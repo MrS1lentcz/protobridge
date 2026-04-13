@@ -13,6 +13,34 @@ extend google.protobuf.MessageOptions {
   EventOptions event = 51234;
 }
 
+// Broadcast marks a gRPC service as the declarative spec for a WebSocket
+// broadcast endpoint. The service must contain exactly one server-streaming
+// RPC; the RPC's return type must be a message whose only field is a oneof
+// listing every event type the endpoint streams. The backend does NOT
+// implement the RPC — protoc-gen-protobridge generates the WS handler that
+// subscribes directly to the bus and translates each delivered event to
+// the typed oneof envelope.
+//
+//   service OrderBroadcast {
+//     option (protobridge.broadcast) = { route: "/api/v1/events/orders" };
+//     rpc Stream(StreamRequest) returns (stream OrderEnvelope);
+//   }
+//
+//   message OrderEnvelope {
+//     oneof event {
+//       OrderCreated  order_created  = 1;
+//       OrderShipped  order_shipped  = 2;
+//     }
+//   }
+extend google.protobuf.ServiceOptions {
+  BroadcastOptions broadcast = 51235;
+}
+
+message BroadcastOptions {
+  // HTTP path where the WS endpoint is mounted. Must start with "/".
+  string route = 1;
+}
+
 message EventOptions {
   // Subject / topic / routing key on the bus. Empty → derived from the
   // message name in snake_case (e.g. OrderCreated → order_created).

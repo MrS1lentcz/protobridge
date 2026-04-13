@@ -117,6 +117,15 @@ func getXVarName(v *descriptorpb.EnumValueDescriptorProto) string {
 	return proto.GetExtension(v.Options, optionspb.E_XVarName).(string)
 }
 
+// getBroadcastOptions returns the (protobridge.broadcast) ServiceOptions
+// extension when present.
+func getBroadcastOptions(s *descriptorpb.ServiceDescriptorProto) (*optionspb.BroadcastOptions, bool) {
+	if s.Options == nil || !proto.HasExtension(s.Options, optionspb.E_Broadcast) {
+		return nil, false
+	}
+	return proto.GetExtension(s.Options, optionspb.E_Broadcast).(*optionspb.BroadcastOptions), true
+}
+
 // getEventOptions returns the (protobridge.event) MessageOptions extension
 // when present, plus a flag indicating presence (so callers can distinguish
 // "not annotated" from "annotated with all-default values"). Once

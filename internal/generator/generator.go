@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"fmt"
 	"io"
 
 	"google.golang.org/protobuf/proto"
@@ -56,6 +57,13 @@ func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorRespo
 		return nil, err
 	}
 
+	// Broadcast services require an explicit events_pkg so main.go can
+	// import the generated New<Svc>Handler. Fail fast with a clear message
+	// instead of emitting unbuildable code.
+	if len(api.BroadcastServices) > 0 && opts.EventsPkg == "" {
+		return nil, fmt.Errorf("api has %d (protobridge.broadcast) service(s) but events_pkg is not set; pass --protobridge_opt=events_pkg=YOUR_MODULE/path/to/events", len(api.BroadcastServices))
+	}
+
 	// Generate a handler file for each service. Files live under handler/
 	// (separate Go package) so the proxy directory stays clean — only main.go
 	// and deployment manifests sit at the root.
@@ -69,7 +77,7 @@ func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorRespo
 	}
 
 	// Generate main.go.
-	mainContent := generateMain(api, handlerPkg)
+	mainContent := generateMain(api, handlerPkg, opts.EventsPkg)
 	mainName := "main.go"
 	resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
 		Name:    &mainName,

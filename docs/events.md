@@ -266,8 +266,12 @@ let currentProject = "xyz";
 
 ws.onmessage = (e) => {
   const env = JSON.parse(e.data);
+  // `labels` is omitempty on the wire — unlabeled / legacy events omit
+  // the field entirely. Default to {} so the UX filter reads a missing
+  // label as "no match" instead of throwing on undefined.
+  const labels = env.labels || {};
   // Server already filtered by tenant_id; this is the per-screen UX filter.
-  if (env.labels.project_id !== currentProject) return;
+  if (labels.project_id !== currentProject) return;
   renderEvent(env.subject, env.event);
 };
 ```

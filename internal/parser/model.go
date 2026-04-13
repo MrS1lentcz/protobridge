@@ -20,6 +20,39 @@ type ParsedAPI struct {
 	// protoc-gen-events-go to emit typed Emit*/Subscribe* helpers and the
 	// AsyncAPI document.
 	Events []*Event
+
+	// BroadcastServices lists every gRPC service annotated with
+	// (protobridge.broadcast). Each entry declares one WebSocket endpoint:
+	// REST plugin emits the handler at the route, subscribes to every
+	// listed event's bus subject, and translates incoming messages to
+	// the typed envelope (the oneof'd return type of the service's only
+	// streaming RPC). Backend leaves the RPC unimplemented.
+	BroadcastServices []*BroadcastService
+}
+
+// BroadcastService is one (protobridge.broadcast) service declaration —
+// metadata only, no backend code is expected to implement the underlying
+// gRPC method.
+type BroadcastService struct {
+	Name        string             // service name, e.g. "OrderBroadcast"
+	Route       string             // HTTP path the WS endpoint is mounted at
+	GoPackage   string             // Go import path of the service's proto package
+	ProtoPackage string            // proto package, e.g. "myapp.events"
+	Envelope    *MessageType       // return type of the streaming RPC; the oneof envelope
+	Events      []*BroadcastEvent  // one entry per oneof variant in Envelope
+}
+
+// BroadcastEvent links a oneof variant in the envelope to its underlying
+// (protobridge.event)-annotated message. Subject, Visibility and GoPackage
+// are copied from the matching Event for codegen convenience — GoPackage
+// lets the per-service marshaler import event messages from multiple proto
+// packages via aliased imports.
+type BroadcastEvent struct {
+	OneofFieldName string       // snake_case of the oneof field, e.g. "order_created"
+	Message        *MessageType // the event's proto message type
+	Subject        string       // bus subject (resolved from (protobridge.event))
+	Visibility     EventVisibility
+	GoPackage      string // Go import path of the event message's proto package
 }
 
 // Event is a message-level annotation that turns a proto message into a
