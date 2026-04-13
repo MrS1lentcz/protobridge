@@ -71,6 +71,58 @@ func (Status) EnumDescriptor() ([]byte, []int) {
 	return file_test_proto_rawDescGZIP(), []int{0}
 }
 
+// Color has no x_var_name aliases on any value — exercises the
+// "no aliases, cache stores nil, second call returns from cache" path
+// in enumAliases / reverseEnumAliases.
+type Color int32
+
+const (
+	Color_COLOR_UNSPECIFIED Color = 0
+	Color_COLOR_RED         Color = 1
+	Color_COLOR_GREEN       Color = 2
+)
+
+// Enum value maps for Color.
+var (
+	Color_name = map[int32]string{
+		0: "COLOR_UNSPECIFIED",
+		1: "COLOR_RED",
+		2: "COLOR_GREEN",
+	}
+	Color_value = map[string]int32{
+		"COLOR_UNSPECIFIED": 0,
+		"COLOR_RED":         1,
+		"COLOR_GREEN":       2,
+	}
+)
+
+func (x Color) Enum() *Color {
+	p := new(Color)
+	*p = x
+	return p
+}
+
+func (x Color) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Color) Descriptor() protoreflect.EnumDescriptor {
+	return file_test_proto_enumTypes[1].Descriptor()
+}
+
+func (Color) Type() protoreflect.EnumType {
+	return &file_test_proto_enumTypes[1]
+}
+
+func (x Color) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Color.Descriptor instead.
+func (Color) EnumDescriptor() ([]byte, []int) {
+	return file_test_proto_rawDescGZIP(), []int{1}
+}
+
 type SimpleRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -808,6 +860,52 @@ func (x *WrapperRequest) GetInner() *SimpleResponse {
 	return nil
 }
 
+// ColorRequest carries an alias-free enum field so the cache-nil branch
+// in enumAliases / reverseEnumAliases is hit on the second call.
+type ColorRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Color         Color                  `protobuf:"varint,1,opt,name=color,proto3,enum=testdata.Color" json:"color,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ColorRequest) Reset() {
+	*x = ColorRequest{}
+	mi := &file_test_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ColorRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ColorRequest) ProtoMessage() {}
+
+func (x *ColorRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_test_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ColorRequest.ProtoReflect.Descriptor instead.
+func (*ColorRequest) Descriptor() ([]byte, []int) {
+	return file_test_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ColorRequest) GetColor() Color {
+	if x != nil {
+		return x.Color
+	}
+	return Color_COLOR_UNSPECIFIED
+}
+
 type QueryParams struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Search        string                 `protobuf:"bytes,1,opt,name=search,proto3" json:"search,omitempty"`
@@ -825,7 +923,7 @@ type QueryParams struct {
 
 func (x *QueryParams) Reset() {
 	*x = QueryParams{}
-	mi := &file_test_proto_msgTypes[12]
+	mi := &file_test_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -837,7 +935,7 @@ func (x *QueryParams) String() string {
 func (*QueryParams) ProtoMessage() {}
 
 func (x *QueryParams) ProtoReflect() protoreflect.Message {
-	mi := &file_test_proto_msgTypes[12]
+	mi := &file_test_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -850,7 +948,7 @@ func (x *QueryParams) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryParams.ProtoReflect.Descriptor instead.
 func (*QueryParams) Descriptor() ([]byte, []int) {
-	return file_test_proto_rawDescGZIP(), []int{12}
+	return file_test_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *QueryParams) GetSearch() string {
@@ -977,7 +1075,9 @@ const file_test_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12&\n" +
 	"\x05value\x18\x02 \x01(\x0e2\x10.testdata.StatusR\x05value:\x028\x01\"@\n" +
 	"\x0eWrapperRequest\x12.\n" +
-	"\x05inner\x18\x01 \x01(\v2\x18.testdata.SimpleResponseR\x05inner\"\xf6\x01\n" +
+	"\x05inner\x18\x01 \x01(\v2\x18.testdata.SimpleResponseR\x05inner\"5\n" +
+	"\fColorRequest\x12%\n" +
+	"\x05color\x18\x01 \x01(\x0e2\x0f.testdata.ColorR\x05color\"\xf6\x01\n" +
 	"\vQueryParams\x12\x16\n" +
 	"\x06search\x18\x01 \x01(\tR\x06search\x12\x16\n" +
 	"\x06active\x18\x02 \x01(\bR\x06active\x12\x16\n" +
@@ -992,7 +1092,11 @@ const file_test_proto_rawDesc = "" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\rSTATUS_ACTIVE\x10\x01\x1a\n" +
 	"\xf2\xb6\x18\x06active\x12!\n" +
-	"\x0fSTATUS_INACTIVE\x10\x02\x1a\f\xf2\xb6\x18\binactiveB4Z2github.com/mrs1lentcz/protobridge/runtime/testdatab\x06proto3"
+	"\x0fSTATUS_INACTIVE\x10\x02\x1a\f\xf2\xb6\x18\binactive*>\n" +
+	"\x05Color\x12\x15\n" +
+	"\x11COLOR_UNSPECIFIED\x10\x00\x12\r\n" +
+	"\tCOLOR_RED\x10\x01\x12\x0f\n" +
+	"\vCOLOR_GREEN\x10\x02B4Z2github.com/mrs1lentcz/protobridge/runtime/testdatab\x06proto3"
 
 var (
 	file_test_proto_rawDescOnce sync.Once
@@ -1006,47 +1110,50 @@ func file_test_proto_rawDescGZIP() []byte {
 	return file_test_proto_rawDescData
 }
 
-var file_test_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_test_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_test_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_test_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_test_proto_goTypes = []any{
 	(Status)(0),                  // 0: testdata.Status
-	(*SimpleRequest)(nil),        // 1: testdata.SimpleRequest
-	(*NestedRequest)(nil),        // 2: testdata.NestedRequest
-	(*Paging)(nil),               // 3: testdata.Paging
-	(*OneofResponse)(nil),        // 4: testdata.OneofResponse
-	(*TextContent)(nil),          // 5: testdata.TextContent
-	(*ImageContent)(nil),         // 6: testdata.ImageContent
-	(*SimpleResponse)(nil),       // 7: testdata.SimpleResponse
-	(*AllTypesRequest)(nil),      // 8: testdata.AllTypesRequest
-	(*QueryRequest)(nil),         // 9: testdata.QueryRequest
-	(*EnumContainerRequest)(nil), // 10: testdata.EnumContainerRequest
-	(*MapOnlyEnumRequest)(nil),   // 11: testdata.MapOnlyEnumRequest
-	(*WrapperRequest)(nil),       // 12: testdata.WrapperRequest
-	(*QueryParams)(nil),          // 13: testdata.QueryParams
-	nil,                          // 14: testdata.EnumContainerRequest.ByNameEntry
-	nil,                          // 15: testdata.MapOnlyEnumRequest.EntriesEntry
+	(Color)(0),                   // 1: testdata.Color
+	(*SimpleRequest)(nil),        // 2: testdata.SimpleRequest
+	(*NestedRequest)(nil),        // 3: testdata.NestedRequest
+	(*Paging)(nil),               // 4: testdata.Paging
+	(*OneofResponse)(nil),        // 5: testdata.OneofResponse
+	(*TextContent)(nil),          // 6: testdata.TextContent
+	(*ImageContent)(nil),         // 7: testdata.ImageContent
+	(*SimpleResponse)(nil),       // 8: testdata.SimpleResponse
+	(*AllTypesRequest)(nil),      // 9: testdata.AllTypesRequest
+	(*QueryRequest)(nil),         // 10: testdata.QueryRequest
+	(*EnumContainerRequest)(nil), // 11: testdata.EnumContainerRequest
+	(*MapOnlyEnumRequest)(nil),   // 12: testdata.MapOnlyEnumRequest
+	(*WrapperRequest)(nil),       // 13: testdata.WrapperRequest
+	(*ColorRequest)(nil),         // 14: testdata.ColorRequest
+	(*QueryParams)(nil),          // 15: testdata.QueryParams
+	nil,                          // 16: testdata.EnumContainerRequest.ByNameEntry
+	nil,                          // 17: testdata.MapOnlyEnumRequest.EntriesEntry
 }
 var file_test_proto_depIdxs = []int32{
 	0,  // 0: testdata.SimpleRequest.status:type_name -> testdata.Status
-	3,  // 1: testdata.NestedRequest.paging:type_name -> testdata.Paging
-	5,  // 2: testdata.OneofResponse.text:type_name -> testdata.TextContent
-	6,  // 3: testdata.OneofResponse.image:type_name -> testdata.ImageContent
+	4,  // 1: testdata.NestedRequest.paging:type_name -> testdata.Paging
+	6,  // 2: testdata.OneofResponse.text:type_name -> testdata.TextContent
+	7,  // 3: testdata.OneofResponse.image:type_name -> testdata.ImageContent
 	0,  // 4: testdata.SimpleResponse.status:type_name -> testdata.Status
 	0,  // 5: testdata.AllTypesRequest.enum_val:type_name -> testdata.Status
-	3,  // 6: testdata.AllTypesRequest.msg_val:type_name -> testdata.Paging
-	13, // 7: testdata.QueryRequest.params:type_name -> testdata.QueryParams
+	4,  // 6: testdata.AllTypesRequest.msg_val:type_name -> testdata.Paging
+	15, // 7: testdata.QueryRequest.params:type_name -> testdata.QueryParams
 	0,  // 8: testdata.EnumContainerRequest.statuses:type_name -> testdata.Status
-	14, // 9: testdata.EnumContainerRequest.by_name:type_name -> testdata.EnumContainerRequest.ByNameEntry
-	15, // 10: testdata.MapOnlyEnumRequest.entries:type_name -> testdata.MapOnlyEnumRequest.EntriesEntry
-	7,  // 11: testdata.WrapperRequest.inner:type_name -> testdata.SimpleResponse
-	0,  // 12: testdata.QueryParams.status:type_name -> testdata.Status
-	0,  // 13: testdata.EnumContainerRequest.ByNameEntry.value:type_name -> testdata.Status
-	0,  // 14: testdata.MapOnlyEnumRequest.EntriesEntry.value:type_name -> testdata.Status
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	16, // 9: testdata.EnumContainerRequest.by_name:type_name -> testdata.EnumContainerRequest.ByNameEntry
+	17, // 10: testdata.MapOnlyEnumRequest.entries:type_name -> testdata.MapOnlyEnumRequest.EntriesEntry
+	8,  // 11: testdata.WrapperRequest.inner:type_name -> testdata.SimpleResponse
+	1,  // 12: testdata.ColorRequest.color:type_name -> testdata.Color
+	0,  // 13: testdata.QueryParams.status:type_name -> testdata.Status
+	0,  // 14: testdata.EnumContainerRequest.ByNameEntry.value:type_name -> testdata.Status
+	0,  // 15: testdata.MapOnlyEnumRequest.EntriesEntry.value:type_name -> testdata.Status
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_test_proto_init() }
@@ -1063,8 +1170,8 @@ func file_test_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_test_proto_rawDesc), len(file_test_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   15,
+			NumEnums:      2,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

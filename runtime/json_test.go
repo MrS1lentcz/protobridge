@@ -248,6 +248,20 @@ func TestWriteResponse_DescriptorWalk_MapOnly(t *testing.T) {
 	}
 }
 
+func TestWriteResponse_NoAliasEnum_CacheNilBranch(t *testing.T) {
+	// Color has no x_var_name aliases anywhere. First WriteResponse
+	// populates the alias caches with nil; the second call hits the
+	// `if v == nil` branch in enumAliases / reverseEnumAliases.
+	for i := 0; i < 2; i++ {
+		w := httptest.NewRecorder()
+		runtime.WriteResponse(w, http.StatusOK, &pb.ColorRequest{Color: pb.Color_COLOR_RED})
+		body := w.Body.String()
+		if !bytes.Contains([]byte(body), []byte("COLOR_RED")) {
+			t.Errorf("call %d: alias-free enum should keep canonical name, got: %s", i, body)
+		}
+	}
+}
+
 func TestWriteResponse_DescriptorWalk_NestedMessageOnly(t *testing.T) {
 	// Triggers fieldHasAliases MessageKind branch — outer message has no
 	// enum directly, only a nested message that transitively carries one.

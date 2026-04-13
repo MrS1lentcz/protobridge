@@ -18,9 +18,10 @@ var enumAliasCache sync.Map // map[protoreflect.FullName]map[string]string
 // for the given enum. Returns nil if no value carries x_var_name.
 func enumAliases(ed protoreflect.EnumDescriptor) map[string]string {
 	if v, ok := enumAliasCache.Load(ed.FullName()); ok {
-		if v == nil {
-			return nil
-		}
+		// Cached value may be a typed nil map for alias-free enums; that's
+		// returned as-is and callers treat nil map equivalently to "no aliases".
+		// (The plain `v == nil` check would never fire here because sync.Map
+		// wraps the typed nil in a non-nil interface.)
 		return v.(map[string]string)
 	}
 	var aliases map[string]string
@@ -186,9 +187,7 @@ func fieldHasAliases(fd protoreflect.FieldDescriptor, seen map[protoreflect.Full
 
 func reverseEnumAliases(ed protoreflect.EnumDescriptor) map[string]string {
 	if v, ok := reverseEnumAliasCache.Load(ed.FullName()); ok {
-		if v == nil {
-			return nil
-		}
+		// Same typed-nil-in-interface caveat as enumAliases above.
 		return v.(map[string]string)
 	}
 	var rev map[string]string
