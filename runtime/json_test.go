@@ -278,6 +278,14 @@ func TestWriteError_WriteFailure(t *testing.T) {
 	}
 }
 
+func TestWriteValidationError_WriteFailure(t *testing.T) {
+	w := &errWriter{header: make(http.Header)}
+	runtime.WriteValidationError(w, []runtime.FieldError{{Field: "x", Reason: "required"}})
+	if w.Header().Get("Content-Type") != "application/json" {
+		t.Errorf("expected Content-Type set even when Write fails")
+	}
+}
+
 func TestMarshalProto_HappyPath(t *testing.T) {
 	msg := &pb.SimpleResponse{Id: "1", Status: pb.Status_STATUS_ACTIVE}
 	data, err := runtime.MarshalProto(msg)
