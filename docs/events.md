@@ -180,6 +180,104 @@ A browser client opens `ws://api/events/myapp` and receives every PUBLIC fan-out
 
 The wire format is JSON text frames; the `event` value matches the `payload` schema in the AsyncAPI document. INTERNAL events are filtered out at code-gen time and never appear on this endpoint.
 
+## Multi-tenant routing with labels
+
+Labels are key/value pairs (`map[string]string`) carried alongside every event and resolved per-connection on the broadcast WS endpoint. The model is deliberately the same one Kubernetes uses for `metadata.labels` + `labelSelector`: you tag the event with what's true about it, you tell each connection what's true about its principal, the runtime forwards an event to a connection only when every event-label key matches.
+
+```protobuf
+message OrderCreated {
+  option (protobridge.event) = { kind: BOTH visibility: PUBLIC };
+  string order_id = 1;
+}
+```
+
+The annotation doesn't change. Labels are an orthogonal axis, applied at publish time:
+
+```go
+import "github.com/mrs1lentcz/protobridge/runtime/events"
+
+func (s *OrderServer) CreateOrder(ctx context.Context, req *pb.CreateOrderRequest) (*pb.CreateOrderResponse, error) {
+    order := s.repo.Create(req)
+
+    // Stash labels on ctx once near the call boundary — typically in a
+    // gRPC interceptor that derives them from the authenticated principal.
+    // Every Emit* in the handler chain forwards them automatically.
+    ctx = events.WithLabels(ctx,
+        "tenant_id", order.TenantID,
+        "project_id", order.ProjectID,
+    )
+
+    if err := myevents.EmitOrderCreated(ctx, s.bus, &myevents.OrderCreated{
+        OrderId: order.ID,
+    }); err != nil {
+        return nil, err
+    }
+    return &pb.CreateOrderResponse{OrderId: order.ID}, nil
+}
+```
+
+On the receiving side, `Register<Pkg>Broadcast` accepts a `BroadcastConfig` override that wires the auth-derived principal labels:
+
+```go
+myevents.RegisterMyappBroadcast(r, bus, "/events/myapp", events.BroadcastConfig{
+    // Pull the principal's labels off the auth context populated by an
+    // upstream middleware. Returning an error closes the connection
+    // before the WS upgrade with a regular HTTP 401.
+    PrincipalLabels: func(r *http.Request) (map[string]string, error) {
+        principal := authctx.From(r.Context())
+        if principal == nil {
+            return nil, fmt.Errorf("not authenticated")
+        }
+        return map[string]string{
+            "tenant_id":  principal.TenantID,
+            "project_id": principal.ProjectID,
+        }, nil
+    },
+    // Optional: defaults to DefaultLabelMatcher (K8s label-selector
+    // semantics — every event-label key must match the principal).
+    // Override to model "admin sees everything" or other custom hierarchies.
+    Matcher: events.DefaultLabelMatcher,
+
+    // Restrict browser origins (defaults to same-origin only).
+    OriginPatterns: []string{"app.example.com"},
+})
+```
+
+### Two filtering layers, one wire format
+
+The runtime applies **server-side filtering** as the security boundary — a connection authenticated as `tenant_id=abc` never sees events tagged `tenant_id=xyz`, no matter what the client requests.
+
+The wire envelope **carries the labels** so the browser can apply a second, UX-driven filter on top: "the user is currently looking at project xyz, drop everything else". This isn't security — it's just rendering economy.
+
+```json
+{
+  "subject": "order_created",
+  "labels": {
+    "tenant_id":  "abc",
+    "project_id": "xyz"
+  },
+  "event": { "order_id": "o-1" }
+}
+```
+
+```js
+const ws = new WebSocket("/events/myapp");
+let currentProject = "xyz";
+
+ws.onmessage = (e) => {
+  const env = JSON.parse(e.data);
+  // Server already filtered by tenant_id; this is the per-screen UX filter.
+  if (env.labels.project_id !== currentProject) return;
+  renderEvent(env.subject, env.event);
+};
+```
+
+Switch projects with a JS variable assignment — no reconnect, no server roundtrip.
+
+### Backend-level subject scoping (advanced)
+
+For NATS-only deployments at high scale, encoding labels into the subject (`tenant.{id}.orders.created`) lets the broker do the routing instead of the proxy holding every connection in memory. protobridge's generic broadcast handler doesn't do this — the in-process matcher is the cross-backend baseline. Wire your own subscriber against the bus directly when you want backend-native subject patterns.
+
 ## Failure semantics
 
 | Kind | Publish error | Subscriber error |
