@@ -25,12 +25,12 @@ func testAPI() *parser.ParsedAPI {
 				PathPrefix:   "/api/v1",
 				Methods: []*parser.Method{
 					{
-						Name:       "SendMessage",
-						HTTPMethod: "POST",
-						HTTPPath:   "/api/v1/chats/{chat_id}/messages",
-						PathParams: []string{"chat_id"},
+						Name:            "SendMessage",
+						HTTPMethod:      "POST",
+						HTTPPath:        "/api/v1/chats/{chat_id}/messages",
+						PathParams:      []string{"chat_id"},
 						RequiredHeaders: []string{"X-Request-Id"},
-						StreamType: parser.StreamUnary,
+						StreamType:      parser.StreamUnary,
 						InputType: &parser.MessageType{
 							Name:     "SendMessageReq",
 							FullName: ".chat.v1.SendMessageReq",
@@ -187,6 +187,18 @@ func TestGenerateServiceFile(t *testing.T) {
 		if !strings.Contains(content, check) {
 			t.Errorf("generated service file missing %q", check)
 		}
+	}
+
+	// Regression: SetUserMetadata must run AFTER metadata.NewOutgoingContext,
+	// otherwise the outgoing context built from path params/headers wipes the
+	// user metadata key.
+	idxNew := strings.Index(content, "metadata.NewOutgoingContext(ctx, md)")
+	idxUser := strings.Index(content, "runtime.SetUserMetadata(ctx, userData)")
+	if idxNew < 0 || idxUser < 0 {
+		t.Fatalf("expected both NewOutgoingContext and SetUserMetadata in handler")
+	}
+	if idxUser < idxNew {
+		t.Errorf("SetUserMetadata must come after NewOutgoingContext (else user metadata is lost)")
 	}
 }
 
@@ -1009,9 +1021,9 @@ func (r *errReader) Read(p []byte) (int, error) {
 }
 
 // helpers for Run tests
-func strPtr(s string) *string   { return &s }
-func int32Ptr(i int32) *int32   { return &i }
-func boolPtr(b bool) *bool      { return &b }
+func strPtr(s string) *string { return &s }
+func int32Ptr(i int32) *int32 { return &i }
+func boolPtr(b bool) *bool    { return &b }
 
 func makeHTTPOpts(method, path string) *descriptorpb.MethodOptions {
 	opts := &descriptorpb.MethodOptions{}
@@ -1167,8 +1179,8 @@ func TestFindMessageTypeInAPI(t *testing.T) {
 				Name: "Svc",
 				Methods: []*parser.Method{
 					{
-						Name:      "Do",
-						InputType: &parser.MessageType{Name: "Req", FullName: ".svc.v1.Req"},
+						Name:       "Do",
+						InputType:  &parser.MessageType{Name: "Req", FullName: ".svc.v1.Req"},
 						OutputType: &parser.MessageType{Name: "Resp", FullName: ".svc.v1.Resp"},
 					},
 				},
