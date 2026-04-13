@@ -15,6 +15,7 @@ type Service struct {
 	GoPackage    string // Go import path from go_package option, e.g. "github.com/foo/gen/taskboard/v1"
 	DisplayName  string // from (protobridge.display_name), used as OpenAPI tag
 	PathPrefix   string // from (protobridge.path_prefix), prepended to all HTTP paths
+	MCPDefault   bool   // from (protobridge.mcp_default), service-wide MCP opt-in
 	Methods      []*Method
 }
 
@@ -31,6 +32,14 @@ type Method struct {
 	StreamType       StreamType
 	SSE              bool   // use SSE instead of WS (server-streaming only)
 	WSMode           string // "private" or "broadcast" (streaming only)
+
+	// MCP attributes — used by the MCP plugin to decide which RPCs become
+	// tools and how they're presented to the LLM client.
+	MCP            bool   // explicitly set or inherited from service mcp_default
+	MCPSet         bool   // true if (protobridge.mcp) was set on this method (used to detect explicit opt-out)
+	MCPScope       string // free-form hint, e.g. "chat session", appended to tool description
+	MCPDescription string // override for the tool description; empty falls back to LeadingComment
+	LeadingComment string // proto leading comment from SourceCodeInfo, used as default MCP tool description
 }
 
 type StreamType int

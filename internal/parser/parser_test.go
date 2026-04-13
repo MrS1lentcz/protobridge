@@ -1060,6 +1060,109 @@ func TestGetPathPrefix_NilOptions(t *testing.T) {
 	}
 }
 
+func TestGetMCP_NotSet(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("M")}
+	val, set := getMCP(m)
+	if val || set {
+		t.Errorf("expected (false,false), got (%v,%v)", val, set)
+	}
+}
+
+func TestGetMCP_ExplicitTrue(t *testing.T) {
+	opts := &descriptorpb.MethodOptions{}
+	proto.SetExtension(opts, optionspb.E_Mcp, true)
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("M"), Options: opts}
+	val, set := getMCP(m)
+	if !val || !set {
+		t.Errorf("expected (true,true), got (%v,%v)", val, set)
+	}
+}
+
+func TestGetMCP_ExplicitFalse(t *testing.T) {
+	// Important: an explicit (mcp) = false must report set=true so the
+	// service-level mcp_default opt-in can be overridden per method.
+	opts := &descriptorpb.MethodOptions{}
+	proto.SetExtension(opts, optionspb.E_Mcp, false)
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("M"), Options: opts}
+	val, set := getMCP(m)
+	if val {
+		t.Error("val should be false")
+	}
+	if !set {
+		t.Error("set should be true (explicit opt-out)")
+	}
+}
+
+func TestParseMCP_DefaultOptInWithPerMethodOptOut(t *testing.T) {
+	// Service has mcp_default=true; one method opts out via (mcp)=false.
+	svcOpts := &descriptorpb.ServiceOptions{}
+	proto.SetExtension(svcOpts, optionspb.E_McpDefault, true)
+
+	optOut := &descriptorpb.MethodOptions{}
+	proto.SetExtension(optOut, optionspb.E_Mcp, false)
+
+	scopeOpts := &descriptorpb.MethodOptions{}
+	proto.SetExtension(scopeOpts, optionspb.E_McpScope, "chat session")
+
+	// Both methods need an HTTP rule so they're emitted as REST methods
+	// (parser only attaches MCP attrs to methods that survive HTTP filtering).
+	addHTTP := func(opts *descriptorpb.MethodOptions, path string) *descriptorpb.MethodOptions {
+		proto.SetExtension(opts, annotations.E_Http, &annotations.HttpRule{
+			Pattern: &annotations.HttpRule_Get{Get: path},
+		})
+		return opts
+	}
+
+	req := makeRequest("test.v1", "test.proto",
+		[]*descriptorpb.DescriptorProto{
+			makeSimpleMessage("Req", "id"),
+			makeSimpleMessage("Resp", "id"),
+		},
+		nil,
+		[]*descriptorpb.ServiceDescriptorProto{
+			{
+				Name: sp("S"), Options: svcOpts,
+				Method: []*descriptorpb.MethodDescriptorProto{
+					{Name: sp("Inherited"),
+						InputType: sp(".test.v1.Req"), OutputType: sp(".test.v1.Resp"),
+						Options: addHTTP(scopeOpts, "/inherited")},
+					{Name: sp("OptedOut"),
+						InputType: sp(".test.v1.Req"), OutputType: sp(".test.v1.Resp"),
+						Options: addHTTP(optOut, "/opted-out")},
+				},
+			},
+		},
+	)
+
+	api, err := Parse(req)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(api.Services) != 1 {
+		t.Fatalf("services: %d", len(api.Services))
+	}
+	svc := api.Services[0]
+	if !svc.MCPDefault {
+		t.Error("MCPDefault should be true on service")
+	}
+	byName := map[string]*Method{}
+	for _, m := range svc.Methods {
+		byName[m.Name] = m
+	}
+	if !byName["Inherited"].MCP {
+		t.Error("Inherited method should inherit MCP=true from mcp_default")
+	}
+	if byName["OptedOut"].MCP {
+		t.Error("OptedOut method must respect explicit (mcp)=false")
+	}
+	if !byName["OptedOut"].MCPSet {
+		t.Error("OptedOut method must report MCPSet=true so service default is overridden")
+	}
+	if byName["Inherited"].MCPScope != "chat session" {
+		t.Errorf("MCPScope: got %q", byName["Inherited"].MCPScope)
+	}
+}
+
 func TestGetXVarName_NilOptions(t *testing.T) {
 	v := &descriptorpb.EnumValueDescriptorProto{Name: sp("TEST")}
 	if got := getXVarName(v); got != "" {
