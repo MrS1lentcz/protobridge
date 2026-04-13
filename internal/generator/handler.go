@@ -335,6 +335,11 @@ func generateServiceFile(svc *parser.Service, api *parser.ParsedAPI) (string, er
 	}
 
 	for _, m := range svc.Methods {
+		// Methods carried in the parser model purely for the MCP plugin
+		// (HTTPMethod is empty) must not produce REST handlers.
+		if m.HTTPMethod == "" {
+			continue
+		}
 		inRef, inEmpty := protoTypeRef(m.InputType)
 		outRef, outEmpty := protoTypeRef(m.OutputType)
 		if inEmpty || outEmpty {

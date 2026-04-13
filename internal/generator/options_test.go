@@ -50,7 +50,7 @@ func TestParseOptions_UnknownKey(t *testing.T) {
 }
 
 func TestResolveHandlerPkg_ExplicitParamWins(t *testing.T) {
-	got, err := resolveHandlerPkg(Options{HandlerPkg: "github.com/x/y/handler"})
+	got, err := resolveHandlerPkg(Options{HandlerPkg: "github.com/x/y/handler"}, "--protobridge_opt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestResolveHandlerPkg_AutoDetectFromGoMod(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := resolveHandlerPkg(Options{})
+	got, err := resolveHandlerPkg(Options{}, "--protobridge_opt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestResolveHandlerPkg_AutoDetectFromNestedDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := resolveHandlerPkg(Options{})
+	got, err := resolveHandlerPkg(Options{}, "--protobridge_opt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestResolveHandlerPkg_NoGoModError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := resolveHandlerPkg(Options{})
+	_, err := resolveHandlerPkg(Options{}, "--protobridge_opt")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -144,7 +144,7 @@ func TestResolveHandlerPkg_GoModButNoConventionalDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := resolveHandlerPkg(Options{})
+	_, err := resolveHandlerPkg(Options{}, "--protobridge_opt")
 	if err == nil {
 		t.Fatal("expected error")
 	}

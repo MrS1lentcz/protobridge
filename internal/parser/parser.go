@@ -82,13 +82,20 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 				}
 
 				httpMethod, httpPath := extractHTTPRule(m)
-				if httpMethod == "" {
-					// No HTTP annotation – skip (not exposed as REST).
+				// Methods without an HTTP annotation AND without MCP opt-in
+				// are not exposed by any proxy — skip outright. Methods with
+				// MCP=true but no HTTP rule still need to land in the model
+				// so protoc-gen-mcp can see them; HTTPMethod stays empty
+				// and the REST plugin filters on that.
+				if httpMethod == "" && !mcpEnabled {
 					continue
 				}
 
-				// Apply service-level path prefix.
-				fullPath := pathPrefix + httpPath
+				// Apply service-level path prefix when there is a path.
+				fullPath := ""
+				if httpPath != "" {
+					fullPath = pathPrefix + httpPath
+				}
 
 				method := &Method{
 					Name:              m.GetName(),

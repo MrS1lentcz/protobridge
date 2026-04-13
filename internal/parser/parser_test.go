@@ -286,6 +286,48 @@ func TestParseAuthMethod(t *testing.T) {
 	}
 }
 
+func TestParseMCPOnly_NoHTTPAnnotation_StillEmittedForMCPPlugin(t *testing.T) {
+	// Regression: an RPC marked (protobridge.mcp)=true but without any
+	// google.api.http annotation must still land in the parsed model so
+	// protoc-gen-mcp can see it. HTTPMethod stays empty so the REST plugin
+	// skips it.
+	mcpOpts := &descriptorpb.MethodOptions{}
+	proto.SetExtension(mcpOpts, optionspb.E_Mcp, true)
+
+	req := makeRequest("test.v1", "test.proto",
+		[]*descriptorpb.DescriptorProto{
+			makeSimpleMessage("Req", "id"),
+			makeSimpleMessage("Resp", "id"),
+		},
+		nil,
+		[]*descriptorpb.ServiceDescriptorProto{{
+			Name: sp("S"),
+			Method: []*descriptorpb.MethodDescriptorProto{{
+				Name:       sp("MCPOnly"),
+				InputType:  sp(".test.v1.Req"),
+				OutputType: sp(".test.v1.Resp"),
+				Options:    mcpOpts,
+			}},
+		}},
+	)
+
+	api, err := Parse(req)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(api.Services) != 1 || len(api.Services[0].Methods) != 1 {
+		t.Fatalf("expected the MCP-only method to be parsed; got services=%d methods=%d",
+			len(api.Services), len(api.Services[0].Methods))
+	}
+	m := api.Services[0].Methods[0]
+	if !m.MCP {
+		t.Error("MCP flag must be set")
+	}
+	if m.HTTPMethod != "" || m.HTTPPath != "" {
+		t.Errorf("HTTP fields should be empty for MCP-only method: %+v", m)
+	}
+}
+
 func TestParseAuthMethod_WithHTTPAnnotation_AlsoExposedAsREST(t *testing.T) {
 	// When (protobridge.auth_method) is combined with (google.api.http), the
 	// auth method must also be emitted as a regular REST method so callers

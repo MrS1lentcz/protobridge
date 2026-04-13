@@ -14,13 +14,18 @@ import (
 )
 
 // ConnectionInfo gives an MCPAuthFunc a unified view of the originating
-// connection regardless of transport:
+// connection regardless of transport. Each field is populated when the
+// runtime can extract that source for the current request:
 //
-//   - stdio: HTTPHeaders is nil, InitializeParams may be nil, Env is the
-//     proxy process environment (parent typically passes auth tokens here).
-//   - streamable HTTP: HTTPHeaders carries the Authorization header etc.;
-//     InitializeParams holds the JSON-RPC initialize params if MCP client
-//     supplied any.
+//   - Env: explicit map you can pre-populate (rare); the DefaultAuthFunc
+//     falls back to os.Getenv when the map is nil/empty, so the most
+//     common stdio setup needs nothing here.
+//   - HTTPHeaders: populated by ServeStreamableHTTP for inbound HTTP
+//     requests via the unexported httpHeadersCtxKey context value. Always
+//     nil in stdio mode.
+//   - InitializeParams: reserved for the MCP `initialize` handshake's
+//     params object. Not yet populated by the runtime — left in the
+//     struct so a future wiring keeps the MCPAuthFunc signature stable.
 //
 // The MCPAuthFunc returns gRPC metadata that protobridge will attach to
 // every backend call made on behalf of this connection.

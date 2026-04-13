@@ -52,7 +52,7 @@ func errResponse(err error) *pluginpb.CodeGeneratorResponse {
 func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorResponse, error) {
 	resp := &pluginpb.CodeGeneratorResponse{}
 
-	handlerPkg, err := resolveHandlerPkg(opts)
+	handlerPkg, err := resolveHandlerPkg(opts, "--protobridge_opt")
 	if err != nil {
 		return nil, err
 	}

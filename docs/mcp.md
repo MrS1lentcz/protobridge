@@ -132,9 +132,9 @@ Both transports share the same handlers, auth pipeline, and gRPC backend connect
 
 MCP doesn't have a one-size-fits-all auth model the way HTTP does. The proxy's `MCPAuthFunc` decides what gRPC metadata to attach for each tool call. The default implementation forwards configurable identity keys from (in order):
 
-1. **HTTP headers** — for streamable HTTP transport
-2. **MCP `initialize` params** — sent at handshake time by the client
-3. **`SCREAMING_SNAKE` env vars** — for stdio transport, the parent process sets them when spawning the proxy
+1. **HTTP headers** — for streamable HTTP transport. `ServeStreamableHTTP` stashes the inbound `http.Header` on the request context so `DefaultAuthFunc` can read it.
+2. **MCP `initialize` params** — sent at handshake time by the client. *Reserved* — the runtime does not currently populate `ConnectionInfo.InitializeParams`; supply your own `MCPAuthFunc` if you need to read them.
+3. **`SCREAMING_SNAKE` env vars** — for stdio transport, the parent process sets them when spawning the proxy.
 
 For example, with `--mcp_opt=forward=session_id` (the default) and `SESSION_ID=abc` set in the proxy's environment, every gRPC call from the proxy carries `session_id=abc` in metadata — and the gRPC backend reads it the same way it would from REST or any other client.
 

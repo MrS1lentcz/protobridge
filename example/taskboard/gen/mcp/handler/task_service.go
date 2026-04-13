@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 
 	mcpsdk "github.com/mark3labs/mcp-go/mcp"
-	mcpserver "github.com/mark3labs/mcp-go/server"
 	"github.com/mrs1lentcz/gox/grpcx"
 	"google.golang.org/protobuf/proto"
 
@@ -91,5 +90,4 @@ func AddTaskServiceToServer(srv *mcp.Server, addr string, pool *grpcx.Pool, scal
 		},
 	)
 
-	_ = mcpserver.ToolHandlerFunc(nil) // keep mcpserver import alive for future tool middlewares
 }

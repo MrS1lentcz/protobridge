@@ -89,7 +89,7 @@ func Run(r io.Reader) *pluginpb.CodeGeneratorResponse {
 func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorResponse, error) {
 	// Reuse the REST plugin's handler-package resolver: same hybrid contract
 	// (explicit param + go.mod walk + conventional dir).
-	handlerPkg, err := generator.ResolveHandlerPkg(generator.Options{HandlerPkg: opts.HandlerPkg})
+	handlerPkg, err := generator.ResolveHandlerPkg(generator.Options{HandlerPkg: opts.HandlerPkg}, "--mcp_opt")
 	if err != nil {
 		return nil, err
 	}

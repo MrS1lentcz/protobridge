@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -24,8 +25,15 @@ type Server struct {
 
 // NewServer constructs a Server with the given name/version and auth
 // translator. The auth translator runs once per tool call and produces the
-// gRPC metadata appended to every backend invocation.
+// gRPC metadata appended to every backend invocation. Passing nil auth is
+// equivalent to a no-op translator (no metadata attached) — useful for
+// servers that don't need per-call identity.
 func NewServer(name, version string, auth MCPAuthFunc) *Server {
+	if auth == nil {
+		auth = func(_ context.Context, _ ConnectionInfo) (metadata.MD, error) {
+			return metadata.MD{}, nil
+		}
+	}
 	return &Server{
 		inner: mcpserver.NewMCPServer(name, version),
 		auth:  auth,
@@ -64,9 +72,29 @@ func (s *Server) ServeStdio(ctx context.Context) error {
 // ServeStreamableHTTP runs the server over the streamable HTTP transport
 // at the given address. Used for remote MCP clients and proxies behind
 // reverse proxies.
-func (s *Server) ServeStreamableHTTP(addr string) error {
-	srv := mcpserver.NewStreamableHTTPServer(s.inner)
-	return srv.Start(addr)
+//
+// The provided ctx controls graceful shutdown: when ctx is cancelled the
+// HTTP server's Shutdown(ctx) is invoked. Per-request HTTP headers are
+// stashed on the request context via WithHTTPContextFunc so the auth
+// translator can read them through HTTPHeadersFromContext.
+func (s *Server) ServeStreamableHTTP(ctx context.Context, addr string) error {
+	srv := mcpserver.NewStreamableHTTPServer(s.inner,
+		mcpserver.WithHTTPContextFunc(func(ctx context.Context, r *http.Request) context.Context {
+			return context.WithValue(ctx, httpHeadersCtxKey{}, r.Header)
+		}),
+	)
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Start(addr) }()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		return err
+	}
 }
 
 // ServeFromEnv selects the transport based on PROTOBRIDGE_MCP_TRANSPORT
@@ -81,21 +109,28 @@ func (s *Server) ServeFromEnv(ctx context.Context) error {
 		if addr == "" {
 			addr = ":8081"
 		}
-		return s.ServeStreamableHTTP(addr)
+		return s.ServeStreamableHTTP(ctx, addr)
 	default:
 		return fmt.Errorf("unknown PROTOBRIDGE_MCP_TRANSPORT %q (want: stdio | http)", transport)
 	}
 }
 
-// HTTPHeadersFromContext extracts HTTP headers from the incoming MCP request
-// when the transport is streamable HTTP. Returns nil for stdio. Generated
-// dispatchers feed it into ConnectionInfo.HTTPHeaders before calling auth.
+// HTTPHeadersFromContext extracts HTTP headers from the incoming MCP
+// request when the transport is streamable HTTP. Returns nil for stdio
+// (no inbound HTTP request) or when the value was not stashed (e.g. a
+// caller using the underlying mcp-go server directly without going
+// through ServeStreamableHTTP).
 func HTTPHeadersFromContext(ctx context.Context) http.Header {
-	// mcp-go currently does not expose a public accessor; keep the helper
-	// so generated code has a single integration point we can wire later
-	// without changing every emitted handler.
+	if v, ok := ctx.Value(httpHeadersCtxKey{}).(http.Header); ok {
+		return v
+	}
 	return nil
 }
+
+// httpHeadersCtxKey is the unexported context key used to stash incoming
+// HTTP headers between the streamable-HTTP transport and the auth translator.
+// Unexported type prevents collisions with caller-defined keys.
+type httpHeadersCtxKey struct{}
 
 // CallUnary is the generic dispatcher used by every generated tool handler.
 // It decodes the MCP arguments JSON into reqMsg, runs the auth translator,
@@ -133,6 +168,11 @@ func (s *Server) CallUnary(
 		return nil, fmt.Errorf("mcp auth: %w", err)
 	}
 	if len(md) > 0 {
+		// Merge with any pre-existing outgoing metadata instead of replacing
+		// it — middlewares or callers may have already attached their own.
+		if existing, ok := metadata.FromOutgoingContext(ctx); ok {
+			md = metadata.Join(existing, md)
+		}
 		ctx = metadata.NewOutgoingContext(ctx, md)
 	}
 

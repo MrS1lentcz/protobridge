@@ -78,7 +78,6 @@ import (
 	"encoding/json"
 
 	mcpsdk "github.com/mark3labs/mcp-go/mcp"
-	mcpserver "github.com/mark3labs/mcp-go/server"
 	"github.com/mrs1lentcz/gox/grpcx"
 	"google.golang.org/protobuf/proto"
 
@@ -109,7 +108,6 @@ func Add{{ .ServiceName }}ToServer(srv *mcp.Server, addr string, pool *grpcx.Poo
 		},
 	)
 {{ end }}
-	_ = mcpserver.ToolHandlerFunc(nil) // keep mcpserver import alive for future tool middlewares
 }
 `))
 
@@ -146,9 +144,14 @@ func protoTypeRef(mt *parser.MessageType) string {
 	return "pb." + mt.Name
 }
 
+// anyEmpty reports whether any *emitted* tool in the service references
+// google.protobuf.Empty. The filter must mirror generateHandlerFile's tool
+// emission (MCP-marked AND unary) — otherwise a streaming MCP method that
+// uses Empty would falsely set UsesEmpty and the template would import
+// emptypb without referencing it, breaking the build.
 func anyEmpty(svc *parser.Service) bool {
 	for _, m := range svc.Methods {
-		if !m.MCP {
+		if !m.MCP || m.StreamType != parser.StreamUnary {
 			continue
 		}
 		if isEmpty(m.InputType) || isEmpty(m.OutputType) {

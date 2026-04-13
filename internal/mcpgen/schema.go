@@ -23,9 +23,12 @@ func jsonSchemaForInput(mt *parser.MessageType) string {
 	schema := messageSchema(mt, map[string]bool{})
 	out, err := json.Marshal(schema)
 	if err != nil {
-		// Failure here means we built a non-marshalable map[string]any, which
-		// should be impossible given the helpers below — fail loudly in tests.
-		return `{"type":"object"}`
+		// All values produced by messageSchema/fieldSchema are
+		// json-serializable primitives, slices, and maps — a marshal
+		// failure here means a future helper change introduced an
+		// unmarshalable value. Fail loudly so the regression is caught
+		// in tests instead of silently emitting a misleading empty schema.
+		panic("mcpgen: failed to marshal generated input schema: " + err.Error())
 	}
 	return string(out)
 }

@@ -45,26 +45,34 @@ func ParseOptions(raw string) (Options, error) {
 
 // ResolveHandlerPkg is the public alias used by sibling plugins (mcpgen) so
 // they share the exact same hybrid resolution behaviour as the REST plugin.
-func ResolveHandlerPkg(opts Options) (string, error) { return resolveHandlerPkg(opts) }
+// optFlag is the plugin-specific opt flag (e.g. `--mcp_opt`) used in the
+// remediation message when auto-detection fails.
+func ResolveHandlerPkg(opts Options, optFlag string) (string, error) {
+	return resolveHandlerPkg(opts, optFlag)
+}
 
 // resolveHandlerPkg returns the import path of the handler subpackage.
 //
 // Resolution order:
-//  1. Explicit `--protobridge_opt=handler_pkg=<path>` — always honored.
+//  1. Explicit handler_pkg option — always honored.
 //  2. Auto-detect: walk up from CWD to find go.mod, read its module path,
-//     then look for a conventional output directory (gen/protobridge,
-//     gen/protobridge-rest, protobridge) and use `<module>/<that>/handler`.
+//     then look for a conventional output directory (see
+//     conventionalOutputDirs) and use `<module>/<that>/handler`.
 //  3. Error with a clear remediation message.
 //
-// The auto-detect step is best-effort. The recommended setup is to pass
-// `handler_pkg` explicitly so codegen is reproducible regardless of CWD.
-func resolveHandlerPkg(opts Options) (string, error) {
+// optFlag is the protoc plugin opt flag the caller is using (e.g.
+// `--protobridge_opt` or `--mcp_opt`); it appears in the error message so
+// users can copy/paste the right remediation.
+//
+// Auto-detect is best-effort. The recommended setup is to pass handler_pkg
+// explicitly so codegen is reproducible regardless of CWD.
+func resolveHandlerPkg(opts Options, optFlag string) (string, error) {
 	if opts.HandlerPkg != "" {
 		return opts.HandlerPkg, nil
 	}
 	module, modRoot, err := findGoModule(".")
 	if err != nil {
-		return "", fmt.Errorf("auto-detect handler_pkg: %w; pass --protobridge_opt=handler_pkg=YOUR_MODULE/path/to/handler", err)
+		return "", fmt.Errorf("auto-detect handler_pkg: %w; pass %s=handler_pkg=YOUR_MODULE/path/to/handler", err, optFlag)
 	}
 	for _, candidate := range conventionalOutputDirs {
 		full := filepath.Join(modRoot, candidate)
@@ -74,8 +82,8 @@ func resolveHandlerPkg(opts Options) (string, error) {
 	}
 	return "", fmt.Errorf(
 		"auto-detect handler_pkg: found go.mod (module %s) but no conventional output dir (%s); "+
-			"pass --protobridge_opt=handler_pkg=%s/<your-output-dir>/handler",
-		module, strings.Join(conventionalOutputDirs, ", "), module,
+			"pass %s=handler_pkg=%s/<your-output-dir>/handler",
+		module, strings.Join(conventionalOutputDirs, ", "), optFlag, module,
 	)
 }
 
