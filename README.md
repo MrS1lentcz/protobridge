@@ -5,18 +5,25 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/mrs1lentcz/protobridge.svg)](https://pkg.go.dev/github.com/mrs1lentcz/protobridge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Multi-protocol gateway generator for gRPC services. Write your business logic once as a gRPC server, then generate proxies that expose it as REST + WebSocket + SSE (`protoc-gen-protobridge`) and as MCP tools (`protoc-gen-mcp`) — all driven by `.proto` annotations, no handwritten glue code.
+Multi-protocol gateway + event system generator for gRPC services. Write your business logic once as a gRPC server, then generate proxies and pub/sub helpers from `.proto` annotations:
+
+- **REST + WebSocket + SSE** proxy (`protoc-gen-protobridge`)
+- **MCP** proxy (`protoc-gen-mcp`) — Claude Desktop, Cursor, custom hosts
+- **Typed pub/sub events** with broadcast WS endpoint (`protoc-gen-events-go`) — backed by Watermill so NATS, Redis, RabbitMQ, Kafka, GCP/AWS Pub/Sub all just work
 
 ```
                   ┌──────────────┐
                   │  REST proxy  │── HTTP / WS / SSE  ─┐
                   └──────────────┘                     │
-                                                       ├──→  ┌──────────────┐
-                  ┌──────────────┐                     │     │ gRPC backend │
-                  │   MCP proxy  │── stdio / HTTP  ────┤     │  (your code) │
-                  └──────────────┘                     │     └──────────────┘
                                                        │
-                  (more proxies on the way) ───────────┘
+                  ┌──────────────┐                     ├──→  ┌──────────────┐
+                  │   MCP proxy  │── stdio / HTTP  ────┤     │ gRPC backend │
+                  └──────────────┘                     │     │  (your code) │
+                                                       │     └──────┬───────┘
+                  ┌──────────────┐                     │            │
+                  │ Events plugin│── pub/sub bus  ─────┘            │
+                  │ + WS fan-out │  (NATS, Redis, ...)   subscribers ◄┘
+                  └──────────────┘
 ```
 
 ## Why protobridge
@@ -29,6 +36,7 @@ Compared to single-purpose gateways:
 - **Unusable enums** elsewhere — proto enums expose raw `SCREAMING_CASE` names and the meaningless `0` default. protobridge strips the zero member entirely and lets you define clean names via `x_var_name` (`"low"` instead of `TASK_PRIORITY_LOW`). Aliases work for both input and output, in REST, MCP and OpenAPI.
 - **No streaming story** in most gateways. protobridge automatically maps all stream types (server, client, bidi) to WebSocket or SSE with configurable connection modes (`private` per-user vs `broadcast` fan-out).
 - **No MCP path at all** elsewhere. `protoc-gen-mcp` emits a stdio + streamable-HTTP MCP server with JSON Schema derived from your proto types and tool descriptions pulled from proto leading comments — drop a binary into Claude Desktop / Cursor / your custom MCP host.
+- **No event system tied to your schema.** `protoc-gen-events-go` turns proto messages annotated with `(protobridge.event)` into typed Go publishers and subscribers, plus an AsyncAPI 3.0 contract for downstream client codegen and an opt-in WebSocket fan-out endpoint that any chi router can mount. Backed by [Watermill](https://watermill.io) so the same code works against NATS, Redis Streams, RabbitMQ, Kafka, GCP Pub/Sub, AWS SQS/SNS, or in-memory channels in tests.
 - **No observability out of the box** elsewhere. protobridge generates OpenTelemetry integration day one: W3C trace propagation, Prometheus metrics, Sentry error reporting, automatic connection health monitoring with transparent retry.
 - **Boilerplate everywhere** in alternatives — even with a gateway you still write middleware, auth wiring, connection management, `main.go`. protobridge generates all of it for every proxy, including Dockerfile and Kubernetes manifest.
 
@@ -83,6 +91,7 @@ protobridge reads your annotated `.proto` files and generates:
 ```bash
 go install github.com/mrs1lentcz/protobridge/cmd/protoc-gen-protobridge@latest  # REST + WS + SSE proxy
 go install github.com/mrs1lentcz/protobridge/cmd/protoc-gen-mcp@latest          # MCP proxy
+go install github.com/mrs1lentcz/protobridge/cmd/protoc-gen-events-go@latest    # typed pub/sub + broadcast WS
 ```
 
 Requirements: `protoc`, `protoc-gen-go`, `protoc-gen-go-grpc`
@@ -178,7 +187,7 @@ PROTOBRIDGE_TOOL_SERVICE_ADDR=localhost:50051 SESSION_ID=$(uuidgen) ./mcp-proxy
 
 By default the binary speaks **stdio** (Claude Desktop / Cursor / `mcp-cli`); set `PROTOBRIDGE_MCP_TRANSPORT=http` for streamable HTTP mode (`PROTOBRIDGE_MCP_HTTP_ADDR=:8081` to choose the port). Identity (e.g. `SESSION_ID`) is forwarded into gRPC metadata so the same backend handles REST and MCP requests with one auth pipeline.
 
-See [`docs/mcp.md`](docs/mcp.md) for the full MCP guide and [`docs/rest.md`](docs/rest.md) for the REST plugin reference.
+See [`docs/rest.md`](docs/rest.md) for the REST plugin reference, [`docs/mcp.md`](docs/mcp.md) for the MCP guide, and [`docs/events.md`](docs/events.md) for the events feature (annotations, runtime API, broadcast WS contract).
 
 ## Proto annotations
 
