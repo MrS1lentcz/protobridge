@@ -80,6 +80,20 @@ message EnumContainerRequest {
   map<string, Status> by_name = 2;
 }
 
+// MapOnlyEnumRequest forces the descriptor walker through the map branch of
+// descriptorHasAliases (no preceding scalar/repeated enum field that would
+// short-circuit the walk).
+message MapOnlyEnumRequest {
+  map<string, Status> entries = 1;
+}
+
+// WrapperRequest forces the descriptor walker through the nested-message
+// branch of fieldHasAliases — its only field is a message that itself
+// transitively carries an alias-bearing enum.
+message WrapperRequest {
+  SimpleResponse inner = 1;
+}
+
 message QueryParams {
   string search = 1;
   bool active = 2;
