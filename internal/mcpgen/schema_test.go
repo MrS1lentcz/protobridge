@@ -11,10 +11,10 @@ import (
 )
 
 func TestJSONSchema_EmptyMessage(t *testing.T) {
-	if got := jsonSchemaForInput(nil); got != `{"type":"object"}` {
+	if got := jsonSchemaForInput(nil, nil); got != `{"type":"object"}` {
 		t.Errorf("nil: %s", got)
 	}
-	if got := jsonSchemaForInput(&parser.MessageType{Name: "Empty"}); got != `{"type":"object"}` {
+	if got := jsonSchemaForInput(&parser.MessageType{Name: "Empty"}, nil); got != `{"type":"object"}` {
 		t.Errorf("empty fields: %s", got)
 	}
 }
@@ -28,7 +28,7 @@ func TestJSONSchema_ScalarsAndRequired(t *testing.T) {
 			{Name: "active", Type: descriptorpb.FieldDescriptorProto_TYPE_BOOL},
 		},
 	}
-	got := jsonSchemaForInput(mt)
+	got := jsonSchemaForInput(mt, nil)
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(got), &parsed); err != nil {
 		t.Fatalf("not valid JSON: %v\n%s", err, got)
@@ -65,7 +65,7 @@ func TestJSONSchema_RepeatedAndEnumWithAlias(t *testing.T) {
 		},
 	}
 	var got map[string]any
-	if err := json.Unmarshal([]byte(jsonSchemaForInput(mt)), &got); err != nil {
+	if err := json.Unmarshal([]byte(jsonSchemaForInput(mt, nil)), &got); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	props := got["properties"].(map[string]any)
@@ -83,6 +83,54 @@ func TestJSONSchema_RepeatedAndEnumWithAlias(t *testing.T) {
 	}
 }
 
+func TestJSONSchema_NestedMessageInlinedFromIndex(t *testing.T) {
+	// Regression: a field referencing a peer message type must emit the
+	// peer's full field list when that peer is present in the messages
+	// index — not a bare {"type":"object","title":"..."} stub. LLM clients
+	// need to see exact field shapes to produce valid arguments.
+	outer := &parser.MessageType{
+		Name: "Outer", FullName: ".x.Outer",
+		Fields: []*parser.Field{
+			{Name: "page", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".x.Paging"},
+		},
+	}
+	paging := &parser.MessageType{
+		Name: "Paging", FullName: ".x.Paging",
+		Fields: []*parser.Field{
+			{Name: "limit", Type: descriptorpb.FieldDescriptorProto_TYPE_INT32},
+			{Name: "offset", Type: descriptorpb.FieldDescriptorProto_TYPE_INT32},
+		},
+	}
+	idx := map[string]*parser.MessageType{
+		".x.Outer":  outer,
+		".x.Paging": paging,
+	}
+	got := jsonSchemaForInput(outer, idx)
+	for _, needed := range []string{`"limit"`, `"offset"`, `"format":"int32"`} {
+		if !strings.Contains(got, needed) {
+			t.Errorf("nested Paging field %s missing from schema:\n%s", needed, got)
+		}
+	}
+	if strings.Contains(got, `"title":"Paging"`) {
+		t.Errorf("expected inlined Paging schema, not the title-only stub:\n%s", got)
+	}
+}
+
+func TestJSONSchema_NestedMessageStubFallback(t *testing.T) {
+	// When the referenced message is NOT in the index (e.g. external proto
+	// not in FileToGenerate), fall back to the titled stub.
+	outer := &parser.MessageType{
+		Name: "Outer", FullName: ".x.Outer",
+		Fields: []*parser.Field{
+			{Name: "ext", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".external.Thing"},
+		},
+	}
+	got := jsonSchemaForInput(outer, map[string]*parser.MessageType{".x.Outer": outer})
+	if !strings.Contains(got, `"title":"Thing"`) {
+		t.Errorf("expected title-only stub for external message: %s", got)
+	}
+}
+
 func TestJSONSchema_NestedMessageStub(t *testing.T) {
 	mt := &parser.MessageType{
 		Name: "Outer",
@@ -90,7 +138,7 @@ func TestJSONSchema_NestedMessageStub(t *testing.T) {
 			{Name: "page", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".x.Paging"},
 		},
 	}
-	got := jsonSchemaForInput(mt)
+	got := jsonSchemaForInput(mt, nil)
 	if !strings.Contains(got, `"title":"Paging"`) {
 		t.Errorf("expected nested message title, got: %s", got)
 	}
@@ -103,7 +151,7 @@ func TestJSONSchema_GoogleProtobufEmpty(t *testing.T) {
 			{Name: "anything", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".google.protobuf.Empty"},
 		},
 	}
-	got := jsonSchemaForInput(mt)
+	got := jsonSchemaForInput(mt, nil)
 	if strings.Contains(got, `"title"`) {
 		t.Errorf("Empty must not carry a title hint: %s", got)
 	}
@@ -117,7 +165,7 @@ func TestJSONSchema_OneofIgnored(t *testing.T) {
 			{Name: "alt", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING, OneofIndex: int32Ptr(0)},
 		},
 	}
-	got := jsonSchemaForInput(mt)
+	got := jsonSchemaForInput(mt, nil)
 	if strings.Contains(got, "alt") {
 		t.Errorf("oneof field should be skipped: %s", got)
 	}
@@ -143,7 +191,7 @@ func TestJSONSchema_AllScalarTypes(t *testing.T) {
 			{Name: "fallback", Type: descriptorpb.FieldDescriptorProto_TYPE_GROUP}, // unsupported → string fallback
 		},
 	}
-	got := jsonSchemaForInput(mt)
+	got := jsonSchemaForInput(mt, nil)
 	for _, tok := range []string{`"format":"int32"`, `"format":"int64"`, `"format":"uint32"`, `"format":"uint64"`, `"format":"float"`, `"format":"double"`, `"format":"byte"`, `"type":"boolean"`} {
 		if !strings.Contains(got, tok) {
 			t.Errorf("missing %s in: %s", tok, got)
@@ -159,7 +207,7 @@ func TestJSONSchema_EnumWithoutValues(t *testing.T) {
 			{Name: "e", Type: descriptorpb.FieldDescriptorProto_TYPE_ENUM},
 		},
 	}
-	got := jsonSchemaForInput(mt)
+	got := jsonSchemaForInput(mt, nil)
 	if !strings.Contains(got, `"type":"string"`) || strings.Contains(got, `"enum"`) {
 		t.Errorf("got %s", got)
 	}
@@ -172,7 +220,7 @@ func TestJSONSchema_RepeatedNestedMessage(t *testing.T) {
 			{Name: "items", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".x.Item", Repeated: true},
 		},
 	}
-	got := jsonSchemaForInput(mt)
+	got := jsonSchemaForInput(mt, nil)
 	if !strings.Contains(got, `"type":"array"`) || !strings.Contains(got, `"title":"Item"`) {
 		t.Errorf("got %s", got)
 	}

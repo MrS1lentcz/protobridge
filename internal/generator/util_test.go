@@ -8,8 +8,10 @@ func TestToSnakeCase(t *testing.T) {
 	}{
 		{"VoiceChatService", "voice_chat_service"},
 		{"UserService", "user_service"},
-		{"API", "a_p_i"},
-		{"getHTTPResponse", "get_h_t_t_p_response"},
+		// Acronyms stay glued (changed from legacy behavior that split on
+		// every uppercase; see toSnakeCase doc for rationale).
+		{"API", "api"},
+		{"getHTTPResponse", "get_http_response"},
 		{"simple", "simple"},
 	}
 	for _, tt := range tests {

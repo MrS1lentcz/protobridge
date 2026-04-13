@@ -75,7 +75,7 @@ func AddTaskServiceToServer(srv *mcp.Server, addr string, pool *grpcx.Pool, scal
 	srv.AddTool(
 		"list_tasks",
 		"Lists tasks for the authenticated user. Useful when the LLM needs an\noverview of what's open before suggesting next actions.",
-		json.RawMessage("{\"properties\":{\"paging\":{\"title\":\"Paging\",\"type\":\"object\"},\"priority_filter\":{\"enum\":[\"low\",\"medium\",\"high\",\"critical\"],\"type\":\"string\"},\"status_filter\":{\"enum\":[\"todo\",\"in_progress\",\"done\"],\"type\":\"string\"}},\"type\":\"object\"}"),
+		json.RawMessage("{\"properties\":{\"paging\":{\"properties\":{\"limit\":{\"format\":\"int32\",\"type\":\"integer\"},\"page\":{\"format\":\"int32\",\"type\":\"integer\"}},\"type\":\"object\"},\"priority_filter\":{\"enum\":[\"low\",\"medium\",\"high\",\"critical\"],\"type\":\"string\"},\"status_filter\":{\"enum\":[\"todo\",\"in_progress\",\"done\"],\"type\":\"string\"}},\"type\":\"object\"}"),
 		func(ctx context.Context, req mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 			conn, err := pool.ConnectScaled(addr, scalingCfg)
 			if err != nil {

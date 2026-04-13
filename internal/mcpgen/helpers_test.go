@@ -18,6 +18,17 @@ func TestToSnakeCase(t *testing.T) {
 		{"X", "x"},
 		{"Already_snake", "already_snake"},
 		{"", ""},
+		// Acronyms must stay glued together: "PR" is one word, not two.
+		// Matches the convention LLM clients (Claude Code et al.) already
+		// expect — splitting on every uppercase would break existing tool
+		// references.
+		{"GitCreatePR", "git_create_pr"},
+		{"GitUpdatePR", "git_update_pr"},
+		{"HTTPRequest", "http_request"},
+		{"ParseURL", "parse_url"},
+		{"APIKey", "api_key"},
+		{"SimpleAPI", "simple_api"},
+		{"IPv4Address", "i_pv4_address"}, // ambiguous by design: no way to tell "v4" is part of the acronym
 	}
 	for _, tc := range cases {
 		if got := toSnakeCase(tc.in); got != tc.want {
@@ -29,7 +40,7 @@ func TestToSnakeCase(t *testing.T) {
 func TestToScreamingSnake(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"TaskService", "TASK_SERVICE"},
-		{"TS", "T_S"}, // simple per-uppercase-letter splitter — TS → T_S; refactor if it becomes a problem
+		{"TS", "TS"}, // pure-acronym stays glued — matches the acronym-aware rules in generator.ToSnakeCase
 		{"x", "X"},
 	}
 	for _, tc := range cases {

@@ -31,7 +31,26 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 		}
 	}
 
-	api := &ParsedAPI{}
+	api := &ParsedAPI{Messages: make(map[string]*MessageType, len(msgMap))}
+	// Populate the global message index so nested-message schema lookups
+	// can recurse into full field lists instead of emitting empty stubs.
+	// Pre-seed with bare stubs first so resolveMessageType's recursive
+	// lookups can always succeed for cyclic or forward-referenced types;
+	// fields get filled in the second pass.
+	for fqn := range msgMap {
+		api.Messages[fqn] = &MessageType{
+			Name:     lastSegment(fqn),
+			FullName: fqn,
+		}
+	}
+	for fqn, desc := range msgMap {
+		full := resolveMessageType(msgMap, enumMap, fqn)
+		// Overwrite fields/oneofs on the pre-seeded stub in place so any
+		// earlier reference stays pointer-stable.
+		api.Messages[fqn].Fields = full.Fields
+		api.Messages[fqn].OneofDecls = full.OneofDecls
+		_ = desc
+	}
 
 	// Only process files that were explicitly requested for generation.
 	filesToGenerate := make(map[string]bool)

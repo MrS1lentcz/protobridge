@@ -7,6 +7,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/mrs1lentcz/protobridge/internal/generator"
 	"github.com/mrs1lentcz/protobridge/internal/parser"
 )
 
@@ -133,18 +134,7 @@ func serviceHasMCP(svc *parser.Service) bool {
 }
 
 func toScreamingSnake(s string) string {
-	var b strings.Builder
-	for i, r := range s {
-		if i > 0 && r >= 'A' && r <= 'Z' {
-			b.WriteByte('_')
-		}
-		if r >= 'a' && r <= 'z' {
-			b.WriteRune(r - 32)
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+	return strings.ToUpper(generator.ToSnakeCase(s))
 }
 
 func toLowerCamel(s string) string {

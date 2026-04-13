@@ -182,7 +182,7 @@ func TestParamsFromMessage_OneofSkipped(t *testing.T) {
 			{Name: "alt", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING, OneofIndex: int32Ptr(0)},
 		},
 	}
-	params := paramsFromMessage(mt)
+	params := paramsFromMessage(mt, nil)
 	if len(params) != 1 || params[0].Name != "scalar" {
 		t.Errorf("oneof field should be skipped: %v", params)
 	}

@@ -7,6 +7,13 @@ import "google.golang.org/protobuf/types/descriptorpb"
 type ParsedAPI struct {
 	Services   []*Service
 	AuthMethod *AuthMethod
+
+	// Messages indexes every message type reachable from the processed
+	// proto files by its fully-qualified name (with leading dot, matching
+	// proto descriptor convention — e.g. ".taskboard.v1.Task"). Nested
+	// message fields reference peers by TypeName; consumers look up the
+	// full MessageType here to inline a schema recursively.
+	Messages map[string]*MessageType
 }
 
 type Service struct {

@@ -50,7 +50,16 @@
       "inputSchema": {
         "properties": {
           "paging": {
-            "title": "Paging",
+            "properties": {
+              "limit": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "page": {
+                "format": "int32",
+                "type": "integer"
+              }
+            },
             "type": "object"
           },
           "priority_filter": {

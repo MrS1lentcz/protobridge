@@ -22,7 +22,7 @@ func TestMessageSchema_SelfReferenceReturnsStub(t *testing.T) {
 		},
 	}
 	seen := map[string]bool{".x.Node": true}
-	got := messageSchema(mt, seen)
+	got := messageSchema(mt, seen, nil)
 	if got["type"] != "object" {
 		t.Errorf("self-ref guard should return generic object stub, got %v", got)
 	}
@@ -42,7 +42,7 @@ func TestMessageSchema_CopiesSeenSet(t *testing.T) {
 		},
 	}
 	caller := map[string]bool{".x.Other": true}
-	_ = messageSchema(mt, caller)
+	_ = messageSchema(mt, caller, nil)
 	if caller[".x.M"] {
 		t.Error("messageSchema mutated the caller's seen map")
 	}
