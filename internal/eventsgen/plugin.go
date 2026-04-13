@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/pluginpb"
 
+	"github.com/mrs1lentcz/protobridge/internal/generator"
 	"github.com/mrs1lentcz/protobridge/internal/parser"
 )
 
@@ -148,30 +149,15 @@ func filename(pkgPath, outputPkg string) string {
 
 // broadcastServiceFilename derives the output path for a per-service
 // broadcast WS handler. The stem is the service name in snake_case so the
-// file sits alphabetically alongside the events helpers.
+// file sits alphabetically alongside the events helpers. Uses the shared
+// generator.ToSnakeCase so acronyms stay together ("HTTPBroadcast" →
+// "http_broadcast", not "h_t_t_p_broadcast").
 func broadcastServiceFilename(svcName, outputPkg string) string {
-	stem := toSnakeCase(svcName) + "_broadcast.go"
+	stem := generator.ToSnakeCase(svcName) + "_broadcast.go"
 	if outputPkg != "" && outputPkg != "events" {
 		return outputPkg + "/" + stem
 	}
 	return stem
-}
-
-// toSnakeCase mirrors the REST generator's helper but lives here to avoid
-// a cross-package dep cycle (eventsgen already imports generator for
-// RenderTemplate; the helper is tiny enough to duplicate).
-func toSnakeCase(s string) string {
-	var out []rune
-	for i, r := range s {
-		if r >= 'A' && r <= 'Z' {
-			if i > 0 {
-				out = append(out, '_')
-			}
-			r += 'a' - 'A'
-		}
-		out = append(out, r)
-	}
-	return string(out)
 }
 
 // packageFilenameStem turns a Go package import path into a stable,

@@ -145,7 +145,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("events bus init: %v", err)
 	}
-	defer func() { _ = bus.(interface{ Close() error }).Close() }()
+	defer func() { _ = bus.Close() }()
 
 	{{ if and .HasAuth .AuthHasLabels -}}
 	// Auth response declares a labels map — extract per request and feed

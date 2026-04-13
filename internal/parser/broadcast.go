@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"strings"
 
 	"google.golang.org/protobuf/types/descriptorpb"
 
@@ -25,8 +26,12 @@ func buildBroadcastService(
 	messages map[string]*MessageType,
 	eventByFQN map[string]*Event,
 ) (*BroadcastService, error) {
-	if opts.GetRoute() == "" {
+	route := opts.GetRoute()
+	if route == "" {
 		return nil, fmt.Errorf("broadcast: route must be set")
+	}
+	if !strings.HasPrefix(route, "/") {
+		return nil, fmt.Errorf("broadcast: route %q must start with %q — generators emit it verbatim as the HTTP mount path", route, "/")
 	}
 	if len(svc.Method) != 1 {
 		return nil, fmt.Errorf("broadcast: service must define exactly one streaming RPC, got %d methods", len(svc.Method))
@@ -42,6 +47,15 @@ func buildBroadcastService(
 	}
 	if len(envelope.OneofDecls) != 1 {
 		return nil, fmt.Errorf("broadcast: envelope %s must contain exactly one oneof declaration, got %d", envelope.Name, len(envelope.OneofDecls))
+	}
+	// Envelope may contain ONLY the oneof's variants — anything else
+	// (scalar sibling fields, a second oneof, unrelated messages) would
+	// be silently dropped by codegen, and users would hit confusing
+	// mismatches between proto and wire. Fail fast with a clear message.
+	for _, f := range envelope.Fields {
+		if f.OneofIndex == nil {
+			return nil, fmt.Errorf("broadcast: envelope %s field %q must be part of the oneof — extra fields outside the envelope's single oneof are not supported", envelope.Name, f.Name)
+		}
 	}
 
 	var (

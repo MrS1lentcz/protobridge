@@ -14,7 +14,7 @@ func TestNewBusFromEnvDefaults(t *testing.T) {
 	if bus == nil {
 		t.Fatal("expected non-nil bus")
 	}
-	_ = bus.(*WatermillBus).Close()
+	_ = bus.Close()
 }
 
 func TestNewBusFromEnvMemoryScheme(t *testing.T) {
@@ -23,7 +23,7 @@ func TestNewBusFromEnvMemoryScheme(t *testing.T) {
 	if err != nil {
 		t.Fatalf("memory://: %v", err)
 	}
-	_ = bus.(*WatermillBus).Close()
+	_ = bus.Close()
 }
 
 func TestNewBusFromEnvReservedSchemes(t *testing.T) {

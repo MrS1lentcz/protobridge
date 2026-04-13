@@ -7,9 +7,12 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/metric"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -113,19 +116,34 @@ func MetricsHandler() http.Handler {
 	return promhttp.Handler()
 }
 
-// ActiveConnections provides a gauge for tracking active WS/SSE connections.
-// The counter is instantiated once at init — Int64UpDownCounter only fails
-// on genuinely bogus instrument names, which we control.
-var activeConnectionsCounter, _ = otel.Meter("protobridge").Int64UpDownCounter("protobridge.active_connections")
+// activeConnectionsCounter tracks concurrent WS/SSE connections. Built
+// once at init; instrument-creation failure (shouldn't happen with our
+// hardcoded name, but guard anyway) degrades to a no-op counter instead
+// of panicking on Add().
+var activeConnectionsCounter = mustActiveConnectionsCounter()
 
-// RecordConnectionOpen increments the active connections gauge.
+func mustActiveConnectionsCounter() metric.Int64UpDownCounter {
+	c, err := otel.Meter("protobridge").Int64UpDownCounter("protobridge.active_connections")
+	if err != nil {
+		logError(err)
+		// Drop back to a no-op meter whose counter never panics; recording
+		// just becomes a no-op on Add(). Safer than a nil instrument.
+		c, _ = metricnoop.NewMeterProvider().Meter("protobridge").Int64UpDownCounter("protobridge.active_connections")
+	}
+	return c
+}
+
+// RecordConnectionOpen increments the active connections gauge. connType
+// ("ws" or "sse") is attached so dashboards can break down by transport.
 func RecordConnectionOpen(connType string) {
-	activeConnectionsCounter.Add(context.Background(), 1)
+	activeConnectionsCounter.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("conn_type", connType)))
 }
 
 // RecordConnectionClose decrements the active connections gauge.
 func RecordConnectionClose(connType string) {
-	activeConnectionsCounter.Add(context.Background(), -1)
+	activeConnectionsCounter.Add(context.Background(), -1,
+		metric.WithAttributes(attribute.String("conn_type", connType)))
 }
 
 // GracefulShutdownOTel flushes and shuts down OTel providers.
