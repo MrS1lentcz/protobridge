@@ -3,6 +3,7 @@ package generator
 import (
 	"bytes"
 	"fmt"
+	"go/format"
 	"strings"
 	"text/template"
 
@@ -398,7 +399,14 @@ func generateServiceFile(svc *parser.Service, api *parser.ParsedAPI) (string, er
 	if err := serviceFileTmpl.Execute(&buf, data); err != nil {
 		return "", err
 	}
-	return buf.String(), nil
+	// Conditional imports leave blank lines / empty groups — gofmt the output
+	// so the emitted file is byte-stable and integrators don't need to run
+	// goimports after every protoc invocation.
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return "", fmt.Errorf("gofmt generated handler: %w\n%s", err, buf.String())
+	}
+	return string(formatted), nil
 }
 
 func chiMethodName(httpMethod string) string {
