@@ -122,11 +122,15 @@ func TestFilename_RespectsOutputPkgOverride(t *testing.T) {
 	cases := []struct {
 		pkgPath, outputPkg, want string
 	}{
-		{"example.com/foo/events", "events", "events_events.go"},
-		{"example.com/foo/myapp", "events", "myapp_events.go"},
+		// Full package path encoded into the stem so foo/v1 + bar/v1 cannot collide.
+		{"example.com/foo/events", "events", "example_com_foo_events_events.go"},
+		{"example.com/foo/myapp", "events", "example_com_foo_myapp_events.go"},
 		// Custom output_pkg adds a directory level to keep the override
 		// visible in the layout.
-		{"example.com/foo/myapp", "eventspkg", "eventspkg/myapp_events.go"},
+		{"example.com/foo/myapp", "eventspkg", "eventspkg/example_com_foo_myapp_events.go"},
+		// Versioned packages with the same leaf land in distinct files.
+		{"a.com/foo/v1", "events", "a_com_foo_v1_events.go"},
+		{"a.com/bar/v1", "events", "a_com_bar_v1_events.go"},
 	}
 	for _, tc := range cases {
 		if got := filename(tc.pkgPath, tc.outputPkg); got != tc.want {
@@ -141,7 +145,7 @@ func TestGenerateEventsFile_EmptyInputPanics(t *testing.T) {
 			t.Fatal("expected panic on empty events (caller invariant violation)")
 		}
 	}()
-	_ = generateEventsFile("example.com/x", nil)
+	_ = generateEventsFile("example.com/x", "events", nil)
 }
 
 // TestAsyncAPI_AllScalarTypes makes sure fieldKindSchema's switch arms
@@ -280,8 +284,8 @@ func TestBroadcastFilename(t *testing.T) {
 	cases := []struct {
 		pkgPath, outputPkg, want string
 	}{
-		{"example.com/foo/myapp", "events", "myapp_broadcast.go"},
-		{"example.com/foo/myapp", "eventspkg", "eventspkg/myapp_broadcast.go"},
+		{"example.com/foo/myapp", "events", "example_com_foo_myapp_broadcast.go"},
+		{"example.com/foo/myapp", "eventspkg", "eventspkg/example_com_foo_myapp_broadcast.go"},
 		{"single", "events", "single_broadcast.go"},
 	}
 	for _, tc := range cases {
@@ -300,7 +304,7 @@ func TestGenerateBroadcastFile_NoPublicEventsReturnsEmpty(t *testing.T) {
 		Message: mt, Subject: "x", Kind: parserpkg.EventKindDurable,
 		Visibility: parserpkg.EventVisibilityInternal, GoPackage: "example.com/x",
 	}}
-	got := generateBroadcastFile("example.com/x", api.Events)
+	got := generateBroadcastFile("example.com/x", "events", api.Events)
 	if got != "" {
 		t.Errorf("expected empty content for non-public-fan-out events, got: %s", got)
 	}
@@ -313,7 +317,7 @@ func TestGenerateBroadcastFile_PublicFanOutEmitsExportedSymbols(t *testing.T) {
 		Kind: parserpkg.EventKindBroadcast, Visibility: parserpkg.EventVisibilityPublic,
 		GoPackage: "example.com/myapp",
 	}}
-	got := generateBroadcastFile("example.com/myapp", events)
+	got := generateBroadcastFile("example.com/myapp", "events", events)
 	for _, want := range []string{
 		"MyappBroadcastSubjects",
 		"MyappBroadcastEnvelope",

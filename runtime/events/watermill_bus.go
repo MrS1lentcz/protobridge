@@ -35,6 +35,10 @@ type WatermillBus struct {
 
 // Publish dispatches to the right Watermill publisher based on kind. Both
 // publishes durable first (must succeed) then broadcast (best-effort).
+//
+// Returns a clear configuration error if the publisher required for the
+// chosen kind is nil — this used to panic in production for callers who
+// only configured one half of the bus.
 func (b *WatermillBus) Publish(ctx context.Context, subject string, payload []byte, kind Kind, headers map[string]string) error {
 	b.mu.Lock()
 	if b.closed {
@@ -50,6 +54,9 @@ func (b *WatermillBus) Publish(ctx context.Context, subject string, payload []by
 
 	switch kind {
 	case KindBroadcast:
+		if b.BroadcastPublisher == nil {
+			return errors.New("events: broadcast publisher not configured")
+		}
 		// Best-effort: log on failure, do not surface to caller.
 		if err := b.BroadcastPublisher.Publish(subject, msg); err != nil {
 			b.logger().Warn("events: broadcast publish failed",
@@ -57,11 +64,17 @@ func (b *WatermillBus) Publish(ctx context.Context, subject string, payload []by
 		}
 		return nil
 	case KindDurable:
+		if b.DurablePublisher == nil {
+			return errors.New("events: durable publisher not configured")
+		}
 		if err := b.DurablePublisher.Publish(subject, msg); err != nil {
 			return fmt.Errorf("events: durable publish %q: %w", subject, err)
 		}
 		return nil
 	case KindBoth:
+		if b.DurablePublisher == nil || b.BroadcastPublisher == nil {
+			return errors.New("events: BOTH kind requires both durable and broadcast publishers")
+		}
 		// Durable first; on success try broadcast as best-effort. The
 		// broadcast leg uses a separate Message instance so Watermill's
 		// per-message ack tracking stays clean.
@@ -82,21 +95,35 @@ func (b *WatermillBus) Publish(ctx context.Context, subject string, payload []by
 	}
 }
 
-// SubscribeDurable registers a load-balanced consumer. The group parameter
-// is passed through to backend implementations that honour it (e.g. NATS
-// JetStream durable name, AMQP queue name, Redis Streams consumer group);
-// gochannel ignores it. Returns the subscription handle for Unsubscribe.
+// SubscribeDurable registers a load-balanced consumer.
+//
+// IMPORTANT: Watermill's Subscriber interface is addressed by *topic only* —
+// consumer groups are baked into the Subscriber instance via its config
+// (e.g. NATS JetStream `DurableName`, AMQP queue name, Redis Streams
+// consumer group). Passing a different group to a single shared
+// DurableSubscriber does NOT load-balance the stream. To get true
+// per-group load-balancing, instantiate a separate Watermill Subscriber
+// per group (typically at app startup) and pass it to its own WatermillBus.
+//
+// Returning an error if a non-empty group is passed would force every
+// caller to track this caveat; instead the bus accepts the group, logs a
+// warning the first time it sees one, and proceeds with the configured
+// subscriber. Tracked as v0.5+ work — a per-group Subscriber factory.
 func (b *WatermillBus) SubscribeDurable(subject, group string, h Handler) (Subscription, error) {
-	return b.subscribe(b.DurableSubscriber, subject, group, h, true)
+	if group != "" {
+		b.logger().Warn("events: SubscribeDurable group is informational only — see WatermillBus docs",
+			"subject", subject, "group", group)
+	}
+	return b.subscribe(b.DurableSubscriber, subject, h)
 }
 
 // SubscribeBroadcast registers an ephemeral fan-out consumer. group is
 // ignored; broadcast subscribers always receive every message.
 func (b *WatermillBus) SubscribeBroadcast(subject string, h Handler) (Subscription, error) {
-	return b.subscribe(b.BroadcastSubscriber, subject, "", h, false)
+	return b.subscribe(b.BroadcastSubscriber, subject, h)
 }
 
-func (b *WatermillBus) subscribe(sub wmsg.Subscriber, subject, group string, h Handler, durable bool) (Subscription, error) {
+func (b *WatermillBus) subscribe(sub wmsg.Subscriber, subject string, h Handler) (Subscription, error) {
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()
@@ -110,15 +137,6 @@ func (b *WatermillBus) subscribe(sub wmsg.Subscriber, subject, group string, h H
 	b.subCancels = append(b.subCancels, cancel)
 	b.mu.Unlock()
 
-	// Watermill subscribers are addressed by topic only. Group routing for
-	// durable consumers is encoded by the backend's New<X>Subscriber config
-	// — we surface it via the Bus API for forward-compatibility (so callers
-	// don't have to wire one Subscriber per group themselves) but pass
-	// through unchanged today; backends ignoring it produce the simplest
-	// possible behaviour (single consumer = no load balancing).
-	_ = group
-	_ = durable
-
 	ch, err := sub.Subscribe(ctx, subject)
 	if err != nil {
 		cancel()
@@ -127,14 +145,14 @@ func (b *WatermillBus) subscribe(sub wmsg.Subscriber, subject, group string, h H
 
 	go func() {
 		for m := range ch {
-			b.dispatch(ctx, m, h)
+			b.dispatch(ctx, subject, m, h)
 		}
 	}()
 
 	return &watermillSubscription{cancel: cancel}, nil
 }
 
-func (b *WatermillBus) dispatch(ctx context.Context, m *wmsg.Message, h Handler) {
+func (b *WatermillBus) dispatch(ctx context.Context, subject string, m *wmsg.Message, h Handler) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			b.logger().Error("events: handler panic", "panic", rec)
@@ -145,17 +163,21 @@ func (b *WatermillBus) dispatch(ctx context.Context, m *wmsg.Message, h Handler)
 	for k, v := range m.Metadata {
 		headers[k] = v
 	}
+	// Subject must be the actual subscribed topic — Watermill doesn't stamp
+	// it on the Message, so we pass it through from subscribe().
 	msg := Message{
-		Subject: m.UUID, // watermill stamps topic on subscriber side
+		Subject: subject,
 		Payload: m.Payload,
 		Headers: headers,
 		Ack:     func() { m.Ack() },
 		Nack:    func() { m.Nack() },
 	}
+	// Contract per Bus.Handler doc: the handler is responsible for calling
+	// Ack/Nack on msg before returning. dispatch only logs a non-nil error;
+	// it does NOT auto-Nack — the generated subscriber helpers already do
+	// that, and double-Nack on Watermill messages can panic depending on
+	// the backend.
 	if err := h(ctx, msg); err != nil {
-		// Handler signalled failure but didn't ack/nack itself — be safe
-		// and Nack so the backend can redeliver.
-		m.Nack()
 		b.logger().Warn("events: handler returned error", "err", err)
 	}
 }

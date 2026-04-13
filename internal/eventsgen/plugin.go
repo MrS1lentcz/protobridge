@@ -96,11 +96,7 @@ func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorRespo
 	sort.Strings(pkgs)
 
 	for _, pkg := range pkgs {
-		// File name: <pkg-leaf>/events.go relative to the protoc output dir.
-		// Convention matches protoc-gen-go's source-relative layout: the
-		// caller chose where the generated proto landed; we drop our file
-		// in the same directory.
-		content := generateEventsFile(pkg, byPkg[pkg])
+		content := generateEventsFile(pkg, opts.OutputPkg, byPkg[pkg])
 		name := filename(pkg, opts.OutputPkg)
 		resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
 			Name: &name, Content: &content,
@@ -110,7 +106,7 @@ func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorRespo
 		// has at least one PUBLIC fan-out event. Empty content signals
 		// "skip" (no PUBLIC events) and we omit the file entirely so users
 		// don't get an empty broadcast file in pure-DURABLE packages.
-		if broadcast := generateBroadcastFile(pkg, byPkg[pkg]); broadcast != "" {
+		if broadcast := generateBroadcastFile(pkg, opts.OutputPkg, byPkg[pkg]); broadcast != "" {
 			bname := broadcastFilename(pkg, opts.OutputPkg)
 			resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
 				Name: &bname, Content: &broadcast,
@@ -128,34 +124,47 @@ func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorRespo
 }
 
 // filename returns the path to the events.go file relative to protoc's
-// --events_out directory. We mirror the proto's Go package path so the
-// generated file lands next to the matching .pb.go.
+// --events_out directory. The full Go import path is encoded into the
+// filename stem so a single request that contains multiple packages
+// sharing the same leaf (`foo/v1` and `bar/v1` are both "v1") cannot
+// produce colliding output files.
 //
-// Example: pkg = "github.com/you/myapp/gen/events" → "events/events.go"
-// (protoc output dir + "events/" + filename).
+// Example:
+//
+//	pkg = "github.com/you/myapp/gen/foo/v1" →
+//	    "github_com_you_myapp_gen_foo_v1_events.go"
+//
+// When outputPkg is set to anything other than the default, the file is
+// emitted under that directory.
 func filename(pkgPath, outputPkg string) string {
-	leaf := pkgPath
-	if i := strings.LastIndex(pkgPath, "/"); i >= 0 {
-		leaf = pkgPath[i+1:]
-	}
+	stem := packageFilenameStem(pkgPath)
 	if outputPkg != "" && outputPkg != "events" {
-		// Caller overrode the package name; honour it for the directory too.
-		return outputPkg + "/" + leaf + "_events.go"
+		return outputPkg + "/" + stem + "_events.go"
 	}
-	return leaf + "_events.go"
+	return stem + "_events.go"
 }
 
 // broadcastFilename mirrors filename() but uses a "_broadcast.go" suffix
 // so the WS handler lands next to the helpers in the same directory.
 func broadcastFilename(pkgPath, outputPkg string) string {
-	leaf := pkgPath
-	if i := strings.LastIndex(pkgPath, "/"); i >= 0 {
-		leaf = pkgPath[i+1:]
-	}
+	stem := packageFilenameStem(pkgPath)
 	if outputPkg != "" && outputPkg != "events" {
-		return outputPkg + "/" + leaf + "_broadcast.go"
+		return outputPkg + "/" + stem + "_broadcast.go"
 	}
-	return leaf + "_broadcast.go"
+	return stem + "_broadcast.go"
+}
+
+// packageFilenameStem turns a Go package import path into a stable,
+// filesystem-safe stem suitable for generated filenames. Slashes,
+// backslashes, dots and dashes all collapse to underscores so two
+// distinct packages can never share a stem.
+func packageFilenameStem(pkgPath string) string {
+	replacer := strings.NewReplacer("/", "_", `\`, "_", ".", "_", "-", "_")
+	stem := strings.Trim(replacer.Replace(pkgPath), "_")
+	if stem == "" {
+		return "events"
+	}
+	return stem
 }
 
 func errResponse(err error) *pluginpb.CodeGeneratorResponse {

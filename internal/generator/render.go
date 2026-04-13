@@ -32,3 +32,16 @@ func renderTemplate(tmpl *template.Template, data any) string {
 func RenderTemplate(tmpl *template.Template, data any) string {
 	return renderTemplate(tmpl, data)
 }
+
+// renderFragment executes tmpl against data WITHOUT running gofmt. Use it
+// for templates that emit Go *fragments* (no `package` clause / imports)
+// — e.g. WS handler bodies that get spliced into a larger file. format.Source
+// would reject a fragment as invalid syntax and panic; the parent template
+// will gofmt the whole assembled file once.
+func renderFragment(tmpl *template.Template, data any) string {
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		panic("generator: template execute: " + err.Error())
+	}
+	return buf.String()
+}

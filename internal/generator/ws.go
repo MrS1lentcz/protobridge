@@ -64,5 +64,9 @@ func generateWSHandler(svc *parser.Service, m *parser.Method) string {
 		InputTypeName:   m.InputType.Name,
 		ExcludeAuth:     m.ExcludeAuth,
 	}
-	return renderTemplate(wsHandlerTmpl, data)
+	// wsHandlerTmpl emits a Go fragment (no package/imports) that the parent
+	// template inlines, so we skip format.Source here — it would reject the
+	// fragment as invalid syntax. The enclosing service file gets gofmt'd
+	// in renderTemplate after assembly.
+	return renderFragment(wsHandlerTmpl, data)
 }

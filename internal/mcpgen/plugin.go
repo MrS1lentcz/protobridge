@@ -101,9 +101,6 @@ func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorRespo
 			continue
 		}
 		content := generateHandlerFile(svc, api.Messages)
-		if err != nil {
-			return nil, fmt.Errorf("handler for %s: %w", svc.Name, err)
-		}
 		name := "handler/" + camelToSnake(svc.Name) + ".go"
 		resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
 			Name: &name, Content: &content,

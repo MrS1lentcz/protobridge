@@ -18,7 +18,7 @@ import (
 // subject in the package, plus a Register helper that mounts the runtime
 // broadcast handler on a chi router. Returns "" when the package has no
 // events with PUBLIC visibility (consumer skips emitting the file).
-func generateBroadcastFile(pkgPath string, events []*parser.Event) string {
+func generateBroadcastFile(pkgPath, outputPkg string, events []*parser.Event) string {
 	var public []tmplBroadcastEvent
 	for _, ev := range events {
 		// Broadcast WS only carries fan-out events. Pure DURABLE events are
@@ -47,7 +47,7 @@ func generateBroadcastFile(pkgPath string, events []*parser.Event) string {
 
 	data := broadcastFileData{
 		ProtoImport: pkgPath,
-		PkgName:     "events",
+		PkgName:     outputPkg,
 		// Title-case the leaf so the generated symbols are exported Go
 		// identifiers (e.g. "myapp" → "Myapp", "v1" → "V1"). Underscores
 		// are preserved; we don't try to be too clever here.
@@ -158,7 +158,7 @@ func Register{{ .PackageID }}Broadcast(r chi.Router, bus events.Bus, prefix stri
 // matches the convention `protoc-gen-go` uses (one .pb.go per .proto file)
 // — but events are message-level annotations that may live anywhere in the
 // proto graph, so we group by the resolved Go import path instead.
-func generateEventsFile(pkgPath string, events []*parser.Event) string {
+func generateEventsFile(pkgPath, outputPkg string, events []*parser.Event) string {
 	if len(events) == 0 {
 		// Caller (Generate) only ever passes a non-empty slice — defensive
 		// panic surfaces a regression instead of silently emitting nothing.
@@ -173,7 +173,7 @@ func generateEventsFile(pkgPath string, events []*parser.Event) string {
 
 	data := fileData{
 		ProtoImport: pkgPath,
-		PkgName:     "events", // generated package — see plugin entry for path resolution
+		PkgName:     outputPkg,
 	}
 	for _, ev := range events {
 		td := tmplEvent{

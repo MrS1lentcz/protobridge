@@ -11,8 +11,16 @@ import (
 //
 // Both broadcast and durable paths share one gochannel instance; gochannel
 // fan-outs to every subscriber, so durable consumer groups don't load-balance
-// here. For production semantics use NewWatermillBus with real publishers
-// (NATS JetStream + core, Redis Streams + Pub/Sub, etc.).
+// here. For production semantics construct a *WatermillBus directly with
+// real publishers/subscribers in its struct fields:
+//
+//	bus := &events.WatermillBus{
+//	    BroadcastPublisher:  natsCorePub,
+//	    BroadcastSubscriber: natsCoreSub,
+//	    DurablePublisher:    jsPub,   // NATS JetStream
+//	    DurableSubscriber:   jsSub,
+//	}
+//	defer bus.Close()
 func NewInMemoryBus() *WatermillBus {
 	logger := watermill.NopLogger{}
 	pubsub := gochannel.NewGoChannel(gochannel.Config{

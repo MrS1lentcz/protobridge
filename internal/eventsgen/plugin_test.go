@@ -90,14 +90,14 @@ func TestGenerate_EmitsHelpersAndAsyncAPI(t *testing.T) {
 	for _, f := range resp.File {
 		files[f.GetName()] = f.GetContent()
 	}
-	if _, ok := files["events_events.go"]; !ok {
+	if _, ok := files["example_com_myapp_events_events.go"]; !ok {
 		t.Fatalf("missing per-pkg events file; got %v", keys(files))
 	}
 	if _, ok := files["schema/asyncapi.json"]; !ok {
 		t.Fatalf("missing asyncapi schema; got %v", keys(files))
 	}
 
-	go_ := files["events_events.go"]
+	go_ := files["example_com_myapp_events_events.go"]
 
 	// Every event gets a SubjectXxx constant + EmitXxx.
 	for _, want := range []string{
@@ -141,7 +141,7 @@ func TestGenerate_EmitsHelpersAndAsyncAPI(t *testing.T) {
 
 	// Generated file must be parseable Go (format.Source already ran inside
 	// the generator; this guards against syntax regressions).
-	if _, err := parser.ParseFile(token.NewFileSet(), "events_events.go", go_, parser.AllErrors); err != nil {
+	if _, err := parser.ParseFile(token.NewFileSet(), "example_com_myapp_events_events.go", go_, parser.AllErrors); err != nil {
 		t.Errorf("generated file is not parseable Go: %v\n%s", err, go_)
 	}
 

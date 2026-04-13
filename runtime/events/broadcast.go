@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/coder/websocket"
@@ -15,8 +16,9 @@ import (
 // payload into the matching proto and re-marshal as protojson; runtime stays
 // agnostic about the message catalog.
 //
-// Returning a non-nil error is logged and the message is dropped — the WS
-// stream stays alive (the client is not disconnected on a single bad event).
+// Returning a non-nil error causes the message to be dropped (the WS stream
+// stays alive — one bad event does not disconnect the client) and the
+// failure is logged via BroadcastConfig.Logger (or slog.Default when unset).
 type EnvelopeMarshaler func(subject string, payload []byte, headers map[string]string) ([]byte, error)
 
 // BroadcastConfig wires a BroadcastHandler. Subjects lists every PUBLIC
@@ -27,6 +29,24 @@ type BroadcastConfig struct {
 	Bus      Bus
 	Subjects []string
 	Marshal  EnvelopeMarshaler
+
+	// OriginPatterns restricts which Origin headers are accepted on the
+	// inbound WS handshake (passed to websocket.AcceptOptions). Empty
+	// means "same-origin only" — the secure default. To allow specific
+	// browser origins, list them explicitly: ["app.example.com"].
+	// To allow ALL origins (cross-site WS hijacking risk), set
+	// SkipOriginVerify=true; preferred only behind an upstream proxy
+	// that already enforces origin policy.
+	OriginPatterns []string
+
+	// SkipOriginVerify disables the WS Origin check entirely. Defaults
+	// to false (secure). Only set to true when an upstream layer (e.g.
+	// nginx, Cloudflare, IAP) enforces the origin policy upstream.
+	SkipOriginVerify bool
+
+	// Logger receives marshaler errors (one bad event dropped, stream
+	// stays alive). Defaults to slog.Default() when nil.
+	Logger *slog.Logger
 }
 
 // NewBroadcastHandler returns an http.Handler that upgrades the request to
@@ -47,7 +67,8 @@ func NewBroadcastHandler(cfg BroadcastConfig) http.Handler {
 			return
 		}
 		ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			InsecureSkipVerify: true, // origin policy belongs in middleware
+			OriginPatterns:     cfg.OriginPatterns,
+			InsecureSkipVerify: cfg.SkipOriginVerify,
 		})
 		if err != nil {
 			return // websocket library already wrote the response
@@ -75,7 +96,14 @@ func NewBroadcastHandler(cfg BroadcastConfig) http.Handler {
 			sub, err := cfg.Bus.SubscribeBroadcast(subj, func(_ context.Context, m Message) error {
 				envelope, mErr := cfg.Marshal(subj, m.Payload, m.Headers)
 				if mErr != nil {
-					// Malformed event on the bus — drop, don't kill the client.
+					// Malformed event on the bus — drop, don't kill the
+					// client. Log so operators see persistent issues.
+					logger := cfg.Logger
+					if logger == nil {
+						logger = slog.Default()
+					}
+					logger.Warn("events: broadcast marshal failed",
+						"subject", subj, "err", mErr)
 					return nil
 				}
 				select {

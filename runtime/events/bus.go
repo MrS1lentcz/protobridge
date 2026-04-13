@@ -51,14 +51,22 @@ type Bus interface {
 
 	// SubscribeDurable creates a load-balanced at-least-once subscription.
 	// Multiple subscribers in the same group split the message stream. The
-	// handler must call msg.Ack() on success or msg.Nack(err) on failure
-	// before returning; the handler's return value is reserved for future
-	// middleware integration.
+	// handler MUST call msg.Ack() on success or msg.Nack() on failure
+	// before returning — those are the explicit signals the backend uses
+	// to commit / redeliver. Returning a non-nil error is logged by the
+	// runtime but does NOT auto-Ack/Nack on the handler's behalf
+	// (double-Ack/Nack panics on some backends).
+	//
+	// Note on the group parameter: Watermill addresses subscribers by
+	// topic only. Real per-group load-balancing requires a separate
+	// Subscriber instance per group at app startup; today's WatermillBus
+	// accepts the group, logs an info-level warning, and proceeds with
+	// the configured DurableSubscriber. See WatermillBus docs.
 	SubscribeDurable(subject, group string, h Handler) (Subscription, error)
 
 	// SubscribeBroadcast creates an ephemeral fan-out subscription. Every
 	// subscriber gets every message; missed messages while offline are not
-	// redelivered. Ack/Nack are no-ops.
+	// redelivered. Ack/Nack are no-ops on broadcast subjects.
 	SubscribeBroadcast(subject string, h Handler) (Subscription, error)
 
 	// Close stops all subscriptions and releases backend resources. In-flight
@@ -67,10 +75,11 @@ type Bus interface {
 	Close() error
 }
 
-// Handler processes a delivered message. Returning a non-nil error and
-// calling msg.Nack() are equivalent to "redeliver"; returning nil and
-// calling msg.Ack() are equivalent to "done". Implementations should
-// pick one convention per backend.
+// Handler processes a delivered message. Delivery state is driven by
+// explicit msg.Ack() / msg.Nack() calls — the return value is informational
+// only (logged by the bus runtime). The handler MUST call exactly one of
+// Ack/Nack before returning on durable subscriptions; broadcast Ack/Nack
+// are no-ops.
 type Handler func(ctx context.Context, msg Message) error
 
 // Message is a delivered event. Payload is the raw proto wire bytes; the
