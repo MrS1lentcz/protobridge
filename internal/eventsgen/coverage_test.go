@@ -212,6 +212,33 @@ func TestAsyncAPI_AllScalarTypes(t *testing.T) {
 
 // TestAsyncAPI_EmptyAndCycle covers the nil-message / no-fields / cycle
 // paths in payloadSchema and inlineMessageSchema.
+func TestAsyncAPI_RequiredFieldsListed(t *testing.T) {
+	// Required fields in the proto end up in the AsyncAPI message payload's
+	// required[] array — covers the conditional that only fires when the
+	// request type has any required fields.
+	mt := &parserpkg.MessageType{
+		Name: "Req", FullName: ".x.Req",
+		Fields: []*parserpkg.Field{
+			{Name: "id", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING, Required: true},
+			{Name: "note", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING}, // not required
+		},
+	}
+	api := &parserpkg.ParsedAPI{
+		Messages: map[string]*parserpkg.MessageType{mt.FullName: mt},
+		Events: []*parserpkg.Event{{
+			Message: mt, Subject: "x.req", Kind: parserpkg.EventKindBroadcast,
+			Visibility: parserpkg.EventVisibilityPublic, GoPackage: "example.com/x",
+		}},
+	}
+	doc := generateAsyncAPI(api.Events, api.Messages)
+	if !strings.Contains(doc, `"required": [`) {
+		t.Errorf("required[] missing from AsyncAPI: %s", doc)
+	}
+	if !strings.Contains(doc, `"id"`) {
+		t.Errorf("required field name missing")
+	}
+}
+
 func TestAsyncAPI_EmptyAndCycle(t *testing.T) {
 	if got := payloadSchema(nil, nil); got["type"] != "object" {
 		t.Errorf("nil message: %v", got)

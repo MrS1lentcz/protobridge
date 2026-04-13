@@ -119,14 +119,12 @@ func getXVarName(v *descriptorpb.EnumValueDescriptorProto) string {
 
 // getEventOptions returns the (protobridge.event) MessageOptions extension
 // when present, plus a flag indicating presence (so callers can distinguish
-// "not annotated" from "annotated with all-default values").
+// "not annotated" from "annotated with all-default values"). Once
+// HasExtension returns true the type assertion is guaranteed to succeed
+// for typed extensions, so no defensive `, ok` branch is needed.
 func getEventOptions(m *descriptorpb.DescriptorProto) (*optionspb.EventOptions, bool) {
 	if m.Options == nil || !proto.HasExtension(m.Options, optionspb.E_Event) {
 		return nil, false
 	}
-	v, ok := proto.GetExtension(m.Options, optionspb.E_Event).(*optionspb.EventOptions)
-	if !ok || v == nil {
-		return nil, false
-	}
-	return v, true
+	return proto.GetExtension(m.Options, optionspb.E_Event).(*optionspb.EventOptions), true
 }

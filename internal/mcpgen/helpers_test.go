@@ -5,9 +5,11 @@ import (
 	"testing"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/pluginpb"
 
 	parserpkg "github.com/mrs1lentcz/protobridge/internal/parser"
+	optionspb "github.com/mrs1lentcz/protobridge/proto/protobridge"
 )
 
 func strPtr(s string) *string { return &s }
@@ -80,6 +82,55 @@ func TestRun_BadParameter(t *testing.T) {
 	resp := Run(bytes.NewReader(data))
 	if resp.Error == nil {
 		t.Error("expected error for unknown plugin option")
+	}
+}
+
+func TestRun_ParserError_SurfacesViaResponse(t *testing.T) {
+	// Two methods marked auth_method = parser.Parse rejects.
+	authOpts := &descriptorpb.MethodOptions{}
+	proto.SetExtension(authOpts, optionspb.E_AuthMethod, true)
+	req := &pluginpb.CodeGeneratorRequest{
+		FileToGenerate: []string{"x.proto"},
+		ProtoFile: []*descriptorpb.FileDescriptorProto{{
+			Name:    strPtr("x.proto"),
+			Package: strPtr("x.v1"),
+			MessageType: []*descriptorpb.DescriptorProto{
+				{Name: strPtr("Req")}, {Name: strPtr("Resp")},
+			},
+			Service: []*descriptorpb.ServiceDescriptorProto{{
+				Name: strPtr("S"),
+				Method: []*descriptorpb.MethodDescriptorProto{
+					{Name: strPtr("A"), InputType: strPtr(".x.v1.Req"), OutputType: strPtr(".x.v1.Resp"), Options: authOpts},
+					{Name: strPtr("B"), InputType: strPtr(".x.v1.Req"), OutputType: strPtr(".x.v1.Resp"), Options: authOpts},
+				},
+			}},
+		}},
+	}
+	data, _ := proto.Marshal(req)
+	resp := Run(bytes.NewReader(data))
+	if resp.Error == nil {
+		t.Fatal("expected parser error to surface in resp.Error")
+	}
+}
+
+func TestRun_GenerateError_SurfacesViaResponse(t *testing.T) {
+	// Valid request but no MCP-marked method → Generate returns an error
+	// ("no methods marked with (protobridge.mcp) = true").
+	req := &pluginpb.CodeGeneratorRequest{
+		Parameter:      strPtr("handler_pkg=example.com/test/h"),
+		FileToGenerate: []string{"x.proto"},
+		ProtoFile: []*descriptorpb.FileDescriptorProto{{
+			Name:    strPtr("x.proto"),
+			Package: strPtr("x.v1"),
+			MessageType: []*descriptorpb.DescriptorProto{
+				{Name: strPtr("Req")}, {Name: strPtr("Resp")},
+			},
+		}},
+	}
+	data, _ := proto.Marshal(req)
+	resp := Run(bytes.NewReader(data))
+	if resp.Error == nil {
+		t.Fatal("expected Generate error (no MCP methods) to surface")
 	}
 }
 

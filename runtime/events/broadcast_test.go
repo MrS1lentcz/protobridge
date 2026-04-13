@@ -103,6 +103,53 @@ type subErr struct{}
 
 func (e *subErr) Error() string { return "subscribe down" }
 
+func TestBroadcast_MarshalErrorDropsMessage(t *testing.T) {
+	// Marshal returning an error must not break the WS stream — the bad
+	// message is dropped and subsequent good messages still flow through.
+	bus := events.NewInMemoryBus()
+	t.Cleanup(func() { _ = bus.Close() })
+
+	first := true
+	marshaler := func(subject string, payload []byte, _ map[string]string) ([]byte, error) {
+		if first {
+			first = false
+			return nil, &subErr{} // simulate one-time decode failure
+		}
+		return events.MarshalJSONEnvelope(subject, json.RawMessage(payload))
+	}
+
+	srv := httptest.NewServer(events.NewBroadcastHandler(events.BroadcastConfig{
+		Bus:      bus,
+		Subjects: []string{"x"},
+		Marshal:  marshaler,
+	}))
+	t.Cleanup(srv.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.CloseNow() //nolint:errcheck
+
+	time.Sleep(50 * time.Millisecond)
+	// First publish triggers a marshal error → dropped.
+	_ = bus.Publish(ctx, "x", []byte(`{"a":1}`), events.KindBroadcast, nil)
+	time.Sleep(50 * time.Millisecond)
+	// Second publish marshals OK → arrives at the client.
+	_ = bus.Publish(ctx, "x", []byte(`{"b":2}`), events.KindBroadcast, nil)
+
+	_, data, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(data), `"b":2`) {
+		t.Errorf("expected the second (good) message, got: %s", data)
+	}
+}
+
 func TestBroadcast_SubscribeErrorClosesConnection(t *testing.T) {
 	srv := httptest.NewServer(events.NewBroadcastHandler(events.BroadcastConfig{
 		Bus:      &failingBus{},
