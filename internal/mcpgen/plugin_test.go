@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"go/parser"
 	"go/token"
+	"os"
 	"strings"
 	"testing"
 
@@ -42,6 +43,24 @@ func TestParseOptions_HandlerPkgAndForwardOverride(t *testing.T) {
 func TestParseOptions_UnknownKey(t *testing.T) {
 	if _, err := ParseOptions("bogus=x"); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestParseOptions_SkipsEmptyParts(t *testing.T) {
+	// Trailing/double commas should be tolerated (some build systems
+	// concatenate option strings sloppily).
+	opts, err := ParseOptions("handler_pkg=example.com/h,,")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.HandlerPkg != "example.com/h" {
+		t.Errorf("got %q", opts.HandlerPkg)
+	}
+}
+
+func TestParseOptions_MissingEquals(t *testing.T) {
+	if _, err := ParseOptions("handler_pkg"); err == nil {
+		t.Error("expected error for missing = sign")
 	}
 }
 
@@ -112,6 +131,30 @@ func TestGenerate_ServiceWithMCPMethods(t *testing.T) {
 		if _, err := parser.ParseFile(token.NewFileSet(), name, content, parser.AllErrors); err != nil {
 			t.Errorf("%s not parseable Go: %v\n%s", name, err, content)
 		}
+	}
+}
+
+func TestGenerate_HandlerPkgResolveFails(t *testing.T) {
+	// Empty HandlerPkg AND a CWD without go.mod → resolveHandlerPkg errors
+	// with the documented remediation message.
+	tmp := t.TempDir()
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd) //nolint:errcheck
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
+	api := &parserpkg.ParsedAPI{
+		Services: []*parserpkg.Service{{
+			Name: "X", GoPackage: "example.com/x",
+			Methods: []*parserpkg.Method{{
+				Name: "Get", StreamType: parserpkg.StreamUnary, MCP: true,
+				InputType:  &parserpkg.MessageType{Name: "Req", FullName: ".x.Req"},
+				OutputType: &parserpkg.MessageType{Name: "Resp", FullName: ".x.Resp"},
+			}},
+		}},
+	}
+	if _, err := Generate(api, Options{}); err == nil {
+		t.Fatal("expected error from resolveHandlerPkg")
 	}
 }
 

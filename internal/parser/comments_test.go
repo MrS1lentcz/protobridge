@@ -50,6 +50,28 @@ func TestCommentLookup_MethodComment(t *testing.T) {
 	}
 }
 
+func TestCommentLookup_SkipsEmptyComments(t *testing.T) {
+	// SourceCodeInfo entries without a leading comment must not pollute the
+	// lookup map (otherwise method() would later return "" for an unrelated
+	// path that happens to collide with the joined-path key for an empty
+	// entry).
+	file := &descriptorpb.FileDescriptorProto{
+		SourceCodeInfo: &descriptorpb.SourceCodeInfo{
+			Location: []*descriptorpb.SourceCodeInfo_Location{
+				{Path: []int32{6, 0, 2, 0}}, // no leading_comments
+				{Path: []int32{6, 0, 2, 1}, LeadingComments: sp(" with comment")},
+			},
+		},
+	}
+	c := buildLeadingComments(file)
+	if got := c.method(0, 0); got != "" {
+		t.Errorf("expected empty for skipped path, got %q", got)
+	}
+	if got := c.method(0, 1); got != "with comment" {
+		t.Errorf("got %q", got)
+	}
+}
+
 func TestJoinPath(t *testing.T) {
 	if got := joinPath([]int32{6, 0, 2, 1}); got != "6.0.2.1" {
 		t.Errorf("got %q", got)
