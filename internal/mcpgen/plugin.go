@@ -100,7 +100,7 @@ func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorRespo
 		if !serviceHasMCP(svc) {
 			continue
 		}
-		content, err := generateHandlerFile(svc, api.Messages)
+		content := generateHandlerFile(svc, api.Messages)
 		if err != nil {
 			return nil, fmt.Errorf("handler for %s: %w", svc.Name, err)
 		}

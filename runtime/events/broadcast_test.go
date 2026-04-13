@@ -84,6 +84,49 @@ func TestBroadcast_RefusesUnconfiguredHandler(t *testing.T) {
 	}
 }
 
+// failingBus implements events.Bus where SubscribeBroadcast always errors —
+// drives the subscribe-error branch of NewBroadcastHandler.
+type failingBus struct{}
+
+func (b *failingBus) Publish(_ context.Context, _ string, _ []byte, _ events.Kind, _ map[string]string) error {
+	return nil
+}
+func (b *failingBus) SubscribeBroadcast(_ string, _ events.Handler) (events.Subscription, error) {
+	return nil, &subErr{}
+}
+func (b *failingBus) SubscribeDurable(_, _ string, _ events.Handler) (events.Subscription, error) {
+	return nil, &subErr{}
+}
+func (b *failingBus) Close() error { return nil }
+
+type subErr struct{}
+
+func (e *subErr) Error() string { return "subscribe down" }
+
+func TestBroadcast_SubscribeErrorClosesConnection(t *testing.T) {
+	srv := httptest.NewServer(events.NewBroadcastHandler(events.BroadcastConfig{
+		Bus:      &failingBus{},
+		Subjects: []string{"x"},
+		Marshal:  passthroughMarshaler,
+	}))
+	t.Cleanup(srv.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		// Acceptable — handler may close before handshake completes.
+		return
+	}
+	defer conn.CloseNow() //nolint:errcheck
+	// Server closed; Read returns with an error promptly.
+	if _, _, err := conn.Read(ctx); err == nil {
+		t.Error("expected read error after subscribe failure")
+	}
+}
+
 func TestMarshalJSONEnvelope_Shape(t *testing.T) {
 	out, err := events.MarshalJSONEnvelope("x", json.RawMessage(`{"a":1}`))
 	if err != nil {

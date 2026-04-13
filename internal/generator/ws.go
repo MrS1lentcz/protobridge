@@ -1,7 +1,6 @@
 package generator
 
 import (
-	"bytes"
 	"text/template"
 
 	"github.com/mrs1lentcz/protobridge/internal/parser"
@@ -55,7 +54,7 @@ type wsData struct {
 	ExcludeAuth     bool
 }
 
-func generateWSHandler(svc *parser.Service, m *parser.Method) (string, error) {
+func generateWSHandler(svc *parser.Service, m *parser.Method) string {
 	data := wsData{
 		ServiceName:     svc.Name,
 		MethodName:      m.Name,
@@ -65,10 +64,5 @@ func generateWSHandler(svc *parser.Service, m *parser.Method) (string, error) {
 		InputTypeName:   m.InputType.Name,
 		ExcludeAuth:     m.ExcludeAuth,
 	}
-
-	var buf bytes.Buffer
-	if err := wsHandlerTmpl.Execute(&buf, data); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
+	return renderTemplate(wsHandlerTmpl, data)
 }

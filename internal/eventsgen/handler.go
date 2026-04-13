@@ -5,13 +5,11 @@
 package eventsgen
 
 import (
-	"bytes"
-	"fmt"
-	"go/format"
 	"sort"
 	"strings"
 	"text/template"
 
+	"github.com/mrs1lentcz/protobridge/internal/generator"
 	"github.com/mrs1lentcz/protobridge/internal/parser"
 )
 
@@ -20,7 +18,7 @@ import (
 // subject in the package, plus a Register helper that mounts the runtime
 // broadcast handler on a chi router. Returns "" when the package has no
 // events with PUBLIC visibility (consumer skips emitting the file).
-func generateBroadcastFile(pkgPath string, events []*parser.Event) (string, error) {
+func generateBroadcastFile(pkgPath string, events []*parser.Event) string {
 	var public []tmplBroadcastEvent
 	for _, ev := range events {
 		// Broadcast WS only carries fan-out events. Pure DURABLE events are
@@ -38,7 +36,7 @@ func generateBroadcastFile(pkgPath string, events []*parser.Event) (string, erro
 		})
 	}
 	if len(public) == 0 {
-		return "", nil
+		return ""
 	}
 	sort.Slice(public, func(i, j int) bool { return public[i].MessageName < public[j].MessageName })
 
@@ -56,15 +54,7 @@ func generateBroadcastFile(pkgPath string, events []*parser.Event) (string, erro
 		PackageID: titleCaseLeaf(pkgLeaf),
 		Events:    public,
 	}
-	var buf bytes.Buffer
-	if err := broadcastTmpl.Execute(&buf, data); err != nil {
-		return "", err
-	}
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		return "", fmt.Errorf("gofmt broadcast file: %w\n%s", err, buf.String())
-	}
-	return string(formatted), nil
+	return generator.RenderTemplate(broadcastTmpl, data)
 }
 
 // titleCaseLeaf upper-cases the first rune so symbols derived from a Go
@@ -168,9 +158,11 @@ func Register{{ .PackageID }}Broadcast(r chi.Router, bus events.Bus, prefix stri
 // matches the convention `protoc-gen-go` uses (one .pb.go per .proto file)
 // — but events are message-level annotations that may live anywhere in the
 // proto graph, so we group by the resolved Go import path instead.
-func generateEventsFile(pkgPath string, events []*parser.Event) (string, error) {
+func generateEventsFile(pkgPath string, events []*parser.Event) string {
 	if len(events) == 0 {
-		return "", fmt.Errorf("eventsgen: no events for package %q", pkgPath)
+		// Caller (Generate) only ever passes a non-empty slice — defensive
+		// panic surfaces a regression instead of silently emitting nothing.
+		panic("eventsgen: no events for package " + pkgPath)
 	}
 
 	// Stable order: alphabetical by message name. Generated files diff only
@@ -196,15 +188,7 @@ func generateEventsFile(pkgPath string, events []*parser.Event) (string, error) 
 		data.Events = append(data.Events, td)
 	}
 
-	var buf bytes.Buffer
-	if err := eventsTmpl.Execute(&buf, data); err != nil {
-		return "", err
-	}
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		return "", fmt.Errorf("gofmt events file: %w\n%s", err, buf.String())
-	}
-	return string(formatted), nil
+	return generator.RenderTemplate(eventsTmpl, data)
 }
 
 type fileData struct {

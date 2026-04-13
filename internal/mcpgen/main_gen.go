@@ -1,9 +1,7 @@
 package mcpgen
 
 import (
-	"bytes"
 	"fmt"
-	"go/format"
 	"strings"
 	"text/template"
 
@@ -38,15 +36,7 @@ func generateMain(api *parser.ParsedAPI, handlerPkg string, forwardKeys []string
 		return "", fmt.Errorf("no methods marked with (protobridge.mcp) = true; nothing to generate")
 	}
 
-	var buf bytes.Buffer
-	if err := mainTmpl.Execute(&buf, data); err != nil {
-		return "", err
-	}
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		return "", fmt.Errorf("gofmt mcp main: %w\n%s", err, buf.String())
-	}
-	return string(formatted), nil
+	return generator.RenderTemplate(mainTmpl, data), nil
 }
 
 type mainData struct {

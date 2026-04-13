@@ -1,7 +1,6 @@
 package generator
 
 import (
-	"fmt"
 	"io"
 
 	"google.golang.org/protobuf/proto"
@@ -61,10 +60,7 @@ func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorRespo
 	// (separate Go package) so the proxy directory stays clean — only main.go
 	// and deployment manifests sit at the root.
 	for _, svc := range api.Services {
-		content, err := generateServiceFile(svc, api)
-		if err != nil {
-			return nil, fmt.Errorf("generating %s: %w", svc.Name, err)
-		}
+		content := generateServiceFile(svc, api)
 		name := "handler/" + toSnakeCase(svc.Name) + ".go"
 		resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
 			Name:    &name,
@@ -73,10 +69,7 @@ func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorRespo
 	}
 
 	// Generate main.go.
-	mainContent, err := generateMain(api, handlerPkg)
-	if err != nil {
-		return nil, fmt.Errorf("generating main.go: %w", err)
-	}
+	mainContent := generateMain(api, handlerPkg)
 	mainName := "main.go"
 	resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
 		Name:    &mainName,

@@ -49,10 +49,54 @@ func TestRun_FullPipeline(t *testing.T) {
 	}
 }
 
+func TestRun_ReadError(t *testing.T) {
+	resp := Run(&errReader{})
+	if resp.Error == nil {
+		t.Fatal("expected error response from failing reader")
+	}
+}
+
+type errReader struct{}
+
+func (e *errReader) Read(_ []byte) (int, error) { return 0, errStr("read failed") }
+
+type errStr string
+
+func (e errStr) Error() string { return string(e) }
+
 func TestRun_InvalidProtoBytesYieldsErrorResponse(t *testing.T) {
 	resp := Run(bytes.NewReader([]byte("not a proto")))
 	if resp.Error == nil {
 		t.Fatal("expected error response")
+	}
+}
+
+func TestRun_ParserError(t *testing.T) {
+	// CodeGeneratorRequest with two methods both marked auth_method =
+	// parser.Parse rejects → resp.Error must be set.
+	authOpts := &descriptorpb.MethodOptions{}
+	proto.SetExtension(authOpts, optionspb.E_AuthMethod, true)
+	req := &pluginpb.CodeGeneratorRequest{
+		FileToGenerate: []string{"x.proto"},
+		ProtoFile: []*descriptorpb.FileDescriptorProto{{
+			Name:    sp("x.proto"),
+			Package: sp("x.v1"),
+			MessageType: []*descriptorpb.DescriptorProto{
+				{Name: sp("Req")}, {Name: sp("Resp")},
+			},
+			Service: []*descriptorpb.ServiceDescriptorProto{{
+				Name: sp("S"),
+				Method: []*descriptorpb.MethodDescriptorProto{
+					{Name: sp("A"), InputType: sp(".x.v1.Req"), OutputType: sp(".x.v1.Resp"), Options: authOpts},
+					{Name: sp("B"), InputType: sp(".x.v1.Req"), OutputType: sp(".x.v1.Resp"), Options: authOpts},
+				},
+			}},
+		}},
+	}
+	data, _ := proto.Marshal(req)
+	resp := Run(bytes.NewReader(data))
+	if resp.Error == nil {
+		t.Fatal("expected parser-error to surface in resp.Error")
 	}
 }
 
@@ -91,10 +135,13 @@ func TestFilename_RespectsOutputPkgOverride(t *testing.T) {
 	}
 }
 
-func TestGenerateEventsFile_EmptyInputErrors(t *testing.T) {
-	if _, err := generateEventsFile("example.com/x", nil); err == nil {
-		t.Fatal("expected error for empty events slice")
-	}
+func TestGenerateEventsFile_EmptyInputPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic on empty events (caller invariant violation)")
+		}
+	}()
+	_ = generateEventsFile("example.com/x", nil)
 }
 
 // TestAsyncAPI_AllScalarTypes makes sure fieldKindSchema's switch arms
@@ -185,6 +232,70 @@ func TestAsyncAPI_EmptyAndCycle(t *testing.T) {
 	doc := payloadSchema(self, idx)
 	if doc["type"] != "object" {
 		t.Errorf("cycle should still produce a typed object root: %v", doc)
+	}
+}
+
+func TestTitleCaseLeaf(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"", ""},
+		{"myapp", "Myapp"},
+		{"Already", "Already"},
+		{"v1", "V1"},
+	}
+	for _, tc := range cases {
+		if got := titleCaseLeaf(tc.in); got != tc.want {
+			t.Errorf("titleCaseLeaf(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestBroadcastFilename(t *testing.T) {
+	cases := []struct {
+		pkgPath, outputPkg, want string
+	}{
+		{"example.com/foo/myapp", "events", "myapp_broadcast.go"},
+		{"example.com/foo/myapp", "eventspkg", "eventspkg/myapp_broadcast.go"},
+		{"single", "events", "single_broadcast.go"},
+	}
+	for _, tc := range cases {
+		if got := broadcastFilename(tc.pkgPath, tc.outputPkg); got != tc.want {
+			t.Errorf("broadcastFilename(%q, %q) = %q, want %q", tc.pkgPath, tc.outputPkg, got, tc.want)
+		}
+	}
+}
+
+func TestGenerateBroadcastFile_NoPublicEventsReturnsEmpty(t *testing.T) {
+	// Pure DURABLE event — must not produce a broadcast file.
+	api := &parserpkg.ParsedAPI{}
+	mt := &parserpkg.MessageType{Name: "X", FullName: ".x.X"}
+	api.Messages = map[string]*parserpkg.MessageType{mt.FullName: mt}
+	api.Events = []*parserpkg.Event{{
+		Message: mt, Subject: "x", Kind: parserpkg.EventKindDurable,
+		Visibility: parserpkg.EventVisibilityInternal, GoPackage: "example.com/x",
+	}}
+	got := generateBroadcastFile("example.com/x", api.Events)
+	if got != "" {
+		t.Errorf("expected empty content for non-public-fan-out events, got: %s", got)
+	}
+}
+
+func TestGenerateBroadcastFile_PublicFanOutEmitsExportedSymbols(t *testing.T) {
+	mt := &parserpkg.MessageType{Name: "OrderCreated", FullName: ".x.OrderCreated"}
+	events := []*parserpkg.Event{{
+		Message: mt, Subject: "order_created",
+		Kind: parserpkg.EventKindBroadcast, Visibility: parserpkg.EventVisibilityPublic,
+		GoPackage: "example.com/myapp",
+	}}
+	got := generateBroadcastFile("example.com/myapp", events)
+	for _, want := range []string{
+		"MyappBroadcastSubjects",
+		"MyappBroadcastEnvelope",
+		"RegisterMyappBroadcast",
+		`"order_created"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in generated broadcast file:\n%s", want, got)
+		}
 	}
 }
 

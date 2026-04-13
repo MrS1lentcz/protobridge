@@ -96,14 +96,11 @@ func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorRespo
 	sort.Strings(pkgs)
 
 	for _, pkg := range pkgs {
-		content, err := generateEventsFile(pkg, byPkg[pkg])
-		if err != nil {
-			return nil, fmt.Errorf("events for package %q: %w", pkg, err)
-		}
 		// File name: <pkg-leaf>/events.go relative to the protoc output dir.
 		// Convention matches protoc-gen-go's source-relative layout: the
 		// caller chose where the generated proto landed; we drop our file
 		// in the same directory.
+		content := generateEventsFile(pkg, byPkg[pkg])
 		name := filename(pkg, opts.OutputPkg)
 		resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
 			Name: &name, Content: &content,
@@ -113,9 +110,7 @@ func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorRespo
 		// has at least one PUBLIC fan-out event. Empty content signals
 		// "skip" (no PUBLIC events) and we omit the file entirely so users
 		// don't get an empty broadcast file in pure-DURABLE packages.
-		if broadcast, err := generateBroadcastFile(pkg, byPkg[pkg]); err != nil {
-			return nil, fmt.Errorf("broadcast for package %q: %w", pkg, err)
-		} else if broadcast != "" {
+		if broadcast := generateBroadcastFile(pkg, byPkg[pkg]); broadcast != "" {
 			bname := broadcastFilename(pkg, opts.OutputPkg)
 			resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
 				Name: &bname, Content: &broadcast,

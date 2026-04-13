@@ -116,6 +116,41 @@ func TestParseEvents_NestedMessageAlsoCollected(t *testing.T) {
 	}
 }
 
+func TestEventKindFromProto_AllValues(t *testing.T) {
+	cases := []struct {
+		in   optionspb.EventKind
+		want EventKind
+	}{
+		{optionspb.EventKind_BROADCAST, EventKindBroadcast},
+		{optionspb.EventKind_DURABLE, EventKindDurable},
+		{optionspb.EventKind_BOTH, EventKindBoth},
+		{optionspb.EventKind_EVENT_KIND_UNSPECIFIED, EventKindUnspecified},
+		{optionspb.EventKind(99), EventKindUnspecified}, // unknown → unspecified
+	}
+	for _, tc := range cases {
+		if got := eventKindFromProto(tc.in); got != tc.want {
+			t.Errorf("eventKindFromProto(%v) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestEventVisibilityFromProto_AllValues(t *testing.T) {
+	cases := []struct {
+		in   optionspb.Visibility
+		want EventVisibility
+	}{
+		{optionspb.Visibility_PUBLIC, EventVisibilityPublic},
+		{optionspb.Visibility_INTERNAL, EventVisibilityInternal},
+		{optionspb.Visibility_VISIBILITY_UNSPECIFIED, EventVisibilityUnspecified},
+		{optionspb.Visibility(99), EventVisibilityUnspecified},
+	}
+	for _, tc := range cases {
+		if got := eventVisibilityFromProto(tc.in); got != tc.want {
+			t.Errorf("eventVisibilityFromProto(%v) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestCamelToSnake_AcronymAware(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"OrderCreated", "order_created"},

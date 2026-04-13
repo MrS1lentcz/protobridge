@@ -3,6 +3,8 @@ package events
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -216,6 +218,16 @@ func TestLogger_DefaultsToSlogDefault(t *testing.T) {
 	bus := &WatermillBus{}
 	if bus.logger() == nil {
 		t.Fatal("logger() must never return nil")
+	}
+}
+
+func TestLogger_HonoursExplicitLogger(t *testing.T) {
+	// When Logger is set, logger() must return that one — covers the
+	// non-default branch that the default-to-slog test cannot reach.
+	custom := slog.New(slog.NewTextHandler(io.Discard, nil))
+	bus := &WatermillBus{Logger: custom}
+	if got := bus.logger(); got != custom {
+		t.Errorf("logger() did not return the configured Logger")
 	}
 }
 
