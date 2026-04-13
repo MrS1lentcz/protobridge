@@ -220,6 +220,75 @@ func TestWriteResponse_EnumUsesXVarName_Repeated(t *testing.T) {
 	}
 }
 
+func TestWriteResponse_EnumUsesXVarName_Map(t *testing.T) {
+	// Output postprocess must rewrite enum values in map fields too.
+	w := httptest.NewRecorder()
+	msg := &pb.EnumContainerRequest{
+		ByName: map[string]pb.Status{"x": pb.Status_STATUS_ACTIVE, "y": pb.Status_STATUS_INACTIVE},
+	}
+	runtime.WriteResponse(w, http.StatusOK, msg)
+	body := w.Body.String()
+	if !bytes.Contains([]byte(body), []byte(`"active"`)) || !bytes.Contains([]byte(body), []byte(`"inactive"`)) {
+		t.Errorf("map enum values should use aliases, got: %s", body)
+	}
+	if bytes.Contains([]byte(body), []byte("STATUS_ACTIVE")) {
+		t.Errorf("map enum values must not include canonical names, got: %s", body)
+	}
+}
+
+func TestWriteResponse_EnumUsesXVarName_NestedMessage(t *testing.T) {
+	// Output postprocess must recurse into nested messages.
+	w := httptest.NewRecorder()
+	msg := &pb.AllTypesRequest{
+		StrVal:  "x",
+		EnumVal: pb.Status_STATUS_INACTIVE,
+		MsgVal:  &pb.Paging{Page: 1, Limit: 10},
+	}
+	runtime.WriteResponse(w, http.StatusOK, msg)
+	body := w.Body.String()
+	if bytes.Contains([]byte(body), []byte("STATUS_INACTIVE")) {
+		t.Errorf("nested-bearing message must rewrite enum, got: %s", body)
+	}
+	if !bytes.Contains([]byte(body), []byte(`"inactive"`)) {
+		t.Errorf("expected alias \"inactive\", got: %s", body)
+	}
+}
+
+func TestWriteResponse_DescriptorWalk_MapOnly(t *testing.T) {
+	// Triggers descriptorHasAliases map branch (no preceding non-map enum
+	// field would short-circuit the walk before reaching the map field).
+	w := httptest.NewRecorder()
+	msg := &pb.MapOnlyEnumRequest{Entries: map[string]pb.Status{"k": pb.Status_STATUS_ACTIVE}}
+	runtime.WriteResponse(w, http.StatusOK, msg)
+	body := w.Body.String()
+	if !bytes.Contains([]byte(body), []byte(`"active"`)) {
+		t.Errorf("map-only descriptor: expected alias, got: %s", body)
+	}
+}
+
+func TestWriteResponse_DescriptorWalk_NestedMessageOnly(t *testing.T) {
+	// Triggers fieldHasAliases MessageKind branch — outer message has no
+	// enum directly, only a nested message that transitively carries one.
+	w := httptest.NewRecorder()
+	msg := &pb.WrapperRequest{Inner: &pb.SimpleResponse{Id: "1", Status: pb.Status_STATUS_INACTIVE}}
+	runtime.WriteResponse(w, http.StatusOK, msg)
+	body := w.Body.String()
+	if !bytes.Contains([]byte(body), []byte(`"inactive"`)) {
+		t.Errorf("nested-only descriptor: expected alias, got: %s", body)
+	}
+}
+
+func TestMarshalProto_HappyPath(t *testing.T) {
+	msg := &pb.SimpleResponse{Id: "1", Status: pb.Status_STATUS_ACTIVE}
+	data, err := runtime.MarshalProto(msg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"status":"active"`)) {
+		t.Errorf("expected alias-rewritten output, got: %s", data)
+	}
+}
+
 func TestWriteResponse_OmitsEnumZero(t *testing.T) {
 	w := httptest.NewRecorder()
 	msg := &pb.SimpleResponse{
