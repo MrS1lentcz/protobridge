@@ -130,8 +130,10 @@ func scalarOrMessageSchema(f *parser.Field, seen map[string]bool, messages map[s
 		// Recurse into the fully-resolved message from the global index so
 		// LLM clients see the actual field list instead of a bare
 		// {"type": "object"} stub. Falls back to the stub only when the
-		// referenced type is external (e.g. from a proto file that wasn't
-		// in the CodeGeneratorRequest's FileToGenerate list).
+		// referenced type is absent from the messages index (e.g. an
+		// imported proto that protoc didn't include in the plugin request,
+		// or a field-less message where the index holds a pointer-stable
+		// stub with Fields==nil).
 		if nested, ok := messages[f.TypeName]; ok && nested != nil && len(nested.Fields) > 0 {
 			return messageSchema(nested, seen, messages)
 		}

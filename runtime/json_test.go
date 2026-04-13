@@ -248,10 +248,11 @@ func TestWriteResponse_DescriptorWalk_MapOnly(t *testing.T) {
 	}
 }
 
-func TestWriteResponse_NoAliasEnum_CacheNilBranch(t *testing.T) {
-	// Color has no x_var_name aliases anywhere. First WriteResponse
-	// populates the alias caches with nil; the second call hits the
-	// `if v == nil` branch in enumAliases / reverseEnumAliases.
+func TestWriteResponse_NoAliasEnum_CachedNilMap(t *testing.T) {
+	// Color has no x_var_name aliases anywhere. First WriteResponse stores
+	// a typed-nil map in the alias caches; the second call takes the
+	// cache-hit path and returns the typed nil via the type assertion
+	// (the enum value keeps its canonical "COLOR_RED" name, not rewritten).
 	for i := 0; i < 2; i++ {
 		w := httptest.NewRecorder()
 		runtime.WriteResponse(w, http.StatusOK, &pb.ColorRequest{Color: pb.Color_COLOR_RED})

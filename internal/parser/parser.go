@@ -43,13 +43,12 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 			FullName: fqn,
 		}
 	}
-	for fqn, desc := range msgMap {
+	for fqn := range msgMap {
 		full := resolveMessageType(msgMap, enumMap, fqn)
 		// Overwrite fields/oneofs on the pre-seeded stub in place so any
 		// earlier reference stays pointer-stable.
 		api.Messages[fqn].Fields = full.Fields
 		api.Messages[fqn].OneofDecls = full.OneofDecls
-		_ = desc
 	}
 
 	// Only process files that were explicitly requested for generation.

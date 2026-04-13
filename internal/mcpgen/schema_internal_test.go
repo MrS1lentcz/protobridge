@@ -8,11 +8,13 @@ import (
 	"github.com/mrs1lentcz/protobridge/internal/parser"
 )
 
-// messageSchema's self-reference guard is unreachable through the public
-// jsonSchemaForInput path today (current scalarOrMessageSchema returns a
-// stub for MESSAGE kind instead of recursing), but the guard is intentional
-// future-proofing for cross-message inlining. Test it directly via the
-// internal entry point so a regression that drops the cycle check is caught.
+// messageSchema's self-reference guard now fires in production whenever a
+// proto message contains a field referencing itself (or a mutually
+// recursive peer): scalarOrMessageSchema recurses into nested types found
+// in the messages index, and this seen-set check breaks the cycle by
+// emitting a typed stub. The internal test covers the guard directly so a
+// regression that drops the cycle check is caught even for single-message
+// inputs where a full recursive fixture would be overkill.
 func TestMessageSchema_SelfReferenceReturnsStub(t *testing.T) {
 	mt := &parser.MessageType{
 		Name:     "Node",
