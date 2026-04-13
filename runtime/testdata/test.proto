@@ -73,6 +73,13 @@ message QueryRequest {
   QueryParams params = 2;
 }
 
+// EnumContainerRequest exercises repeated and map enum field rewriting in
+// the JSON enum-alias prepass.
+message EnumContainerRequest {
+  repeated Status statuses = 1;
+  map<string, Status> by_name = 2;
+}
+
 message QueryParams {
   string search = 1;
   bool active = 2;

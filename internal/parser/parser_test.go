@@ -286,6 +286,82 @@ func TestParseAuthMethod(t *testing.T) {
 	}
 }
 
+func TestParseAuthMethod_WithHTTPAnnotation_AlsoExposedAsREST(t *testing.T) {
+	// When (protobridge.auth_method) is combined with (google.api.http), the
+	// auth method must also be emitted as a regular REST method so callers
+	// can hit the login endpoint directly. ExcludeAuth must be implicit so
+	// the auth middleware does not try to authenticate the auth call itself.
+	mapEntry := &descriptorpb.DescriptorProto{
+		Name: sp("HeadersEntry"),
+		Field: []*descriptorpb.FieldDescriptorProto{
+			{Name: sp("key"), Number: i32p(1), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()},
+			{Name: sp("value"), Number: i32p(2), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()},
+		},
+		Options: &descriptorpb.MessageOptions{MapEntry: bp(true)},
+	}
+	authInput := &descriptorpb.DescriptorProto{
+		Name: sp("AuthReq"),
+		Field: []*descriptorpb.FieldDescriptorProto{
+			{
+				Name: sp("headers"), Number: i32p(1),
+				Type:     descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(),
+				TypeName: sp(".test.v1.AuthReq.HeadersEntry"),
+				Label:    descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum(),
+			},
+		},
+		NestedType: []*descriptorpb.DescriptorProto{mapEntry},
+	}
+
+	opts := withAuthMethod(nil)
+	proto.SetExtension(opts, annotations.E_Http, &annotations.HttpRule{
+		Pattern: &annotations.HttpRule_Post{Post: "/auth/login"},
+		Body:    "*",
+	})
+
+	req := makeRequest("test.v1", "test.proto",
+		[]*descriptorpb.DescriptorProto{
+			authInput,
+			makeSimpleMessage("AuthResp", "user_id"),
+		},
+		nil,
+		[]*descriptorpb.ServiceDescriptorProto{
+			{
+				Name: sp("AuthService"),
+				Method: []*descriptorpb.MethodDescriptorProto{
+					{
+						Name:       sp("Authenticate"),
+						InputType:  sp(".test.v1.AuthReq"),
+						OutputType: sp(".test.v1.AuthResp"),
+						Options:    opts,
+					},
+				},
+			},
+		},
+	)
+
+	api, err := Parse(req)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if api.AuthMethod == nil {
+		t.Fatal("expected AuthMethod to be set")
+	}
+	if len(api.Services) != 1 {
+		t.Fatalf("expected 1 service, got %d", len(api.Services))
+	}
+	svc := api.Services[0]
+	if len(svc.Methods) != 1 {
+		t.Fatalf("expected the auth method exposed as REST, got %d methods", len(svc.Methods))
+	}
+	m := svc.Methods[0]
+	if m.HTTPMethod != "POST" || m.HTTPPath != "/auth/login" {
+		t.Errorf("got %s %s, want POST /auth/login", m.HTTPMethod, m.HTTPPath)
+	}
+	if !m.ExcludeAuth {
+		t.Error("auth method exposed as REST must have ExcludeAuth=true (no middleware on login)")
+	}
+}
+
 func TestParseMultipleAuthMethodsError(t *testing.T) {
 	mapEntry := &descriptorpb.DescriptorProto{
 		Name: sp("HeadersEntry"),
@@ -1089,6 +1165,44 @@ func TestGetXVarName_EmptyOptions(t *testing.T) {
 	}
 	if got := getXVarName(v); got != "" {
 		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+// TestOptionGetters_NilOptions covers the early `if .Options == nil` branch
+// of every option getter — the EmptyOptions tests above only exercise the
+// type-assertion failure path.
+func TestOptionGetters_NilOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("M")}
+	if got := getRequiredHeaders(m); got != nil {
+		t.Errorf("getRequiredHeaders: got %v", got)
+	}
+	if got := getQueryParamsTarget(m); got != "" {
+		t.Errorf("getQueryParamsTarget: got %q", got)
+	}
+	if getExcludeAuth(m) {
+		t.Error("getExcludeAuth: got true")
+	}
+	if getAuthMethod(m) {
+		t.Error("getAuthMethod: got true")
+	}
+	if getSSE(m) {
+		t.Error("getSSE: got true")
+	}
+	if got := getWSMode(m); got != "" {
+		t.Errorf("getWSMode: got %q", got)
+	}
+
+	f := &descriptorpb.FieldDescriptorProto{Name: sp("f")}
+	if getFieldRequired(f) {
+		t.Error("getFieldRequired: got true")
+	}
+
+	s := &descriptorpb.ServiceDescriptorProto{Name: sp("S")}
+	if got := getDisplayName(s); got != "" {
+		t.Errorf("getDisplayName: got %q", got)
+	}
+	if got := getPathPrefix(s); got != "" {
+		t.Errorf("getPathPrefix: got %q", got)
 	}
 }
 

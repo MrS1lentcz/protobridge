@@ -101,6 +101,125 @@ func TestDecodeRequest_EnumWithXVarName_Nested(t *testing.T) {
 	}
 }
 
+func TestDecodeRequest_EnumWithXVarName_Repeated(t *testing.T) {
+	body := `{"statuses":["active","STATUS_INACTIVE","inactive"]}`
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	msg := &pb.EnumContainerRequest{}
+	if err := runtime.DecodeRequest(r, msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []pb.Status{pb.Status_STATUS_ACTIVE, pb.Status_STATUS_INACTIVE, pb.Status_STATUS_INACTIVE}
+	if len(msg.Statuses) != len(want) {
+		t.Fatalf("len mismatch: got %d, want %d", len(msg.Statuses), len(want))
+	}
+	for i := range want {
+		if msg.Statuses[i] != want[i] {
+			t.Fatalf("statuses[%d]: got %v, want %v", i, msg.Statuses[i], want[i])
+		}
+	}
+}
+
+func TestDecodeRequest_EnumWithXVarName_Map(t *testing.T) {
+	body := `{"by_name":{"a":"active","b":"inactive","c":"STATUS_ACTIVE"}}`
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	msg := &pb.EnumContainerRequest{}
+	if err := runtime.DecodeRequest(r, msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := map[string]pb.Status{
+		"a": pb.Status_STATUS_ACTIVE,
+		"b": pb.Status_STATUS_INACTIVE,
+		"c": pb.Status_STATUS_ACTIVE,
+	}
+	for k, v := range want {
+		if msg.ByName[k] != v {
+			t.Fatalf("by_name[%q]: got %v, want %v", k, msg.ByName[k], v)
+		}
+	}
+}
+
+func TestDecodeRequest_EnumAliasPrepass_UnknownFieldIgnored(t *testing.T) {
+	// Unknown JSON keys hit the `fd == nil { continue }` branch in the
+	// prepass. With DiscardUnknown, the request still parses cleanly.
+	body := `{"name":"alice","mystery":"value","status":"active"}`
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	msg := &pb.SimpleRequest{}
+	if err := runtime.DecodeRequest(r, msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.Status != pb.Status_STATUS_ACTIVE {
+		t.Fatalf("expected STATUS_ACTIVE, got %v", msg.Status)
+	}
+}
+
+func TestDecodeRequest_EnumAliasPrepass_NumericEnumLeftUntouched(t *testing.T) {
+	// Numeric enum value is not a string -> prepass leaves it alone and
+	// protojson handles it natively.
+	body := `{"status":1}`
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	msg := &pb.SimpleRequest{}
+	if err := runtime.DecodeRequest(r, msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.Status != pb.Status_STATUS_ACTIVE {
+		t.Fatalf("expected STATUS_ACTIVE (1), got %v", msg.Status)
+	}
+}
+
+func TestDecodeRequest_EnumAliasPrepass_NullNestedMessage(t *testing.T) {
+	// JSON null for a nested message field exercises the
+	// `node.(map[string]any)` failure branch when recursing.
+	body := `{"str_val":"a","msg_val":null}`
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	msg := &pb.AllTypesRequest{}
+	if err := runtime.DecodeRequest(r, msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDecodeRequest_EnumAliasPrepass_NonObjectBody(t *testing.T) {
+	// Top-level JSON array bypasses the prepass and protojson surfaces the error.
+	body := `[1,2,3]`
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	msg := &pb.SimpleRequest{}
+	if err := runtime.DecodeRequest(r, msg); err == nil {
+		t.Fatal("expected error for non-object body")
+	}
+}
+
+func TestWriteResponse_EnumUsesXVarName(t *testing.T) {
+	// On output, enum values that declare (protobridge.x_var_name) must be
+	// serialized using the alias, not the canonical proto name. Symmetric
+	// to the input prepass.
+	w := httptest.NewRecorder()
+	msg := &pb.SimpleResponse{Id: "1", Name: "alice", Status: pb.Status_STATUS_ACTIVE}
+	runtime.WriteResponse(w, http.StatusOK, msg)
+
+	body := w.Body.String()
+	if bytes.Contains([]byte(body), []byte("STATUS_ACTIVE")) {
+		t.Errorf("response should not contain canonical proto enum name, got: %s", body)
+	}
+	if !bytes.Contains([]byte(body), []byte(`"status":"active"`)) {
+		t.Errorf("response should contain x_var_name alias \"active\", got: %s", body)
+	}
+}
+
+func TestWriteResponse_EnumUsesXVarName_Repeated(t *testing.T) {
+	w := httptest.NewRecorder()
+	msg := &pb.EnumContainerRequest{
+		Statuses: []pb.Status{pb.Status_STATUS_ACTIVE, pb.Status_STATUS_INACTIVE},
+	}
+	runtime.WriteResponse(w, http.StatusOK, msg)
+
+	body := w.Body.String()
+	if !bytes.Contains([]byte(body), []byte(`"active"`)) || !bytes.Contains([]byte(body), []byte(`"inactive"`)) {
+		t.Errorf("repeated enum should use aliases, got: %s", body)
+	}
+	if bytes.Contains([]byte(body), []byte("STATUS_ACTIVE")) || bytes.Contains([]byte(body), []byte("STATUS_INACTIVE")) {
+		t.Errorf("repeated enum should not contain canonical names, got: %s", body)
+	}
+}
+
 func TestWriteResponse_OmitsEnumZero(t *testing.T) {
 	w := httptest.NewRecorder()
 	msg := &pb.SimpleResponse{
@@ -126,8 +245,27 @@ func TestWriteResponse_IncludesNonZeroEnum(t *testing.T) {
 	runtime.WriteResponse(w, http.StatusOK, msg)
 
 	body := w.Body.String()
-	if !bytes.Contains([]byte(body), []byte("STATUS_ACTIVE")) {
-		t.Fatalf("expected STATUS_ACTIVE in response, got: %s", body)
+	// Status_STATUS_ACTIVE has (protobridge.x_var_name) = "active", so the
+	// post-processor rewrites the canonical name to the alias.
+	if !bytes.Contains([]byte(body), []byte(`"status":"active"`)) {
+		t.Fatalf("expected x_var_name alias \"active\" in response, got: %s", body)
+	}
+}
+
+func TestMarshalOneofField_AppliesEnumAliases(t *testing.T) {
+	// Symmetric to WriteResponse: oneof variant marshaling must also apply
+	// x_var_name aliases, otherwise JSON output is inconsistent depending
+	// on which helper produced it.
+	msg := &pb.SimpleResponse{Id: "1", Status: pb.Status_STATUS_ACTIVE}
+	data, err := runtime.MarshalOneofField(msg, "SimpleResponse")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bytes.Contains(data, []byte("STATUS_ACTIVE")) {
+		t.Errorf("oneof output should use x_var_name alias, got: %s", data)
+	}
+	if !bytes.Contains(data, []byte(`"status":"active"`)) {
+		t.Errorf("oneof output should contain alias \"active\", got: %s", data)
 	}
 }
 
