@@ -51,6 +51,22 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 		api.Messages[fqn].OneofDecls = full.OneofDecls
 	}
 
+	// Walk every proto file's messages in declaration order and collect
+	// events. Order is stable across runs (driven by req.ProtoFile +
+	// nested visit order), which keeps generated files diff-free until a
+	// proto change reorders them.
+	for _, file := range req.ProtoFile {
+		pkg := file.GetPackage()
+		goPackage := extractGoPackage(file)
+		for _, msg := range file.MessageType {
+			collectEvents(api, &eventCollectCtx{
+				pkg:       pkg,
+				goPackage: goPackage,
+				prefix:    "." + pkg,
+			}, msg)
+		}
+	}
+
 	// Only process files that were explicitly requested for generation.
 	filesToGenerate := make(map[string]bool)
 	for _, name := range req.FileToGenerate {

@@ -144,6 +144,20 @@ func getMCPDefault(s *descriptorpb.ServiceDescriptorProto) bool {
 	return v
 }
 
+// getEventOptions returns the (protobridge.event) MessageOptions extension
+// when present, plus a flag indicating presence (so callers can distinguish
+// "not annotated" from "annotated with all-default values").
+func getEventOptions(m *descriptorpb.DescriptorProto) (*optionspb.EventOptions, bool) {
+	if m.Options == nil || !proto.HasExtension(m.Options, optionspb.E_Event) {
+		return nil, false
+	}
+	v, ok := proto.GetExtension(m.Options, optionspb.E_Event).(*optionspb.EventOptions)
+	if !ok || v == nil {
+		return nil, false
+	}
+	return v, true
+}
+
 func getXVarName(v *descriptorpb.EnumValueDescriptorProto) string {
 	if v.Options == nil {
 		return ""

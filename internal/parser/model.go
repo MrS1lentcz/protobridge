@@ -14,7 +14,51 @@ type ParsedAPI struct {
 	// message fields reference peers by TypeName; consumers look up the
 	// full MessageType here to inline a schema recursively.
 	Messages map[string]*MessageType
+
+	// Events lists every message annotated with (protobridge.event), in
+	// proto declaration order (stable across runs). Consumed by
+	// protoc-gen-events-go to emit typed Emit*/Subscribe* helpers and the
+	// AsyncAPI document.
+	Events []*Event
 }
+
+// Event is a message-level annotation that turns a proto message into a
+// pub/sub event. The fields mirror the EventOptions extension defined in
+// proto/protobridge/events.proto, with subject resolved (annotation value
+// or snake_case of the message name when blank).
+type Event struct {
+	Message      *MessageType
+	Subject      string // resolved: explicit subject or snake_case of Message.Name
+	Kind         EventKind
+	DurableGroup string
+	Visibility   EventVisibility
+	Description  string
+
+	// GoPackage is the Go import path of the proto package that owns this
+	// message, copied so the events plugin doesn't have to re-derive it.
+	GoPackage string
+}
+
+// EventKind mirrors the protobridge.EventKind proto enum. Kept as a small
+// integer alias so generator code can use named constants without importing
+// the runtime events package (which would create a parser → runtime cycle).
+type EventKind int
+
+const (
+	EventKindUnspecified EventKind = iota
+	EventKindBroadcast
+	EventKindDurable
+	EventKindBoth
+)
+
+// EventVisibility mirrors the protobridge.Visibility proto enum.
+type EventVisibility int
+
+const (
+	EventVisibilityUnspecified EventVisibility = iota
+	EventVisibilityPublic
+	EventVisibilityInternal
+)
 
 type Service struct {
 	Name         string // e.g. "VoiceChatService"
