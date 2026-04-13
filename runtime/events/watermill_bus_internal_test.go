@@ -221,6 +221,74 @@ func TestLogger_DefaultsToSlogDefault(t *testing.T) {
 	}
 }
 
+func TestPublish_NilPublisherReturnsConfigError(t *testing.T) {
+	cases := []struct {
+		name string
+		bus  *WatermillBus
+		kind Kind
+		want string
+	}{
+		{"broadcast nil", &WatermillBus{}, KindBroadcast, "broadcast publisher not configured"},
+		{"durable nil", &WatermillBus{}, KindDurable, "durable publisher not configured"},
+		{"both missing one", &WatermillBus{DurablePublisher: &countingPublisher{}}, KindBoth, "both durable and broadcast"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.bus.Publish(context.Background(), "x", []byte("y"), tc.kind, nil)
+			if err == nil || !contains(err.Error(), tc.want) {
+				t.Errorf("expected error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestSubscribeDurable_NonEmptyGroupLogsWarning(t *testing.T) {
+	// The bus accepts a group parameter for forward-compatibility but
+	// today it only logs an info-level warning (Watermill addresses by
+	// topic alone). Verify the call still succeeds and registers the
+	// subscription.
+	bus := NewInMemoryBus()
+	t.Cleanup(func() { _ = bus.Close() })
+
+	sub, err := bus.SubscribeDurable("x", "shipping-group", noopHandler)
+	if err != nil {
+		t.Fatalf("SubscribeDurable should succeed even with a non-empty group: %v", err)
+	}
+	if err := sub.Unsubscribe(); err != nil {
+		t.Errorf("Unsubscribe: %v", err)
+	}
+}
+
+func TestDispatch_AckNackClosuresInvokeWatermillMessage(t *testing.T) {
+	// The Ack/Nack closures stamped on Message wrap the underlying
+	// watermill message. Generated subscriber helpers always call one of
+	// them before returning; cover the closures by exercising the explicit
+	// Ack path through a real handler call.
+	bus := NewInMemoryBus()
+	t.Cleanup(func() { _ = bus.Close() })
+
+	done := make(chan struct{})
+	sub, err := bus.SubscribeBroadcast("x", func(_ context.Context, m Message) error {
+		m.Ack()  // exercises the Ack closure
+		m.Nack() // exercises the Nack closure (no-op for gochannel after ack)
+		close(done)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer sub.Unsubscribe() //nolint:errcheck
+
+	if err := bus.Publish(context.Background(), "x", []byte("p"), KindBroadcast, nil); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler never ran")
+	}
+}
+
 func TestLogger_HonoursExplicitLogger(t *testing.T) {
 	// When Logger is set, logger() must return that one — covers the
 	// non-default branch that the default-to-slog test cannot reach.

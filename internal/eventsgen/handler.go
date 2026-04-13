@@ -114,7 +114,7 @@ var {{ .PackageID }}BroadcastSubjects = []string{
 // It unmarshals each subject's payload into the matching proto type and
 // re-encodes it as protojson under the subject key, so WS clients see
 // strongly-typed events regardless of the bus wire format.
-func {{ .PackageID }}BroadcastEnvelope(subject string, payload []byte, _ map[string]string) ([]byte, error) {
+func {{ .PackageID }}BroadcastEnvelope(subject string, payload []byte, headers map[string]string) ([]byte, error) {
 	jsonOpts := protojson.MarshalOptions{UseProtoNames: true}
 	var (
 		msg proto.Message
@@ -134,22 +134,27 @@ func {{ .PackageID }}BroadcastEnvelope(subject string, payload []byte, _ map[str
 	if err != nil {
 		return nil, fmt.Errorf("encode %s: %w", subject, err)
 	}
-	return events.MarshalJSONEnvelope(subject, json.RawMessage(encoded))
+	return events.MarshalJSONEnvelope(subject, json.RawMessage(encoded), events.HeadersToLabels(headers))
 }
 
 // Register{{ .PackageID }}Broadcast mounts a WebSocket broadcast endpoint
 // at "<prefix>" that streams every PUBLIC event in this package as a JSON
-// envelope ({"subject": "...", "event": {...}}). prefix is typically
-// something like "/events/{{ .PackageID }}".
+// envelope ({"subject": "...", "labels": {...}, "event": {...}}). prefix
+// is typically something like "/events/{{ .PackageID }}".
 //
-// Auth, rate limiting, tenant filtering: compose with chi middleware on
-// the router. The handler itself is auth-agnostic.
-func Register{{ .PackageID }}Broadcast(r chi.Router, bus events.Bus, prefix string) {
-	r.Method(http.MethodGet, prefix, events.NewBroadcastHandler(events.BroadcastConfig{
-		Bus:      bus,
-		Subjects: {{ .PackageID }}BroadcastSubjects,
-		Marshal:  {{ .PackageID }}BroadcastEnvelope,
-	}))
+// extra is merged into the BroadcastConfig — pass it to wire auth-derived
+// principal labels (PrincipalLabels), a custom Matcher, OriginPatterns,
+// or a Logger. Bus / Subjects / Marshal are filled in automatically and
+// take precedence over any equivalent fields in extra.
+func Register{{ .PackageID }}Broadcast(r chi.Router, bus events.Bus, prefix string, extra ...events.BroadcastConfig) {
+	cfg := events.BroadcastConfig{}
+	if len(extra) > 0 {
+		cfg = extra[0]
+	}
+	cfg.Bus = bus
+	cfg.Subjects = {{ .PackageID }}BroadcastSubjects
+	cfg.Marshal = {{ .PackageID }}BroadcastEnvelope
+	r.Method(http.MethodGet, prefix, events.NewBroadcastHandler(cfg))
 }
 `))
 
@@ -227,7 +232,9 @@ import (
 const Subject{{ .MessageName }} = {{ printf "%q" .Subject }}
 
 // Emit{{ .MessageName }} marshals ev and publishes it on the bus using the
-// kind declared in the proto annotation.{{ if .Description }}
+// kind declared in the proto annotation. Labels stashed on ctx via
+// events.WithLabels are forwarded as message headers so subscribers
+// (and the broadcast WS endpoint) can route on them.{{ if .Description }}
 //
 // {{ .Description }}{{ end }}
 func Emit{{ .MessageName }}(ctx context.Context, bus events.Bus, ev *pb.{{ .MessageName }}) error {
@@ -238,7 +245,8 @@ func Emit{{ .MessageName }}(ctx context.Context, bus events.Bus, ev *pb.{{ .Mess
 	if err != nil {
 		return fmt.Errorf("Emit{{ .MessageName }}: marshal: %w", err)
 	}
-	return bus.Publish(ctx, Subject{{ .MessageName }}, payload, {{ if .KindBroadcast }}events.KindBroadcast{{ else if .KindDurable }}events.KindDurable{{ else if .KindBoth }}events.KindBoth{{ else }}events.KindUnspecified{{ end }}, nil)
+	headers := events.LabelsToHeaders(events.LabelsFromContext(ctx), nil)
+	return bus.Publish(ctx, Subject{{ .MessageName }}, payload, {{ if .KindBroadcast }}events.KindBroadcast{{ else if .KindDurable }}events.KindDurable{{ else if .KindBoth }}events.KindBoth{{ else }}events.KindUnspecified{{ end }}, headers)
 }
 
 // {{ .MessageName }}Handler is the typed signature for {{ .MessageName }}

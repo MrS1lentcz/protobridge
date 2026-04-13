@@ -30,6 +30,24 @@ type BroadcastConfig struct {
 	Subjects []string
 	Marshal  EnvelopeMarshaler
 
+	// PrincipalLabels resolves the labels carried by the inbound WS
+	// connection's authenticated user (e.g. tenant_id, role, ...).
+	// Combined with Matcher, this is the security boundary: the broadcast
+	// handler only forwards events whose labels match the principal's.
+	// Returning an error closes the connection (typical use: auth
+	// rejected). Returning a nil/empty map means "no labels"; events
+	// with non-empty labels will be filtered out by DefaultLabelMatcher.
+	//
+	// When nil, the handler treats every connection as having no labels —
+	// suitable for single-tenant deployments where every authenticated
+	// user sees every event.
+	PrincipalLabels func(r *http.Request) (map[string]string, error)
+
+	// Matcher decides per delivered message whether to forward it to a
+	// given connection given its principal's labels. Defaults to
+	// DefaultLabelMatcher (Kubernetes-style label selector semantics).
+	Matcher LabelMatcher
+
 	// OriginPatterns restricts which Origin headers are accepted on the
 	// inbound WS handshake (passed to websocket.AcceptOptions). Empty
 	// means "same-origin only" — the secure default. To allow specific
@@ -66,6 +84,24 @@ func NewBroadcastHandler(cfg BroadcastConfig) http.Handler {
 			http.Error(w, "broadcast handler not configured", http.StatusInternalServerError)
 			return
 		}
+
+		// Resolve the principal's labels BEFORE upgrading — auth failures
+		// land on a plain HTTP response code so middleware (Sentry, etc.)
+		// can capture them normally.
+		var principalLabels map[string]string
+		if cfg.PrincipalLabels != nil {
+			pl, err := cfg.PrincipalLabels(r)
+			if err != nil {
+				http.Error(w, "unauthorized: "+err.Error(), http.StatusUnauthorized)
+				return
+			}
+			principalLabels = pl
+		}
+		matcher := cfg.Matcher
+		if matcher == nil {
+			matcher = DefaultLabelMatcher
+		}
+
 		ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			OriginPatterns:     cfg.OriginPatterns,
 			InsecureSkipVerify: cfg.SkipOriginVerify,
@@ -94,6 +130,13 @@ func NewBroadcastHandler(cfg BroadcastConfig) http.Handler {
 		for _, subj := range cfg.Subjects {
 			subj := subj
 			sub, err := cfg.Bus.SubscribeBroadcast(subj, func(_ context.Context, m Message) error {
+				// Server-side auth filter: drop events whose labels don't
+				// match the principal's. This is the security boundary;
+				// the client-side envelope-label filter on top of it is
+				// pure UX (which screen is the user looking at).
+				if !matcher(principalLabels, HeadersToLabels(m.Headers)) {
+					return nil
+				}
 				envelope, mErr := cfg.Marshal(subj, m.Payload, m.Headers)
 				if mErr != nil {
 					// Malformed event on the bus — drop, don't kill the
@@ -152,15 +195,22 @@ func NewBroadcastHandler(cfg BroadcastConfig) http.Handler {
 // clients. The events plugin's generated marshaler produces this struct
 // per delivered message; exposed here so handwritten clients (or custom
 // marshalers) can match the contract.
+//
+// Labels piggyback on every envelope so browser clients can apply
+// per-screen UX filtering on top of the server-side auth filter
+// (e.g. "show only events for the project the user is currently
+// viewing"). omitempty keeps the wire compatible with consumers that
+// were written against the pre-labels envelope shape.
 type JSONEnvelope struct {
-	Subject string          `json:"subject"`
-	Event   json.RawMessage `json:"event"`
+	Subject string            `json:"subject"`
+	Labels  map[string]string `json:"labels,omitempty"`
+	Event   json.RawMessage   `json:"event"`
 }
 
-// MarshalJSONEnvelope is a small helper for the generated marshaler to
-// avoid reimplementing the wrapping. event is already-encoded JSON
-// (typically protojson output of the typed message).
-func MarshalJSONEnvelope(subject string, event json.RawMessage) ([]byte, error) {
-	return json.Marshal(JSONEnvelope{Subject: subject, Event: event})
+// MarshalJSONEnvelope wraps an already-encoded event payload in the
+// canonical envelope. Labels are attached when non-empty (the generated
+// marshaler passes the message's HeadersToLabels result here).
+func MarshalJSONEnvelope(subject string, event json.RawMessage, labels map[string]string) ([]byte, error) {
+	return json.Marshal(JSONEnvelope{Subject: subject, Labels: labels, Event: event})
 }
 

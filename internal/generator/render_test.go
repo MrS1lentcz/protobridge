@@ -45,6 +45,26 @@ func TestRenderTemplate_GofmtFailurePanics(t *testing.T) {
 	_ = renderTemplate(tmpl, "x")
 }
 
+func TestRenderFragment_HappyPathSkipsGofmt(t *testing.T) {
+	// Fragment templates emit Go that's not a complete file (no `package`
+	// clause) — renderFragment must NOT run gofmt over them.
+	tmpl := template.Must(template.New("frag").Parse(`var x = {{.}}`))
+	got := renderFragment(tmpl, 42)
+	if got != "var x = 42" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestRenderFragment_TemplateExecuteFailurePanics(t *testing.T) {
+	tmpl := template.Must(template.New("bad").Parse(`{{.Missing}}`))
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic from broken fragment template")
+		}
+	}()
+	_ = renderFragment(tmpl, 1)
+}
+
 func TestRenderTemplate_PublicAlias(t *testing.T) {
 	// RenderTemplate is the export sibling plugins consume; cover it
 	// alongside the unexported internal so a refactor that breaks one

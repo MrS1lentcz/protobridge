@@ -71,6 +71,22 @@ func TestRun_InvalidProtoBytesYieldsErrorResponse(t *testing.T) {
 	}
 }
 
+func TestPackageFilenameStem_EdgeCases(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"example.com/foo/bar", "example_com_foo_bar"},
+		{`a\b\c`, "a_b_c"},                  // Windows-style separators
+		{"foo-bar.v1", "foo_bar_v1"},        // dashes + dots
+		{"////", "events"},                  // collapses to empty → fallback stem
+		{"", "events"},                      // empty input → fallback stem
+		{"_leading_trailing_", "leading_trailing"}, // strips leading/trailing underscores
+	}
+	for _, tc := range cases {
+		if got := packageFilenameStem(tc.in); got != tc.want {
+			t.Errorf("packageFilenameStem(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestRun_ParserError(t *testing.T) {
 	// CodeGeneratorRequest with two methods both marked auth_method =
 	// parser.Parse rejects → resp.Error must be set.
