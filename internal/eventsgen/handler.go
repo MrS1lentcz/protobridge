@@ -241,10 +241,13 @@ func Emit{{ .MessageName }}(ctx context.Context, bus events.Bus, ev *pb.{{ .Mess
 	return bus.Publish(ctx, Subject{{ .MessageName }}, payload, {{ if .KindBroadcast }}events.KindBroadcast{{ else if .KindDurable }}events.KindDurable{{ else if .KindBoth }}events.KindBoth{{ else }}events.KindUnspecified{{ end }}, nil)
 }
 
-{{ if or .KindDurable .KindBoth }}
-// {{ .MessageName }}Handler is the typed signature for {{ .MessageName }} subscribers.
+// {{ .MessageName }}Handler is the typed signature for {{ .MessageName }}
+// subscribers — declared once and reused by both Subscribe{{ .MessageName }}
+// (durable) and SubscribeBroadcast{{ .MessageName }} (fan-out) so callers
+// can swap between transports without changing the handler type.
 type {{ .MessageName }}Handler func(ctx context.Context, ev *pb.{{ .MessageName }}) error
 
+{{ if or .KindDurable .KindBoth }}
 // Subscribe{{ .MessageName }} registers a load-balanced at-least-once
 // subscriber. group identifies the consumer group; multiple processes in
 // the same group split the message stream. Pass an empty string to use
