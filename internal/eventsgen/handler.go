@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"go/format"
 	"sort"
-	"strings"
 	"text/template"
 
 	"github.com/mrs1lentcz/protobridge/internal/parser"
@@ -155,8 +154,3 @@ func SubscribeBroadcast{{ .MessageName }}(bus events.Bus, h {{ .MessageName }}Ha
 {{ end }}
 `))
 
-// asString quotes a Go string. Currently unused in template but kept for
-// parity with internal/mcpgen if we add multi-line description rendering.
-func asString(s string) string { return strings.ReplaceAll(s, `"`, `\"`) }
-
-var _ = asString
