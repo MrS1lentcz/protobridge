@@ -29,6 +29,9 @@ func DecodeRequest(r *http.Request, msg proto.Message) error {
 	if len(body) == 0 {
 		return nil
 	}
+	if rewritten, perr := preprocessEnumAliases(body, msg); perr == nil {
+		body = rewritten
+	}
 	if err := unmarshaller.Unmarshal(body, msg); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}

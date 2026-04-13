@@ -63,6 +63,44 @@ func TestDecodeRequest_EnumOmitted_DefaultsToZero(t *testing.T) {
 	}
 }
 
+func TestDecodeRequest_EnumWithXVarName(t *testing.T) {
+	// Frontend sends the custom name from (protobridge.x_var_name);
+	// the decoder must accept it as well as the canonical proto name.
+	cases := []struct {
+		name string
+		body string
+		want pb.Status
+	}{
+		{"custom alias active", `{"status":"active"}`, pb.Status_STATUS_ACTIVE},
+		{"custom alias inactive", `{"status":"inactive"}`, pb.Status_STATUS_INACTIVE},
+		{"canonical proto name still works", `{"status":"STATUS_ACTIVE"}`, pb.Status_STATUS_ACTIVE},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(tc.body))
+			msg := &pb.SimpleRequest{}
+			if err := runtime.DecodeRequest(r, msg); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if msg.Status != tc.want {
+				t.Fatalf("got %v, want %v", msg.Status, tc.want)
+			}
+		})
+	}
+}
+
+func TestDecodeRequest_EnumWithXVarName_Nested(t *testing.T) {
+	body := `{"str_val":"a","enum_val":"inactive","msg_val":{"page":1}}`
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	msg := &pb.AllTypesRequest{}
+	if err := runtime.DecodeRequest(r, msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.EnumVal != pb.Status_STATUS_INACTIVE {
+		t.Fatalf("nested enum: got %v, want STATUS_INACTIVE", msg.EnumVal)
+	}
+}
+
 func TestWriteResponse_OmitsEnumZero(t *testing.T) {
 	w := httptest.NewRecorder()
 	msg := &pb.SimpleResponse{
@@ -225,7 +263,7 @@ type errWriter struct {
 	code   int
 }
 
-func (e *errWriter) Header() http.Header        { return e.header }
+func (e *errWriter) Header() http.Header         { return e.header }
 func (e *errWriter) WriteHeader(code int)        { e.code = code }
 func (e *errWriter) Write(b []byte) (int, error) { return 0, errors.New("write failed") }
 

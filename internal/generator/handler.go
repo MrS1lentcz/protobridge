@@ -56,7 +56,6 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 			runtime.WriteAuthError(w, err)
 			return
 		}
-		ctx = runtime.SetUserMetadata(ctx, userData)
 		{{ end }}
 		// Path params → metadata
 		md := metadata.MD{}
@@ -73,6 +72,9 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		md.Set("{{ .HeaderName }}", {{ .VarName }})
 		{{ end }}
 		ctx = metadata.NewOutgoingContext(ctx, md)
+		{{ if not .ExcludeAuth }}
+		ctx = runtime.SetUserMetadata(ctx, userData)
+		{{ end }}
 		{{ if .IsUnary }}
 		// Parse request
 		req := &pb.{{ .InputTypeName }}{}

@@ -2,12 +2,14 @@ syntax = "proto3";
 
 package testdata;
 
+import "protobridge/options.proto";
+
 option go_package = "github.com/mrs1lentcz/protobridge/runtime/testdata";
 
 enum Status {
   STATUS_UNSPECIFIED = 0;
-  STATUS_ACTIVE = 1;
-  STATUS_INACTIVE = 2;
+  STATUS_ACTIVE = 1 [(protobridge.x_var_name) = "active"];
+  STATUS_INACTIVE = 2 [(protobridge.x_var_name) = "inactive"];
 }
 
 message SimpleRequest {

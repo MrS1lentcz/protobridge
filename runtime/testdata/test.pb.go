@@ -7,6 +7,7 @@
 package testdata
 
 import (
+	_ "github.com/mrs1lentcz/protobridge/proto/protobridge"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -772,7 +773,7 @@ var File_test_proto protoreflect.FileDescriptor
 const file_test_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"test.proto\x12\btestdata\"_\n" +
+	"test.proto\x12\btestdata\x1a\x19protobridge/options.proto\"_\n" +
 	"\rSimpleRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
 	"\x03age\x18\x02 \x01(\x05R\x03age\x12(\n" +
@@ -825,11 +826,12 @@ const file_test_proto_rawDesc = "" +
 	"\tpage_size\x18\x06 \x01(\rR\bpageSize\x12\x16\n" +
 	"\x06cursor\x18\a \x01(\x04R\x06cursor\x12\x16\n" +
 	"\x06weight\x18\b \x01(\x01R\x06weight\x12\x12\n" +
-	"\x04page\x18\t \x01(\x05R\x04page*H\n" +
+	"\x04page\x18\t \x01(\x05R\x04page*b\n" +
 	"\x06Status\x12\x16\n" +
-	"\x12STATUS_UNSPECIFIED\x10\x00\x12\x11\n" +
-	"\rSTATUS_ACTIVE\x10\x01\x12\x13\n" +
-	"\x0fSTATUS_INACTIVE\x10\x02B4Z2github.com/mrs1lentcz/protobridge/runtime/testdatab\x06proto3"
+	"\x12STATUS_UNSPECIFIED\x10\x00\x12\x1d\n" +
+	"\rSTATUS_ACTIVE\x10\x01\x1a\n" +
+	"\xf2\xb6\x18\x06active\x12!\n" +
+	"\x0fSTATUS_INACTIVE\x10\x02\x1a\f\xf2\xb6\x18\binactiveB4Z2github.com/mrs1lentcz/protobridge/runtime/testdatab\x06proto3"
 
 var (
 	file_test_proto_rawDescOnce sync.Once

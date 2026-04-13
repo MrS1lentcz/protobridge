@@ -49,3 +49,28 @@ func TestSetUserMetadata_PreservesExisting(t *testing.T) {
 		t.Fatal("user metadata should be set")
 	}
 }
+
+// TestGeneratedHandlerOrder_PreservesUserMetadata mirrors the call sequence
+// emitted by internal/generator/handler.go: SetUserMetadata first, then a
+// fresh metadata.MD is built from path params/headers and applied via
+// NewOutgoingContext. The user metadata key must survive that second call.
+func TestGeneratedHandlerOrder_PreservesUserMetadata(t *testing.T) {
+	ctx := context.Background()
+
+	md := metadata.MD{}
+	md.Set("task_id", "42")
+	ctx = metadata.NewOutgoingContext(ctx, md)
+
+	ctx = runtime.SetUserMetadata(ctx, []byte("user"))
+
+	out, ok := metadata.FromOutgoingContext(ctx)
+	if !ok {
+		t.Fatal("expected outgoing metadata")
+	}
+	if vals := out.Get("x-protobridge-user"); len(vals) != 1 {
+		t.Fatalf("user metadata lost: got %v", out)
+	}
+	if vals := out.Get("task_id"); len(vals) != 1 || vals[0] != "42" {
+		t.Fatalf("path-param metadata lost: got %v", out)
+	}
+}
