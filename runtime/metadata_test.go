@@ -51,9 +51,10 @@ func TestSetUserMetadata_PreservesExisting(t *testing.T) {
 }
 
 // TestGeneratedHandlerOrder_PreservesUserMetadata mirrors the call sequence
-// emitted by internal/generator/handler.go: SetUserMetadata first, then a
-// fresh metadata.MD is built from path params/headers and applied via
-// NewOutgoingContext. The user metadata key must survive that second call.
+// emitted by internal/generator/handler.go: a fresh metadata.MD is built
+// from path params/headers and applied via NewOutgoingContext first, then
+// SetUserMetadata is called. The user metadata key must coexist with the
+// path-param/header metadata in the resulting outgoing context.
 func TestGeneratedHandlerOrder_PreservesUserMetadata(t *testing.T) {
 	ctx := context.Background()
 

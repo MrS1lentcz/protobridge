@@ -47,15 +47,17 @@ func enumAliases(ed protoreflect.EnumDescriptor) map[string]string {
 // rewriteEnumAliases walks a decoded JSON tree alongside a message descriptor
 // and rewrites string values of enum-typed fields from their x_var_name alias
 // to the canonical proto enum name, so protojson.Unmarshal accepts them.
+// Returns true if any value was rewritten.
 //
 // JSON keys may be either the proto field name (snake_case) or the JSON name
 // (camelCase) — both are accepted by protojson on input, so we look up both.
-func rewriteEnumAliases(node any, md protoreflect.MessageDescriptor) any {
+func rewriteEnumAliases(node any, md protoreflect.MessageDescriptor) bool {
 	obj, ok := node.(map[string]any)
 	if !ok {
-		return node
+		return false
 	}
 	fields := md.Fields()
+	changed := false
 	for key, val := range obj {
 		fd := fields.ByJSONName(key)
 		if fd == nil {
@@ -64,61 +66,75 @@ func rewriteEnumAliases(node any, md protoreflect.MessageDescriptor) any {
 		if fd == nil {
 			continue
 		}
-		obj[key] = rewriteFieldValue(val, fd)
+		newVal, fieldChanged := rewriteFieldValue(val, fd)
+		if fieldChanged {
+			obj[key] = newVal
+			changed = true
+		}
 	}
-	return obj
+	return changed
 }
 
-func rewriteFieldValue(val any, fd protoreflect.FieldDescriptor) any {
+func rewriteFieldValue(val any, fd protoreflect.FieldDescriptor) (any, bool) {
 	switch {
 	case fd.IsMap():
 		valFD := fd.MapValue()
 		m, ok := val.(map[string]any)
 		if !ok {
-			return val
+			return val, false
 		}
+		changed := false
 		for k, v := range m {
-			m[k] = rewriteScalarOrMessage(v, valFD)
+			nv, c := rewriteScalarOrMessage(v, valFD)
+			if c {
+				m[k] = nv
+				changed = true
+			}
 		}
-		return m
+		return m, changed
 	case fd.IsList():
 		arr, ok := val.([]any)
 		if !ok {
-			return val
+			return val, false
 		}
+		changed := false
 		for i, v := range arr {
-			arr[i] = rewriteScalarOrMessage(v, fd)
+			nv, c := rewriteScalarOrMessage(v, fd)
+			if c {
+				arr[i] = nv
+				changed = true
+			}
 		}
-		return arr
+		return arr, changed
 	default:
 		return rewriteScalarOrMessage(val, fd)
 	}
 }
 
-func rewriteScalarOrMessage(val any, fd protoreflect.FieldDescriptor) any {
+func rewriteScalarOrMessage(val any, fd protoreflect.FieldDescriptor) (any, bool) {
 	switch fd.Kind() {
 	case protoreflect.EnumKind:
 		s, ok := val.(string)
 		if !ok {
-			return val
+			return val, false
 		}
 		if aliases := enumAliases(fd.Enum()); aliases != nil {
 			if canonical, found := aliases[s]; found {
-				return canonical
+				return canonical, true
 			}
 		}
-		return val
+		return val, false
 	case protoreflect.MessageKind, protoreflect.GroupKind:
-		return rewriteEnumAliases(val, fd.Message())
+		return val, rewriteEnumAliases(val, fd.Message())
 	default:
-		return val
+		return val, false
 	}
 }
 
 // preprocessEnumAliases parses raw JSON, rewrites any x_var_name aliases on
 // enum-typed fields to canonical proto enum names, and returns the rewritten
-// JSON. If the body is not a JSON object or contains no aliasable enums, the
-// original bytes are returned unchanged.
+// JSON. If the body is not a JSON object or no aliases were rewritten, the
+// original bytes are returned unchanged (no re-marshal).
 func preprocessEnumAliases(body []byte, msg proto.Message) ([]byte, error) {
 	var tree any
 	if err := json.Unmarshal(body, &tree); err != nil {
@@ -127,6 +143,8 @@ func preprocessEnumAliases(body []byte, msg proto.Message) ([]byte, error) {
 	if _, ok := tree.(map[string]any); !ok {
 		return body, nil
 	}
-	rewriteEnumAliases(tree, msg.ProtoReflect().Descriptor())
+	if !rewriteEnumAliases(tree, msg.ProtoReflect().Descriptor()) {
+		return body, nil
+	}
 	return json.Marshal(tree)
 }
