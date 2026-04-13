@@ -15,16 +15,15 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"io"
+	{{ if .UsesFmt }}"fmt"{{ end }}
+	{{ if .UsesIO }}"io"{{ end }}
 	"net/http"
 
-	"github.com/coder/websocket"
+	{{ if .UsesWebsocket }}"github.com/coder/websocket"{{ end }}
 	"github.com/go-chi/chi/v5"
 	"github.com/mrs1lentcz/gox/grpcx"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/protobuf/encoding/protojson"
+	{{ if .UsesProtojson }}"google.golang.org/protobuf/encoding/protojson"{{ end }}
 
 	"github.com/mrs1lentcz/protobridge/runtime"
 	pb "{{ .ProtoImport }}"
@@ -289,10 +288,14 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 `))
 
 type serviceFileData struct {
-	ServiceName string
-	ProtoImport string
-	UsesEmpty   bool
-	Methods     []methodData
+	ServiceName   string
+	ProtoImport   string
+	UsesEmpty     bool
+	UsesFmt       bool
+	UsesIO        bool
+	UsesWebsocket bool
+	UsesProtojson bool
+	Methods       []methodData
 }
 
 type methodData struct {
@@ -334,6 +337,19 @@ func generateServiceFile(svc *parser.Service, api *parser.ParsedAPI) (string, er
 		outRef, outEmpty := protoTypeRef(m.OutputType)
 		if inEmpty || outEmpty {
 			data.UsesEmpty = true
+		}
+		isStream := m.StreamType != parser.StreamUnary
+		if m.SSE {
+			data.UsesFmt = true
+			data.UsesIO = true
+		} else if isStream {
+			data.UsesWebsocket = true
+			if m.StreamType == parser.StreamServer {
+				data.UsesIO = true
+			}
+			if m.StreamType == parser.StreamClient || m.StreamType == parser.StreamBidi {
+				data.UsesProtojson = true
+			}
 		}
 		md := methodData{
 			MethodName:      m.Name,

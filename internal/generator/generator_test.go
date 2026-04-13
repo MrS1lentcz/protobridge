@@ -3,6 +3,8 @@ package generator
 import (
 	"bytes"
 	"fmt"
+	parser2 "go/parser"
+	"go/token"
 	"regexp"
 	"strings"
 	"testing"
@@ -1055,6 +1057,117 @@ func TestGenerateServiceFile_GoogleProtobufEmpty(t *testing.T) {
 	}
 	if !strings.Contains(content, `"google.golang.org/protobuf/types/known/emptypb"`) {
 		t.Errorf("expected emptypb import")
+	}
+}
+
+func TestGenerateServiceFile_NoUnusedImports_UnaryOnly(t *testing.T) {
+	// Generated handler files for a service with only unary methods must
+	// not import packages they don't reference (fmt, io, websocket,
+	// protojson) — Go refuses to compile with unused imports, forcing
+	// integrators to run goimports after every codegen.
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{{
+			Name: "X", ProtoPackage: "x.v1", GoPackage: "x/v1",
+			Methods: []*parser.Method{{
+				Name: "Get", HTTPMethod: "GET", HTTPPath: "/x",
+				StreamType: parser.StreamUnary,
+				InputType:  &parser.MessageType{Name: "Req", FullName: ".x.v1.Req"},
+				OutputType: &parser.MessageType{Name: "Resp", FullName: ".x.v1.Resp"},
+			}},
+		}},
+	}
+	content, err := generateServiceFile(api.Services[0], api)
+	if err != nil {
+		t.Fatalf("generateServiceFile: %v", err)
+	}
+	for _, unused := range []string{
+		`"fmt"`,
+		`"io"`,
+		`"github.com/coder/websocket"`,
+		`"google.golang.org/protobuf/encoding/protojson"`,
+		`"google.golang.org/grpc"`, // never used in the template at all
+	} {
+		if strings.Contains(content, unused) {
+			t.Errorf("unary-only handler must not import %s:\n%s", unused, content)
+		}
+	}
+}
+
+func TestGenerateServiceFile_NoUnusedImports_SSE(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{{
+			Name: "X", ProtoPackage: "x.v1", GoPackage: "x/v1",
+			Methods: []*parser.Method{{
+				Name: "Live", HTTPMethod: "GET", HTTPPath: "/live",
+				StreamType: parser.StreamServer, SSE: true,
+				InputType:  &parser.MessageType{Name: "Req", FullName: ".x.v1.Req"},
+				OutputType: &parser.MessageType{Name: "Msg", FullName: ".x.v1.Msg"},
+			}},
+		}},
+	}
+	content, err := generateServiceFile(api.Services[0], api)
+	if err != nil {
+		t.Fatalf("generateServiceFile: %v", err)
+	}
+	if !strings.Contains(content, `"fmt"`) || !strings.Contains(content, `"io"`) {
+		t.Errorf("SSE handler must import fmt and io:\n%s", content)
+	}
+	for _, unused := range []string{
+		`"github.com/coder/websocket"`,
+		`"google.golang.org/protobuf/encoding/protojson"`,
+	} {
+		if strings.Contains(content, unused) {
+			t.Errorf("SSE-only handler must not import %s", unused)
+		}
+	}
+}
+
+func TestGenerateServiceFile_GofmtClean_UnaryOnly(t *testing.T) {
+	// The conditional imports must produce valid, gofmt-clean Go (no stray
+	// blank lines that break parsing or that gofmt would reformat).
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{{
+			Name: "X", ProtoPackage: "x.v1", GoPackage: "x/v1",
+			Methods: []*parser.Method{{
+				Name: "Get", HTTPMethod: "GET", HTTPPath: "/x",
+				StreamType: parser.StreamUnary,
+				InputType:  &parser.MessageType{Name: "Req", FullName: ".x.v1.Req"},
+				OutputType: &parser.MessageType{Name: "Resp", FullName: ".x.v1.Resp"},
+			}},
+		}},
+	}
+	content, err := generateServiceFile(api.Services[0], api)
+	if err != nil {
+		t.Fatalf("generateServiceFile: %v", err)
+	}
+	if _, err := parser2.ParseFile(token.NewFileSet(), "service.go", content, parser2.AllErrors); err != nil {
+		t.Fatalf("generated file is not parseable Go: %v\n%s", err, content)
+	}
+}
+
+func TestGenerateServiceFile_NoUnusedImports_WSBidi(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{{
+			Name: "X", ProtoPackage: "x.v1", GoPackage: "x/v1",
+			Methods: []*parser.Method{{
+				Name: "Chat", HTTPMethod: "GET", HTTPPath: "/chat",
+				StreamType: parser.StreamBidi,
+				InputType:  &parser.MessageType{Name: "Req", FullName: ".x.v1.Req"},
+				OutputType: &parser.MessageType{Name: "Msg", FullName: ".x.v1.Msg"},
+			}},
+		}},
+	}
+	content, err := generateServiceFile(api.Services[0], api)
+	if err != nil {
+		t.Fatalf("generateServiceFile: %v", err)
+	}
+	for _, needed := range []string{
+		`"github.com/coder/websocket"`,
+		`"google.golang.org/protobuf/encoding/protojson"`,
+	} {
+		if !strings.Contains(content, needed) {
+			t.Errorf("WS bidi handler must import %s", needed)
+		}
 	}
 }
 
