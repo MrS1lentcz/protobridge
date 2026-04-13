@@ -47,6 +47,7 @@ func WriteResponse(w http.ResponseWriter, status int, msg proto.Message) {
 		WriteError(w, http.StatusInternalServerError, "INTERNAL", "failed to marshal response")
 		return
 	}
+	data = postprocessEnumAliases(data, msg)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if _, err := w.Write(data); err != nil {

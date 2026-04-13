@@ -28,6 +28,7 @@ import (
 
 	"github.com/mrs1lentcz/protobridge/runtime"
 	pb "{{ .ProtoImport }}"
+	{{ if .UsesEmpty }}"google.golang.org/protobuf/types/known/emptypb"{{ end }}
 )
 
 func register{{ .ServiceName }}(r chi.Router, addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConfig, auth runtime.AuthFunc) {
@@ -77,7 +78,7 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		{{ end }}
 		{{ if .IsUnary }}
 		// Parse request
-		req := &pb.{{ .InputTypeName }}{}
+		req := &{{ .InputTypeRef }}{}
 		{{ if .HasBody -}}
 		if err := runtime.DecodeRequest(r, req); err != nil {
 			runtime.WriteError(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
@@ -99,7 +100,7 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		{{ end }}
 		// gRPC call with retry on transient errors
 		resp, err := runtime.UnaryCallWithRetry(ctx, pool, addr,
-			func(ctx context.Context, req *pb.{{ .InputTypeName }}) (*pb.{{ .OutputTypeName }}, error) {
+			func(ctx context.Context, req *{{ .InputTypeRef }}) (*{{ .OutputTypeRef }}, error) {
 				return client.{{ .MethodName }}(ctx, req)
 			}, req)
 		if err != nil {
@@ -110,7 +111,7 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		runtime.WriteResponse(w, http.StatusOK, resp)
 		{{ else if .IsSSE }}
 		// SSE: server → client streaming via text/event-stream.
-		stream, err := client.{{ .MethodName }}(ctx, &pb.{{ .InputTypeName }}{})
+		stream, err := client.{{ .MethodName }}(ctx, &{{ .InputTypeRef }}{})
 		if err != nil {
 			runtime.WriteGRPCError(w, err)
 			return
@@ -160,7 +161,7 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		}
 		defer ws.CloseNow()
 
-		stream, err := client.{{ .MethodName }}(ctx, &pb.{{ .InputTypeName }}{})
+		stream, err := client.{{ .MethodName }}(ctx, &{{ .InputTypeRef }}{})
 		if err != nil {
 			ws.Close(websocket.StatusInternalError, "stream open failed")
 			return
@@ -218,7 +219,7 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 				ws.Close(websocket.StatusNormalClosure, "done")
 				return
 			}
-			msg := &pb.{{ .InputTypeName }}{}
+			msg := &{{ .InputTypeRef }}{}
 			if err := protojson.Unmarshal(data, msg); err != nil {
 				ws.Close(websocket.StatusInvalidFramePayloadData, "invalid JSON")
 				return
@@ -272,7 +273,7 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 				stream.CloseSend()
 				return
 			}
-			msg := &pb.{{ .InputTypeName }}{}
+			msg := &{{ .InputTypeRef }}{}
 			if err := protojson.Unmarshal(data, msg); err != nil {
 				ws.Close(websocket.StatusInvalidFramePayloadData, "invalid JSON")
 				return
@@ -290,6 +291,7 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 type serviceFileData struct {
 	ServiceName string
 	ProtoImport string
+	UsesEmpty   bool
 	Methods     []methodData
 }
 
@@ -302,6 +304,8 @@ type methodData struct {
 	RequiredHeaders   []headerData
 	InputTypeName     string
 	OutputTypeName    string
+	InputTypeRef      string
+	OutputTypeRef     string
 	ExcludeAuth       bool
 	IsUnary           bool
 	IsServerStream    bool
@@ -326,6 +330,11 @@ func generateServiceFile(svc *parser.Service, api *parser.ParsedAPI) (string, er
 	}
 
 	for _, m := range svc.Methods {
+		inRef, inEmpty := protoTypeRef(m.InputType)
+		outRef, outEmpty := protoTypeRef(m.OutputType)
+		if inEmpty || outEmpty {
+			data.UsesEmpty = true
+		}
 		md := methodData{
 			MethodName:      m.Name,
 			HandlerFuncName: toLowerCamel(m.Name) + "Handler",
@@ -334,6 +343,8 @@ func generateServiceFile(svc *parser.Service, api *parser.ParsedAPI) (string, er
 			PathParams:      m.PathParams,
 			InputTypeName:   m.InputType.Name,
 			OutputTypeName:  m.OutputType.Name,
+			InputTypeRef:    inRef,
+			OutputTypeRef:   outRef,
 			ExcludeAuth:     m.ExcludeAuth,
 			IsUnary:         m.StreamType == parser.StreamUnary,
 			IsServerStream:  m.StreamType == parser.StreamServer,
@@ -402,8 +413,20 @@ func protoImportPath(svc *parser.Service) string {
 	return strings.ReplaceAll(svc.ProtoPackage, ".", "/")
 }
 
+// protoTypeRef returns the qualified Go type name for a proto message and
+// whether the type is google.protobuf.Empty (in which case emptypb must be
+// imported).
+func protoTypeRef(mt *parser.MessageType) (ref string, isEmpty bool) {
+	if mt.FullName == ".google.protobuf.Empty" || mt.FullName == "google.protobuf.Empty" {
+		return "emptypb.Empty", true
+	}
+	return "pb." + mt.Name, false
+}
+
 func toPascalCase(s string) string {
-	parts := strings.Split(s, "_")
+	parts := strings.FieldsFunc(s, func(r rune) bool {
+		return r == '_' || r == '-'
+	})
 	var result string
 	for _, p := range parts {
 		if len(p) > 0 {

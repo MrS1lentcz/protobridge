@@ -57,7 +57,8 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 			}
 
 			for _, m := range svc.Method {
-				if getAuthMethod(m) {
+				isAuth := getAuthMethod(m)
+				if isAuth {
 					if api.AuthMethod != nil {
 						return nil, fmt.Errorf("multiple auth_method annotations found: %s.%s and %s.%s",
 							api.AuthMethod.ServiceName, api.AuthMethod.MethodName,
@@ -70,7 +71,6 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 						InputType:   resolveMessageType(msgMap, enumMap, m.GetInputType()),
 						OutputType:  resolveMessageType(msgMap, enumMap, m.GetOutputType()),
 					}
-					continue
 				}
 
 				httpMethod, httpPath := extractHTTPRule(m)
@@ -91,7 +91,9 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 					PathParams:        extractPathParams(fullPath),
 					RequiredHeaders:   getRequiredHeaders(m),
 					QueryParamsTarget: getQueryParamsTarget(m),
-					ExcludeAuth:       getExcludeAuth(m),
+					// Auth methods exposed as REST must skip the auth middleware
+					// (otherwise login itself would require a prior login).
+					ExcludeAuth:       getExcludeAuth(m) || isAuth,
 					StreamType:        resolveStreamType(m),
 					SSE:               getSSE(m),
 					WSMode:            getWSMode(m),

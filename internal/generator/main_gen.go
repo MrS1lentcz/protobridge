@@ -133,7 +133,9 @@ func main() {
 	r.Get("/healthz", runtime.HealthHandler())
 
 	{{ range .Services -}}
-	register{{ .ServiceName }}(r, "{{ .EnvAddrKey }}", pool, scalingCfg, authFn)
+	{{ if .HasREST -}}
+	register{{ .ServiceName }}(r, {{ .EnvAddr }}, pool, scalingCfg, authFn)
+	{{ end -}}
 	{{ end }}
 
 	// Prometheus metrics endpoint
@@ -295,6 +297,10 @@ type mainServiceData struct {
 	EnvTLSKey      string // env key, e.g. "PROTOBRIDGE_VOICE_CHAT_SERVICE_TLS"
 	EnvGRPCOptsKey string // env key, e.g. "PROTOBRIDGE_VOICE_CHAT_SERVICE_GRPC_OPTIONS"
 	ConnVar        string // variable name, e.g. "voiceChatServiceConn"
+	// HasREST is false for synthetic auth-only services that need a gRPC
+	// connection (for the auth function) but have no generated register*
+	// function. The main template skips register* for these.
+	HasREST bool
 }
 
 func generateMain(api *parser.ParsedAPI) (string, error) {
@@ -311,6 +317,7 @@ func generateMain(api *parser.ParsedAPI) (string, error) {
 			EnvTLSKey:      "PROTOBRIDGE_" + screaming + "_TLS",
 			EnvGRPCOptsKey: "PROTOBRIDGE_" + screaming + "_GRPC_OPTIONS",
 			ConnVar:        toLowerCamel(svc.Name) + "Conn",
+			HasREST:        true,
 		}
 		data.Services = append(data.Services, sd)
 	}

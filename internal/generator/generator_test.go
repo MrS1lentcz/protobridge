@@ -3,6 +3,7 @@ package generator
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -283,6 +284,55 @@ func TestGenerateMain(t *testing.T) {
 		if !strings.Contains(content, check) {
 			t.Errorf("generated main.go missing %q", check)
 		}
+	}
+
+	// Regression: register*Service must be called with the resolved address
+	// variable, not the env var key string literal. Passing the literal would
+	// make the pool dial the literal "PROTOBRIDGE_..." hostname.
+	if strings.Contains(content, `registerChatService(r, "PROTOBRIDGE_CHAT_SERVICE_ADDR"`) {
+		t.Error("registerChatService called with env var key literal instead of resolved address")
+	}
+	if !strings.Contains(content, "registerChatService(r, chatServiceAddr,") {
+		t.Errorf("expected registerChatService(r, chatServiceAddr, ...) in generated main.go")
+	}
+}
+
+func TestGenerateMain_AuthOnlyService_NoRegisterCall(t *testing.T) {
+	// When an auth service has no REST endpoints, we still need a connection
+	// for the auth function to dial, but main.go must NOT call
+	// registerAuthService — there is no such generated function and the
+	// build would fail.
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{{
+			Name: "ChatService", ProtoPackage: "x.v1", GoPackage: "x/v1",
+			Methods: []*parser.Method{{
+				Name: "Send", HTTPMethod: "POST", HTTPPath: "/send",
+				StreamType: parser.StreamUnary,
+				InputType:  &parser.MessageType{Name: "Req", FullName: ".x.v1.Req"},
+				OutputType: &parser.MessageType{Name: "Resp", FullName: ".x.v1.Resp"},
+			}},
+		}},
+		AuthMethod: &parser.AuthMethod{
+			ServiceName: "AuthService",
+			MethodName:  "Authenticate",
+			GoPackage:   "x/v1",
+			InputType:   &parser.MessageType{Name: "AuthReq", FullName: ".x.v1.AuthReq"},
+			OutputType:  &parser.MessageType{Name: "AuthResp", FullName: ".x.v1.AuthResp"},
+		},
+	}
+	content, err := generateMain(api)
+	if err != nil {
+		t.Fatalf("generateMain: %v", err)
+	}
+	if strings.Contains(content, "registerAuthService(") {
+		t.Errorf("must not call registerAuthService when auth service has no REST endpoints:\n%s", content)
+	}
+	if !strings.Contains(content, "registerChatService(") {
+		t.Error("expected registerChatService(...) for non-auth service")
+	}
+	// Connection still needs to be pre-created.
+	if !strings.Contains(content, "authServiceAddr") {
+		t.Error("expected authServiceAddr for connection pre-create")
 	}
 }
 
@@ -888,6 +938,87 @@ func TestGenerateOpenAPIOneofComment(t *testing.T) {
 	content := GenerateOpenAPI(api)
 	if !strings.Contains(content, "# oneof: payload") {
 		t.Error("expected oneof comment in OpenAPI schema")
+	}
+}
+
+func TestToPascalCase_HyphenatedHeaders(t *testing.T) {
+	// Header names with hyphens (e.g. "x-github-event") must produce a valid
+	// Go identifier — toPascalCase is used to build the local var name in
+	// the generated handler.
+	tests := []struct {
+		in, want string
+	}{
+		{"x-github-event", "XGithubEvent"},
+		{"Content-Type", "ContentType"},
+		{"x_request_id", "XRequestId"},
+		{"mixed-case_value", "MixedCaseValue"},
+	}
+	for _, tc := range tests {
+		got := toPascalCase(tc.in)
+		if got != tc.want {
+			t.Errorf("toPascalCase(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		if strings.ContainsAny(got, "-") {
+			t.Errorf("toPascalCase(%q) = %q contains hyphen (invalid Go identifier)", tc.in, got)
+		}
+	}
+}
+
+func TestGenerateServiceFile_HeaderWithHyphenIsValidIdentifier(t *testing.T) {
+	// End-to-end: a required_headers entry with hyphens must produce a Go
+	// identifier in the emitted handler, not a literal hyphenated string.
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{{
+			Name: "X", ProtoPackage: "x.v1", GoPackage: "x/v1",
+			Methods: []*parser.Method{{
+				Name: "Do", HTTPMethod: "GET", HTTPPath: "/x",
+				StreamType:      parser.StreamUnary,
+				RequiredHeaders: []string{"x-github-event"},
+				InputType:       &parser.MessageType{Name: "Req", FullName: ".x.v1.Req"},
+				OutputType:      &parser.MessageType{Name: "Resp", FullName: ".x.v1.Resp"},
+			}},
+		}},
+	}
+	content, err := generateServiceFile(api.Services[0], api)
+	if err != nil {
+		t.Fatalf("generateServiceFile: %v", err)
+	}
+	if strings.Contains(content, "headerx-github-event") || strings.Contains(content, "headerX-github-event") {
+		t.Fatalf("emitted invalid Go identifier with hyphen:\n%s", content)
+	}
+	if !strings.Contains(content, "headerXGithubEvent") {
+		t.Fatalf("expected headerXGithubEvent in output:\n%s", content)
+	}
+}
+
+func TestGenerateServiceFile_GoogleProtobufEmpty(t *testing.T) {
+	// google.protobuf.Empty is an external well-known type. The generated
+	// handler must reference emptypb.Empty (with import) rather than pb.Empty
+	// which doesn't exist in the user's proto package.
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{{
+			Name: "X", ProtoPackage: "x.v1", GoPackage: "x/v1",
+			Methods: []*parser.Method{{
+				Name: "Dismiss", HTTPMethod: "POST", HTTPPath: "/dismiss",
+				StreamType: parser.StreamUnary,
+				InputType:  &parser.MessageType{Name: "DismissRequest", FullName: ".x.v1.DismissRequest"},
+				OutputType: &parser.MessageType{Name: "Empty", FullName: ".google.protobuf.Empty"},
+			}},
+		}},
+	}
+	content, err := generateServiceFile(api.Services[0], api)
+	if err != nil {
+		t.Fatalf("generateServiceFile: %v", err)
+	}
+	// Match `pb.Empty` only when not preceded by alphanumerics (so emptypb.Empty doesn't trip).
+	if regexp.MustCompile(`\bpb\.Empty\b`).MatchString(content) {
+		t.Errorf("must not reference pb.Empty (external well-known type):\n%s", content)
+	}
+	if !strings.Contains(content, "emptypb.Empty") {
+		t.Errorf("expected emptypb.Empty:\n%s", content)
+	}
+	if !strings.Contains(content, `"google.golang.org/protobuf/types/known/emptypb"`) {
+		t.Errorf("expected emptypb import")
 	}
 }
 

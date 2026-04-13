@@ -187,6 +187,39 @@ func TestDecodeRequest_EnumAliasPrepass_NonObjectBody(t *testing.T) {
 	}
 }
 
+func TestWriteResponse_EnumUsesXVarName(t *testing.T) {
+	// On output, enum values that declare (protobridge.x_var_name) must be
+	// serialized using the alias, not the canonical proto name. Symmetric
+	// to the input prepass.
+	w := httptest.NewRecorder()
+	msg := &pb.SimpleResponse{Id: "1", Name: "alice", Status: pb.Status_STATUS_ACTIVE}
+	runtime.WriteResponse(w, http.StatusOK, msg)
+
+	body := w.Body.String()
+	if bytes.Contains([]byte(body), []byte("STATUS_ACTIVE")) {
+		t.Errorf("response should not contain canonical proto enum name, got: %s", body)
+	}
+	if !bytes.Contains([]byte(body), []byte(`"status":"active"`)) {
+		t.Errorf("response should contain x_var_name alias \"active\", got: %s", body)
+	}
+}
+
+func TestWriteResponse_EnumUsesXVarName_Repeated(t *testing.T) {
+	w := httptest.NewRecorder()
+	msg := &pb.EnumContainerRequest{
+		Statuses: []pb.Status{pb.Status_STATUS_ACTIVE, pb.Status_STATUS_INACTIVE},
+	}
+	runtime.WriteResponse(w, http.StatusOK, msg)
+
+	body := w.Body.String()
+	if !bytes.Contains([]byte(body), []byte(`"active"`)) || !bytes.Contains([]byte(body), []byte(`"inactive"`)) {
+		t.Errorf("repeated enum should use aliases, got: %s", body)
+	}
+	if bytes.Contains([]byte(body), []byte("STATUS_ACTIVE")) || bytes.Contains([]byte(body), []byte("STATUS_INACTIVE")) {
+		t.Errorf("repeated enum should not contain canonical names, got: %s", body)
+	}
+}
+
 func TestWriteResponse_OmitsEnumZero(t *testing.T) {
 	w := httptest.NewRecorder()
 	msg := &pb.SimpleResponse{
@@ -212,8 +245,10 @@ func TestWriteResponse_IncludesNonZeroEnum(t *testing.T) {
 	runtime.WriteResponse(w, http.StatusOK, msg)
 
 	body := w.Body.String()
-	if !bytes.Contains([]byte(body), []byte("STATUS_ACTIVE")) {
-		t.Fatalf("expected STATUS_ACTIVE in response, got: %s", body)
+	// Status_STATUS_ACTIVE has (protobridge.x_var_name) = "active", so the
+	// post-processor rewrites the canonical name to the alias.
+	if !bytes.Contains([]byte(body), []byte(`"status":"active"`)) {
+		t.Fatalf("expected x_var_name alias \"active\" in response, got: %s", body)
 	}
 }
 
