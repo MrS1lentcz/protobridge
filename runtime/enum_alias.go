@@ -134,6 +134,56 @@ func rewriteScalarOrMessage(val any, fd protoreflect.FieldDescriptor) (any, bool
 // reverseEnumAliasCache: enum full name → canonical proto name → x_var_name alias.
 var reverseEnumAliasCache sync.Map
 
+// messageHasAliasesCache memoises whether a message (transitively, through
+// nested messages and map values) contains any enum field whose enum has at
+// least one (protobridge.x_var_name) value. When false, we can skip the JSON
+// unmarshal + tree walk entirely on every request/response of that type.
+var messageHasAliasesCache sync.Map // map[protoreflect.FullName]bool
+
+func messageHasAliases(md protoreflect.MessageDescriptor) bool {
+	if v, ok := messageHasAliasesCache.Load(md.FullName()); ok {
+		return v.(bool)
+	}
+	// Pre-store false to break recursion on self-referential message types.
+	messageHasAliasesCache.Store(md.FullName(), false)
+	result := descriptorHasAliases(md, map[protoreflect.FullName]bool{md.FullName(): true})
+	messageHasAliasesCache.Store(md.FullName(), result)
+	return result
+}
+
+func descriptorHasAliases(md protoreflect.MessageDescriptor, seen map[protoreflect.FullName]bool) bool {
+	fields := md.Fields()
+	for i := 0; i < fields.Len(); i++ {
+		fd := fields.Get(i)
+		if fd.IsMap() {
+			vfd := fd.MapValue()
+			if fieldHasAliases(vfd, seen) {
+				return true
+			}
+			continue
+		}
+		if fieldHasAliases(fd, seen) {
+			return true
+		}
+	}
+	return false
+}
+
+func fieldHasAliases(fd protoreflect.FieldDescriptor, seen map[protoreflect.FullName]bool) bool {
+	switch fd.Kind() {
+	case protoreflect.EnumKind:
+		return enumAliases(fd.Enum()) != nil || reverseEnumAliases(fd.Enum()) != nil
+	case protoreflect.MessageKind, protoreflect.GroupKind:
+		nested := fd.Message()
+		if seen[nested.FullName()] {
+			return false
+		}
+		seen[nested.FullName()] = true
+		return descriptorHasAliases(nested, seen)
+	}
+	return false
+}
+
 func reverseEnumAliases(ed protoreflect.EnumDescriptor) map[string]string {
 	if v, ok := reverseEnumAliasCache.Load(ed.FullName()); ok {
 		if v == nil {
@@ -249,6 +299,10 @@ func applyOutputScalarOrMessage(val any, fd protoreflect.FieldDescriptor) (any, 
 // their x_var_name aliases. Returns the original bytes unchanged when there
 // is nothing to rewrite.
 func postprocessEnumAliases(body []byte, msg proto.Message) []byte {
+	md := msg.ProtoReflect().Descriptor()
+	if !messageHasAliases(md) {
+		return body
+	}
 	var tree any
 	if err := json.Unmarshal(body, &tree); err != nil {
 		return body
@@ -256,7 +310,7 @@ func postprocessEnumAliases(body []byte, msg proto.Message) []byte {
 	if _, ok := tree.(map[string]any); !ok {
 		return body
 	}
-	if !applyEnumAliasesToOutput(tree, msg.ProtoReflect().Descriptor()) {
+	if !applyEnumAliasesToOutput(tree, md) {
 		return body
 	}
 	out, err := json.Marshal(tree)
@@ -271,6 +325,10 @@ func postprocessEnumAliases(body []byte, msg proto.Message) []byte {
 // JSON. If the body is not a JSON object or no aliases were rewritten, the
 // original bytes are returned unchanged (no re-marshal).
 func preprocessEnumAliases(body []byte, msg proto.Message) ([]byte, error) {
+	md := msg.ProtoReflect().Descriptor()
+	if !messageHasAliases(md) {
+		return body, nil
+	}
 	var tree any
 	if err := json.Unmarshal(body, &tree); err != nil {
 		return body, nil // let protojson surface the parse error
@@ -278,7 +336,7 @@ func preprocessEnumAliases(body []byte, msg proto.Message) ([]byte, error) {
 	if _, ok := tree.(map[string]any); !ok {
 		return body, nil
 	}
-	if !rewriteEnumAliases(tree, msg.ProtoReflect().Descriptor()) {
+	if !rewriteEnumAliases(tree, md) {
 		return body, nil
 	}
 	return json.Marshal(tree)

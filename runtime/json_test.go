@@ -252,6 +252,23 @@ func TestWriteResponse_IncludesNonZeroEnum(t *testing.T) {
 	}
 }
 
+func TestMarshalOneofField_AppliesEnumAliases(t *testing.T) {
+	// Symmetric to WriteResponse: oneof variant marshaling must also apply
+	// x_var_name aliases, otherwise JSON output is inconsistent depending
+	// on which helper produced it.
+	msg := &pb.SimpleResponse{Id: "1", Status: pb.Status_STATUS_ACTIVE}
+	data, err := runtime.MarshalOneofField(msg, "SimpleResponse")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bytes.Contains(data, []byte("STATUS_ACTIVE")) {
+		t.Errorf("oneof output should use x_var_name alias, got: %s", data)
+	}
+	if !bytes.Contains(data, []byte(`"status":"active"`)) {
+		t.Errorf("oneof output should contain alias \"active\", got: %s", data)
+	}
+}
+
 func TestMarshalOneofField_AddsDiscriminator(t *testing.T) {
 	msg := &pb.TextContent{Body: "hello world"}
 	data, err := runtime.MarshalOneofField(msg, "TextContent")

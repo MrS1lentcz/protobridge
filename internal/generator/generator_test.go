@@ -991,6 +991,42 @@ func TestGenerateServiceFile_HeaderWithHyphenIsValidIdentifier(t *testing.T) {
 	}
 }
 
+func TestGenerateServiceFile_StreamingMarshalGoesThroughRuntime(t *testing.T) {
+	// Streaming branches (SSE/WebSocket) used to call protojson.Marshal
+	// directly, bypassing x_var_name post-processing. They must use the
+	// centralized runtime.MarshalProto helper so enum aliases are applied
+	// consistently across unary and streaming transports.
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{{
+			Name: "X", ProtoPackage: "x.v1", GoPackage: "x/v1",
+			Methods: []*parser.Method{
+				{
+					Name: "Stream", HTTPMethod: "GET", HTTPPath: "/stream",
+					StreamType: parser.StreamServer,
+					InputType:  &parser.MessageType{Name: "Req", FullName: ".x.v1.Req"},
+					OutputType: &parser.MessageType{Name: "Msg", FullName: ".x.v1.Msg"},
+				},
+				{
+					Name: "Live", HTTPMethod: "GET", HTTPPath: "/live",
+					StreamType: parser.StreamServer, SSE: true,
+					InputType:  &parser.MessageType{Name: "Req", FullName: ".x.v1.Req"},
+					OutputType: &parser.MessageType{Name: "Msg", FullName: ".x.v1.Msg"},
+				},
+			},
+		}},
+	}
+	content, err := generateServiceFile(api.Services[0], api)
+	if err != nil {
+		t.Fatalf("generateServiceFile: %v", err)
+	}
+	if strings.Contains(content, "protojson.Marshal(") {
+		t.Errorf("streaming handler must not call protojson.Marshal directly (bypasses x_var_name postprocess):\n%s", content)
+	}
+	if !strings.Contains(content, "runtime.MarshalProto(") {
+		t.Errorf("streaming handler must use runtime.MarshalProto helper:\n%s", content)
+	}
+}
+
 func TestGenerateServiceFile_GoogleProtobufEmpty(t *testing.T) {
 	// google.protobuf.Empty is an external well-known type. The generated
 	// handler must reference emptypb.Empty (with import) rather than pb.Empty

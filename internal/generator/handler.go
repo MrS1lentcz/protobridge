@@ -140,7 +140,7 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 			if err != nil {
 				return
 			}
-			data, err := protojson.Marshal(msg)
+			data, err := runtime.MarshalProto(msg)
 			if err != nil {
 				if _, writeErr := fmt.Fprintf(w, "event: error\ndata: {\"error\":\"marshal failure\"}\n\n"); writeErr != nil {
 					return
@@ -177,7 +177,7 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 				ws.Close(websocket.StatusInternalError, "stream error")
 				return
 			}
-			data, err := protojson.Marshal(msg)
+			data, err := runtime.MarshalProto(msg)
 			if err != nil {
 				ws.Close(websocket.StatusInternalError, "marshal error")
 				return
@@ -208,7 +208,7 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 					ws.Close(websocket.StatusInternalError, "close error")
 					return
 				}
-				result, err := protojson.Marshal(resp)
+				result, err := runtime.MarshalProto(resp)
 				if err != nil {
 					ws.Close(websocket.StatusInternalError, "marshal error")
 					return
@@ -255,7 +255,7 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 					ws.Close(websocket.StatusNormalClosure, "stream ended")
 					return
 				}
-				data, err := protojson.Marshal(msg)
+				data, err := runtime.MarshalProto(msg)
 				if err != nil {
 					ws.Close(websocket.StatusInternalError, "marshal error")
 					return

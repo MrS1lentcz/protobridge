@@ -38,16 +38,27 @@ func DecodeRequest(r *http.Request, msg proto.Message) error {
 	return nil
 }
 
+// MarshalProto marshals a proto message to JSON using the runtime's standard
+// options and applies x_var_name aliases on enum-typed fields. All response
+// paths (unary, oneof discriminator, SSE/WS streaming) must go through this
+// helper so JSON output is consistent regardless of transport.
+func MarshalProto(msg proto.Message) ([]byte, error) {
+	data, err := marshaller.Marshal(msg)
+	if err != nil {
+		return nil, err
+	}
+	return postprocessEnumAliases(data, msg), nil
+}
+
 // WriteResponse marshals a proto message and writes it as JSON.
 func WriteResponse(w http.ResponseWriter, status int, msg proto.Message) {
-	data, err := marshaller.Marshal(msg)
+	data, err := MarshalProto(msg)
 	if err != nil {
 		// Proto3 marshal failure = data corruption → Sentry.
 		reportError(err)
 		WriteError(w, http.StatusInternalServerError, "INTERNAL", "failed to marshal response")
 		return
 	}
-	data = postprocessEnumAliases(data, msg)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if _, err := w.Write(data); err != nil {
@@ -71,7 +82,7 @@ const DiscriminatorField = "protobridge_disc"
 
 // MarshalOneofField marshals a oneof message variant with a discriminator field.
 func MarshalOneofField(msg proto.Message, typeName string) (json.RawMessage, error) {
-	data, err := marshaller.Marshal(msg)
+	data, err := MarshalProto(msg)
 	if err != nil {
 		return nil, err
 	}
