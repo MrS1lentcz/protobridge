@@ -15,7 +15,7 @@ var serviceFileTmpl = template.Must(template.New("service").Parse(`// Code gener
 package main
 
 import (
-	"context"
+	{{ if .UsesContext }}"context"{{ end }}
 	{{ if .UsesFmt }}"fmt"{{ end }}
 	{{ if .UsesIO }}"io"{{ end }}
 	"net/http"
@@ -292,6 +292,7 @@ type serviceFileData struct {
 	ServiceName   string
 	ProtoImport   string
 	UsesEmpty     bool
+	UsesContext   bool
 	UsesFmt       bool
 	UsesIO        bool
 	UsesWebsocket bool
@@ -340,6 +341,13 @@ func generateServiceFile(svc *parser.Service, api *parser.ParsedAPI) (string, er
 			data.UsesEmpty = true
 		}
 		isStream := m.StreamType != parser.StreamUnary
+		// Unary handlers wrap the call in a context.Context-typed closure
+		// (UnaryCallWithRetry); the bidi branch calls context.WithCancel.
+		// Other streaming branches use the ctx value but never reference
+		// the context.Context type.
+		if !isStream || m.StreamType == parser.StreamBidi {
+			data.UsesContext = true
+		}
 		if m.SSE {
 			data.UsesFmt = true
 			data.UsesIO = true
