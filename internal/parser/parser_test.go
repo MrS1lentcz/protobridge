@@ -1092,6 +1092,44 @@ func TestGetXVarName_EmptyOptions(t *testing.T) {
 	}
 }
 
+// TestOptionGetters_NilOptions covers the early `if .Options == nil` branch
+// of every option getter — the EmptyOptions tests above only exercise the
+// type-assertion failure path.
+func TestOptionGetters_NilOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("M")}
+	if got := getRequiredHeaders(m); got != nil {
+		t.Errorf("getRequiredHeaders: got %v", got)
+	}
+	if got := getQueryParamsTarget(m); got != "" {
+		t.Errorf("getQueryParamsTarget: got %q", got)
+	}
+	if getExcludeAuth(m) {
+		t.Error("getExcludeAuth: got true")
+	}
+	if getAuthMethod(m) {
+		t.Error("getAuthMethod: got true")
+	}
+	if getSSE(m) {
+		t.Error("getSSE: got true")
+	}
+	if got := getWSMode(m); got != "" {
+		t.Errorf("getWSMode: got %q", got)
+	}
+
+	f := &descriptorpb.FieldDescriptorProto{Name: sp("f")}
+	if getFieldRequired(f) {
+		t.Error("getFieldRequired: got true")
+	}
+
+	s := &descriptorpb.ServiceDescriptorProto{Name: sp("S")}
+	if got := getDisplayName(s); got != "" {
+		t.Errorf("getDisplayName: got %q", got)
+	}
+	if got := getPathPrefix(s); got != "" {
+		t.Errorf("getPathPrefix: got %q", got)
+	}
+}
+
 // --- Test collectNestedEnums with nested message containing enum ---
 
 func TestParseNestedMessageWithNestedEnum(t *testing.T) {

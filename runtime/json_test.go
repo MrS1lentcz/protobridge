@@ -101,6 +101,92 @@ func TestDecodeRequest_EnumWithXVarName_Nested(t *testing.T) {
 	}
 }
 
+func TestDecodeRequest_EnumWithXVarName_Repeated(t *testing.T) {
+	body := `{"statuses":["active","STATUS_INACTIVE","inactive"]}`
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	msg := &pb.EnumContainerRequest{}
+	if err := runtime.DecodeRequest(r, msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []pb.Status{pb.Status_STATUS_ACTIVE, pb.Status_STATUS_INACTIVE, pb.Status_STATUS_INACTIVE}
+	if len(msg.Statuses) != len(want) {
+		t.Fatalf("len mismatch: got %d, want %d", len(msg.Statuses), len(want))
+	}
+	for i := range want {
+		if msg.Statuses[i] != want[i] {
+			t.Fatalf("statuses[%d]: got %v, want %v", i, msg.Statuses[i], want[i])
+		}
+	}
+}
+
+func TestDecodeRequest_EnumWithXVarName_Map(t *testing.T) {
+	body := `{"by_name":{"a":"active","b":"inactive","c":"STATUS_ACTIVE"}}`
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	msg := &pb.EnumContainerRequest{}
+	if err := runtime.DecodeRequest(r, msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := map[string]pb.Status{
+		"a": pb.Status_STATUS_ACTIVE,
+		"b": pb.Status_STATUS_INACTIVE,
+		"c": pb.Status_STATUS_ACTIVE,
+	}
+	for k, v := range want {
+		if msg.ByName[k] != v {
+			t.Fatalf("by_name[%q]: got %v, want %v", k, msg.ByName[k], v)
+		}
+	}
+}
+
+func TestDecodeRequest_EnumAliasPrepass_UnknownFieldIgnored(t *testing.T) {
+	// Unknown JSON keys hit the `fd == nil { continue }` branch in the
+	// prepass. With DiscardUnknown, the request still parses cleanly.
+	body := `{"name":"alice","mystery":"value","status":"active"}`
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	msg := &pb.SimpleRequest{}
+	if err := runtime.DecodeRequest(r, msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.Status != pb.Status_STATUS_ACTIVE {
+		t.Fatalf("expected STATUS_ACTIVE, got %v", msg.Status)
+	}
+}
+
+func TestDecodeRequest_EnumAliasPrepass_NumericEnumLeftUntouched(t *testing.T) {
+	// Numeric enum value is not a string -> prepass leaves it alone and
+	// protojson handles it natively.
+	body := `{"status":1}`
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	msg := &pb.SimpleRequest{}
+	if err := runtime.DecodeRequest(r, msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.Status != pb.Status_STATUS_ACTIVE {
+		t.Fatalf("expected STATUS_ACTIVE (1), got %v", msg.Status)
+	}
+}
+
+func TestDecodeRequest_EnumAliasPrepass_NullNestedMessage(t *testing.T) {
+	// JSON null for a nested message field exercises the
+	// `node.(map[string]any)` failure branch when recursing.
+	body := `{"str_val":"a","msg_val":null}`
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	msg := &pb.AllTypesRequest{}
+	if err := runtime.DecodeRequest(r, msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDecodeRequest_EnumAliasPrepass_NonObjectBody(t *testing.T) {
+	// Top-level JSON array bypasses the prepass and protojson surfaces the error.
+	body := `[1,2,3]`
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	msg := &pb.SimpleRequest{}
+	if err := runtime.DecodeRequest(r, msg); err == nil {
+		t.Fatal("expected error for non-object body")
+	}
+}
+
 func TestWriteResponse_OmitsEnumZero(t *testing.T) {
 	w := httptest.NewRecorder()
 	msg := &pb.SimpleResponse{

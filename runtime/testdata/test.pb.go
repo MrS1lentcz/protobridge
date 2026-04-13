@@ -660,6 +660,60 @@ func (x *QueryRequest) GetParams() *QueryParams {
 	return nil
 }
 
+// EnumContainerRequest exercises repeated and map enum field rewriting in
+// the JSON enum-alias prepass.
+type EnumContainerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Statuses      []Status               `protobuf:"varint,1,rep,packed,name=statuses,proto3,enum=testdata.Status" json:"statuses,omitempty"`
+	ByName        map[string]Status      `protobuf:"bytes,2,rep,name=by_name,json=byName,proto3" json:"by_name,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value,enum=testdata.Status"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnumContainerRequest) Reset() {
+	*x = EnumContainerRequest{}
+	mi := &file_test_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnumContainerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnumContainerRequest) ProtoMessage() {}
+
+func (x *EnumContainerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_test_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnumContainerRequest.ProtoReflect.Descriptor instead.
+func (*EnumContainerRequest) Descriptor() ([]byte, []int) {
+	return file_test_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *EnumContainerRequest) GetStatuses() []Status {
+	if x != nil {
+		return x.Statuses
+	}
+	return nil
+}
+
+func (x *EnumContainerRequest) GetByName() map[string]Status {
+	if x != nil {
+		return x.ByName
+	}
+	return nil
+}
+
 type QueryParams struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Search        string                 `protobuf:"bytes,1,opt,name=search,proto3" json:"search,omitempty"`
@@ -677,7 +731,7 @@ type QueryParams struct {
 
 func (x *QueryParams) Reset() {
 	*x = QueryParams{}
-	mi := &file_test_proto_msgTypes[9]
+	mi := &file_test_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -689,7 +743,7 @@ func (x *QueryParams) String() string {
 func (*QueryParams) ProtoMessage() {}
 
 func (x *QueryParams) ProtoReflect() protoreflect.Message {
-	mi := &file_test_proto_msgTypes[9]
+	mi := &file_test_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -702,7 +756,7 @@ func (x *QueryParams) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryParams.ProtoReflect.Descriptor instead.
 func (*QueryParams) Descriptor() ([]byte, []int) {
-	return file_test_proto_rawDescGZIP(), []int{9}
+	return file_test_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *QueryParams) GetSearch() string {
@@ -816,7 +870,13 @@ const file_test_proto_rawDesc = "" +
 	"\amsg_val\x18\v \x01(\v2\x10.testdata.PagingR\x06msgVal\"M\n" +
 	"\fQueryRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12-\n" +
-	"\x06params\x18\x02 \x01(\v2\x15.testdata.QueryParamsR\x06params\"\xf6\x01\n" +
+	"\x06params\x18\x02 \x01(\v2\x15.testdata.QueryParamsR\x06params\"\xd6\x01\n" +
+	"\x14EnumContainerRequest\x12,\n" +
+	"\bstatuses\x18\x01 \x03(\x0e2\x10.testdata.StatusR\bstatuses\x12C\n" +
+	"\aby_name\x18\x02 \x03(\v2*.testdata.EnumContainerRequest.ByNameEntryR\x06byName\x1aK\n" +
+	"\vByNameEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12&\n" +
+	"\x05value\x18\x02 \x01(\x0e2\x10.testdata.StatusR\x05value:\x028\x01\"\xf6\x01\n" +
 	"\vQueryParams\x12\x16\n" +
 	"\x06search\x18\x01 \x01(\tR\x06search\x12\x16\n" +
 	"\x06active\x18\x02 \x01(\bR\x06active\x12\x16\n" +
@@ -846,19 +906,21 @@ func file_test_proto_rawDescGZIP() []byte {
 }
 
 var file_test_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_test_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_test_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_test_proto_goTypes = []any{
-	(Status)(0),             // 0: testdata.Status
-	(*SimpleRequest)(nil),   // 1: testdata.SimpleRequest
-	(*NestedRequest)(nil),   // 2: testdata.NestedRequest
-	(*Paging)(nil),          // 3: testdata.Paging
-	(*OneofResponse)(nil),   // 4: testdata.OneofResponse
-	(*TextContent)(nil),     // 5: testdata.TextContent
-	(*ImageContent)(nil),    // 6: testdata.ImageContent
-	(*SimpleResponse)(nil),  // 7: testdata.SimpleResponse
-	(*AllTypesRequest)(nil), // 8: testdata.AllTypesRequest
-	(*QueryRequest)(nil),    // 9: testdata.QueryRequest
-	(*QueryParams)(nil),     // 10: testdata.QueryParams
+	(Status)(0),                  // 0: testdata.Status
+	(*SimpleRequest)(nil),        // 1: testdata.SimpleRequest
+	(*NestedRequest)(nil),        // 2: testdata.NestedRequest
+	(*Paging)(nil),               // 3: testdata.Paging
+	(*OneofResponse)(nil),        // 4: testdata.OneofResponse
+	(*TextContent)(nil),          // 5: testdata.TextContent
+	(*ImageContent)(nil),         // 6: testdata.ImageContent
+	(*SimpleResponse)(nil),       // 7: testdata.SimpleResponse
+	(*AllTypesRequest)(nil),      // 8: testdata.AllTypesRequest
+	(*QueryRequest)(nil),         // 9: testdata.QueryRequest
+	(*EnumContainerRequest)(nil), // 10: testdata.EnumContainerRequest
+	(*QueryParams)(nil),          // 11: testdata.QueryParams
+	nil,                          // 12: testdata.EnumContainerRequest.ByNameEntry
 }
 var file_test_proto_depIdxs = []int32{
 	0,  // 0: testdata.SimpleRequest.status:type_name -> testdata.Status
@@ -868,13 +930,16 @@ var file_test_proto_depIdxs = []int32{
 	0,  // 4: testdata.SimpleResponse.status:type_name -> testdata.Status
 	0,  // 5: testdata.AllTypesRequest.enum_val:type_name -> testdata.Status
 	3,  // 6: testdata.AllTypesRequest.msg_val:type_name -> testdata.Paging
-	10, // 7: testdata.QueryRequest.params:type_name -> testdata.QueryParams
-	0,  // 8: testdata.QueryParams.status:type_name -> testdata.Status
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	11, // 7: testdata.QueryRequest.params:type_name -> testdata.QueryParams
+	0,  // 8: testdata.EnumContainerRequest.statuses:type_name -> testdata.Status
+	12, // 9: testdata.EnumContainerRequest.by_name:type_name -> testdata.EnumContainerRequest.ByNameEntry
+	0,  // 10: testdata.QueryParams.status:type_name -> testdata.Status
+	0,  // 11: testdata.EnumContainerRequest.ByNameEntry.value:type_name -> testdata.Status
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_test_proto_init() }
@@ -892,7 +957,7 @@ func file_test_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_test_proto_rawDesc), len(file_test_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
