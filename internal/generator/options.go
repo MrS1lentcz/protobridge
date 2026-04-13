@@ -43,6 +43,10 @@ func ParseOptions(raw string) (Options, error) {
 	return opts, nil
 }
 
+// ResolveHandlerPkg is the public alias used by sibling plugins (mcpgen) so
+// they share the exact same hybrid resolution behaviour as the REST plugin.
+func ResolveHandlerPkg(opts Options) (string, error) { return resolveHandlerPkg(opts) }
+
 // resolveHandlerPkg returns the import path of the handler subpackage.
 //
 // Resolution order:
