@@ -108,6 +108,19 @@ func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorRespo
 		resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
 			Name: &name, Content: &content,
 		})
+
+		// Per-package broadcast WS handler — only emitted when the package
+		// has at least one PUBLIC fan-out event. Empty content signals
+		// "skip" (no PUBLIC events) and we omit the file entirely so users
+		// don't get an empty broadcast file in pure-DURABLE packages.
+		if broadcast, err := generateBroadcastFile(pkg, byPkg[pkg]); err != nil {
+			return nil, fmt.Errorf("broadcast for package %q: %w", pkg, err)
+		} else if broadcast != "" {
+			bname := broadcastFilename(pkg, opts.OutputPkg)
+			resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
+				Name: &bname, Content: &broadcast,
+			})
+		}
 	}
 
 	asyncAPI := generateAsyncAPI(api.Events, api.Messages)
@@ -135,6 +148,19 @@ func filename(pkgPath, outputPkg string) string {
 		return outputPkg + "/" + leaf + "_events.go"
 	}
 	return leaf + "_events.go"
+}
+
+// broadcastFilename mirrors filename() but uses a "_broadcast.go" suffix
+// so the WS handler lands next to the helpers in the same directory.
+func broadcastFilename(pkgPath, outputPkg string) string {
+	leaf := pkgPath
+	if i := strings.LastIndex(pkgPath, "/"); i >= 0 {
+		leaf = pkgPath[i+1:]
+	}
+	if outputPkg != "" && outputPkg != "events" {
+		return outputPkg + "/" + leaf + "_broadcast.go"
+	}
+	return leaf + "_broadcast.go"
 }
 
 func errResponse(err error) *pluginpb.CodeGeneratorResponse {
