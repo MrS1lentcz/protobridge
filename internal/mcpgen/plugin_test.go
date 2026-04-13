@@ -1,12 +1,19 @@
 package mcpgen
 
 import (
+	"bytes"
 	"go/parser"
 	"go/token"
 	"strings"
 	"testing"
 
+	"google.golang.org/genproto/googleapis/api/annotations"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/pluginpb"
+
 	parserpkg "github.com/mrs1lentcz/protobridge/internal/parser"
+	optionspb "github.com/mrs1lentcz/protobridge/proto/protobridge"
 )
 
 func TestParseOptions_DefaultForward(t *testing.T) {
@@ -147,6 +154,73 @@ func TestGenerate_GoogleProtobufEmptyImportsEmptypb(t *testing.T) {
 		}
 	}
 }
+
+func TestRun_FullPipeline(t *testing.T) {
+	// Fully-formed CodeGeneratorRequest exercises Run end-to-end including
+	// proto marshaling, parser parsing, and Generate.
+	mcpOpts := &descriptorpb.MethodOptions{}
+	proto.SetExtension(mcpOpts, optionspb.E_Mcp, true)
+	proto.SetExtension(mcpOpts, annotations.E_Http, &annotations.HttpRule{
+		Pattern: &annotations.HttpRule_Post{Post: "/things"},
+		Body:    "*",
+	})
+
+	req := &pluginpb.CodeGeneratorRequest{
+		Parameter:      strPtr2("handler_pkg=example.com/test/mcp/handler"),
+		FileToGenerate: []string{"test.proto"},
+		ProtoFile: []*descriptorpb.FileDescriptorProto{{
+			Name:    strPtr2("test.proto"),
+			Package: strPtr2("test.v1"),
+			Options: &descriptorpb.FileOptions{GoPackage: strPtr2("example.com/test/v1")},
+			MessageType: []*descriptorpb.DescriptorProto{
+				{Name: strPtr2("Req"), Field: []*descriptorpb.FieldDescriptorProto{
+					{Name: strPtr2("name"), Number: int32Ptr2(1), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()},
+				}},
+				{Name: strPtr2("Resp"), Field: []*descriptorpb.FieldDescriptorProto{
+					{Name: strPtr2("id"), Number: int32Ptr2(1), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()},
+				}},
+			},
+			Service: []*descriptorpb.ServiceDescriptorProto{{
+				Name: strPtr2("ThingService"),
+				Method: []*descriptorpb.MethodDescriptorProto{{
+					Name:       strPtr2("CreateThing"),
+					InputType:  strPtr2(".test.v1.Req"),
+					OutputType: strPtr2(".test.v1.Resp"),
+					Options:    mcpOpts,
+				}},
+			}},
+		}},
+	}
+	data, err := proto.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := Run(bytes.NewReader(data))
+	if resp.Error != nil {
+		t.Fatalf("Run returned error: %s", resp.GetError())
+	}
+	if len(resp.File) < 2 {
+		t.Fatalf("expected main.go + handler file, got %d", len(resp.File))
+	}
+	var sawMain, sawHandler bool
+	for _, f := range resp.File {
+		switch f.GetName() {
+		case "main.go":
+			sawMain = true
+		case "handler/thing_service.go":
+			sawHandler = true
+			if !strings.Contains(f.GetContent(), `"create_thing"`) {
+				t.Errorf("handler missing tool registration: %s", f.GetContent())
+			}
+		}
+	}
+	if !sawMain || !sawHandler {
+		t.Errorf("missing files: main=%v handler=%v", sawMain, sawHandler)
+	}
+}
+
+func strPtr2(s string) *string { return &s }
+func int32Ptr2(v int32) *int32 { return &v }
 
 func keys(m map[string]string) []string {
 	out := make([]string, 0, len(m))

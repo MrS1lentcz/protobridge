@@ -1402,6 +1402,37 @@ func TestRun_InvalidBytes(t *testing.T) {
 	}
 }
 
+func TestRun_BadParameter(t *testing.T) {
+	// Run must surface ParseOptions errors via the response.Error.
+	req := &pluginpb.CodeGeneratorRequest{
+		Parameter:      strPtr("bogus=x"),
+		FileToGenerate: []string{"test.proto"},
+	}
+	data, _ := proto.Marshal(req)
+	resp := Run(bytes.NewReader(data))
+	if resp.Error == nil {
+		t.Fatal("expected error in response for unknown plugin option")
+	}
+}
+
+func TestRun_ReadError(t *testing.T) {
+	// io.ReadAll error path: pass a reader that always errors.
+	resp := Run(&errReaderGen{})
+	if resp.Error == nil {
+		t.Fatal("expected error from failing reader")
+	}
+}
+
+type errReaderGen struct{}
+
+func (e *errReaderGen) Read(_ []byte) (int, error) { return 0, errReaderGenFail }
+
+var errReaderGenFail = errStrGen("read failed")
+
+type errStrGen string
+
+func (e errStrGen) Error() string { return string(e) }
+
 func TestRun_EmptyReader(t *testing.T) {
 	resp := Run(&errReader{})
 	if resp.Error == nil {

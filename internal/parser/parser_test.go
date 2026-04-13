@@ -1060,6 +1060,24 @@ func TestGetPathPrefix_NilOptions(t *testing.T) {
 	}
 }
 
+func TestGetMCP_NilOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("M")}
+	val, set := getMCP(m)
+	if val || set {
+		t.Errorf("nil options → (%v,%v)", val, set)
+	}
+	if got := getMCPScope(m); got != "" {
+		t.Errorf("scope nil: %q", got)
+	}
+	if got := getMCPDescription(m); got != "" {
+		t.Errorf("desc nil: %q", got)
+	}
+	s := &descriptorpb.ServiceDescriptorProto{Name: sp("S")}
+	if getMCPDefault(s) {
+		t.Error("mcp_default nil → false")
+	}
+}
+
 func TestGetMCP_NotSet(t *testing.T) {
 	m := &descriptorpb.MethodDescriptorProto{Name: sp("M")}
 	val, set := getMCP(m)

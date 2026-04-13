@@ -124,3 +124,56 @@ func TestJSONSchema_OneofIgnored(t *testing.T) {
 }
 
 func int32Ptr(v int32) *int32 { return &v }
+
+func TestJSONSchema_AllScalarTypes(t *testing.T) {
+	// Single test that walks every supported scalar type so the switch
+	// arms in scalarOrMessageSchema are all hit at least once.
+	mt := &parser.MessageType{
+		Name: "AllScalars",
+		Fields: []*parser.Field{
+			{Name: "s", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+			{Name: "i32", Type: descriptorpb.FieldDescriptorProto_TYPE_INT32},
+			{Name: "i64", Type: descriptorpb.FieldDescriptorProto_TYPE_INT64},
+			{Name: "u32", Type: descriptorpb.FieldDescriptorProto_TYPE_UINT32},
+			{Name: "u64", Type: descriptorpb.FieldDescriptorProto_TYPE_UINT64},
+			{Name: "f32", Type: descriptorpb.FieldDescriptorProto_TYPE_FLOAT},
+			{Name: "f64", Type: descriptorpb.FieldDescriptorProto_TYPE_DOUBLE},
+			{Name: "b", Type: descriptorpb.FieldDescriptorProto_TYPE_BOOL},
+			{Name: "raw", Type: descriptorpb.FieldDescriptorProto_TYPE_BYTES},
+			{Name: "fallback", Type: descriptorpb.FieldDescriptorProto_TYPE_GROUP}, // unsupported → string fallback
+		},
+	}
+	got := jsonSchemaForInput(mt)
+	for _, tok := range []string{`"format":"int32"`, `"format":"int64"`, `"format":"uint32"`, `"format":"uint64"`, `"format":"float"`, `"format":"double"`, `"format":"byte"`, `"type":"boolean"`} {
+		if !strings.Contains(got, tok) {
+			t.Errorf("missing %s in: %s", tok, got)
+		}
+	}
+}
+
+func TestJSONSchema_EnumWithoutValues(t *testing.T) {
+	// Enum with no listed values still emits a string-typed schema.
+	mt := &parser.MessageType{
+		Name: "M",
+		Fields: []*parser.Field{
+			{Name: "e", Type: descriptorpb.FieldDescriptorProto_TYPE_ENUM},
+		},
+	}
+	got := jsonSchemaForInput(mt)
+	if !strings.Contains(got, `"type":"string"`) || strings.Contains(got, `"enum"`) {
+		t.Errorf("got %s", got)
+	}
+}
+
+func TestJSONSchema_RepeatedNestedMessage(t *testing.T) {
+	mt := &parser.MessageType{
+		Name: "M",
+		Fields: []*parser.Field{
+			{Name: "items", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".x.Item", Repeated: true},
+		},
+	}
+	got := jsonSchemaForInput(mt)
+	if !strings.Contains(got, `"type":"array"`) || !strings.Contains(got, `"title":"Item"`) {
+		t.Errorf("got %s", got)
+	}
+}

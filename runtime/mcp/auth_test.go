@@ -70,6 +70,16 @@ func TestDefaultAuthFunc_NoIdentityResultsInEmptyMD(t *testing.T) {
 	}
 }
 
+func TestDefaultAuthFunc_ExplicitEnvMap(t *testing.T) {
+	// ConnectionInfo.Env is the in-memory map, separate from process env.
+	auth := mcp.DefaultAuthFunc("session_id")
+	conn := mcp.ConnectionInfo{Env: map[string]string{"SESSION_ID": "from-map"}}
+	md, _ := auth(context.Background(), conn)
+	if got := md.Get("session_id"); len(got) != 1 || got[0] != "from-map" {
+		t.Errorf("got %v", got)
+	}
+}
+
 func TestDefaultAuthFunc_HyphenatedKey(t *testing.T) {
 	t.Setenv("X_AUTH_TOKEN", "tok")
 	auth := mcp.DefaultAuthFunc("x-auth-token")

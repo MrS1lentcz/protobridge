@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	mcpsdk "github.com/mark3labs/mcp-go/mcp"
 	"google.golang.org/grpc/metadata"
@@ -103,6 +104,55 @@ func TestServer_CallUnary_InvokeError(t *testing.T) {
 		func(_ context.Context) error { return want })
 	if !errors.Is(err, want) {
 		t.Errorf("expected backend error to surface, got %v", err)
+	}
+}
+
+func TestServer_ServeFromEnv_UnknownTransport(t *testing.T) {
+	t.Setenv("PROTOBRIDGE_MCP_TRANSPORT", "websocket")
+	srv := mcp.NewServer("t", "0", mcp.DefaultAuthFunc())
+	err := srv.ServeFromEnv(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Errorf("expected unknown-transport error, got: %v", err)
+	}
+}
+
+func TestServer_ServeStdio_RespectsCancelledContext(t *testing.T) {
+	srv := mcp.NewServer("t", "0", mcp.DefaultAuthFunc())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancelled — stdio loop should exit promptly
+
+	done := make(chan error, 1)
+	go func() { done <- srv.ServeStdio(ctx) }()
+	select {
+	case <-done:
+		// either nil or context.Canceled is fine — the goal is "exits".
+	case <-time.After(2 * time.Second):
+		t.Fatal("ServeStdio did not honor cancelled context within 2s")
+	}
+}
+
+func TestServer_ServeStreamableHTTP_BadAddr(t *testing.T) {
+	srv := mcp.NewServer("t", "0", mcp.DefaultAuthFunc())
+	// Address not preceded by ':' is invalid per net.Listen — exercises the
+	// error return path without occupying a real port.
+	if err := srv.ServeStreamableHTTP("not-a-valid-addr"); err == nil {
+		t.Error("expected listen error")
+	}
+}
+
+func TestServer_ServeFromEnv_HTTPRoutesToHTTPServer(t *testing.T) {
+	t.Setenv("PROTOBRIDGE_MCP_TRANSPORT", "http")
+	t.Setenv("PROTOBRIDGE_MCP_HTTP_ADDR", "not-a-valid-addr")
+	srv := mcp.NewServer("t", "0", mcp.DefaultAuthFunc())
+	err := srv.ServeFromEnv(context.Background())
+	if err == nil {
+		t.Error("expected error from invalid HTTP addr")
+	}
+}
+
+func TestServer_HTTPHeadersFromContext_NilForStdio(t *testing.T) {
+	if got := mcp.HTTPHeadersFromContext(context.Background()); got != nil {
+		t.Errorf("expected nil for stdio context, got %v", got)
 	}
 }
 
