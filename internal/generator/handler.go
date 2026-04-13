@@ -341,10 +341,11 @@ func generateServiceFile(svc *parser.Service, api *parser.ParsedAPI) (string, er
 			data.UsesEmpty = true
 		}
 		isStream := m.StreamType != parser.StreamUnary
-		if !isStream {
-			// Unary handlers wrap the call in a context.Context-typed closure
-			// (UnaryCallWithRetry); streaming branches use ctx as a value but
-			// never reference the context.Context type.
+		// Unary handlers wrap the call in a context.Context-typed closure
+		// (UnaryCallWithRetry); the bidi branch calls context.WithCancel.
+		// Other streaming branches use the ctx value but never reference
+		// the context.Context type.
+		if !isStream || m.StreamType == parser.StreamBidi {
 			data.UsesContext = true
 		}
 		if m.SSE {
