@@ -260,6 +260,24 @@ func TestWriteResponse_DescriptorWalk_NestedMessageOnly(t *testing.T) {
 	}
 }
 
+func TestHealthHandler_WriteError(t *testing.T) {
+	// Covers the w.Write failure branch (logError) inside HealthHandler.
+	w := &errWriter{header: make(http.Header)}
+	runtime.HealthHandler()(w, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if w.Header().Get("Content-Type") != "application/json" {
+		t.Errorf("expected Content-Type set even when Write fails")
+	}
+}
+
+func TestWriteError_WriteFailure(t *testing.T) {
+	// Covers the write-failure branch in WriteError.
+	w := &errWriter{header: make(http.Header)}
+	runtime.WriteError(w, http.StatusInternalServerError, "INTERNAL", "boom")
+	if w.Header().Get("Content-Type") != "application/json" {
+		t.Errorf("expected Content-Type set even when Write fails")
+	}
+}
+
 func TestMarshalProto_HappyPath(t *testing.T) {
 	msg := &pb.SimpleResponse{Id: "1", Status: pb.Status_STATUS_ACTIVE}
 	data, err := runtime.MarshalProto(msg)

@@ -2,6 +2,8 @@ package generator
 
 import (
 	"bytes"
+	"fmt"
+	"go/format"
 	"text/template"
 
 	"github.com/mrs1lentcz/protobridge/internal/parser"
@@ -14,7 +16,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -32,12 +33,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/protobuf/proto"
+	{{ if .HasAuth }}"google.golang.org/protobuf/proto"{{ end }}
 
 	"github.com/mrs1lentcz/protobridge/runtime"
-	{{ range .Services -}}
-	{{ .PkgAlias }} "{{ .ProtoImport }}"
-	{{ end }}
+	{{ if .HasAuth }}{{ .AuthPkgAlias }} "{{ .AuthProtoImport }}"{{ end }}
 )
 
 func main() {
@@ -285,6 +284,7 @@ type mainData struct {
 	AuthServiceName string // e.g. "AuthService"
 	AuthMethodName  string // e.g. "Authenticate"
 	AuthPkgAlias    string // e.g. "authServicepb"
+	AuthProtoImport string // Go import path of the auth service's proto package
 	AuthInputType   string // e.g. "AuthRequest"
 }
 
@@ -329,6 +329,7 @@ func generateMain(api *parser.ParsedAPI) (string, error) {
 		data.AuthInputType = api.AuthMethod.InputType.Name
 		data.AuthPkgAlias = toLowerCamel(api.AuthMethod.ServiceName) + "pb"
 		data.AuthAddrVar = toLowerCamel(api.AuthMethod.ServiceName) + "Addr"
+		data.AuthProtoImport = api.AuthMethod.GoPackage
 
 		// Find the service data for the auth service.
 		for _, sd := range data.Services {
@@ -336,6 +337,7 @@ func generateMain(api *parser.ParsedAPI) (string, error) {
 				data.AuthConnVar = sd.ConnVar
 				data.AuthAddrVar = sd.EnvAddr
 				data.AuthPkgAlias = sd.PkgAlias
+				data.AuthProtoImport = sd.ProtoImport
 				break
 			}
 		}
@@ -361,5 +363,9 @@ func generateMain(api *parser.ParsedAPI) (string, error) {
 	if err := mainTmpl.Execute(&buf, data); err != nil {
 		return "", err
 	}
-	return buf.String(), nil
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return "", fmt.Errorf("gofmt generated main: %w\n%s", err, buf.String())
+	}
+	return string(formatted), nil
 }

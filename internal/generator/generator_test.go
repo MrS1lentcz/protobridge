@@ -1203,6 +1203,65 @@ func TestGenerateServiceFile_GofmtStable_UnaryOnly(t *testing.T) {
 	}
 }
 
+func TestGenerateServiceFile_StreamingOnly_NoContextImport(t *testing.T) {
+	// Streaming branches use the local `ctx` variable but never reference
+	// the context.Context type. A service with no unary methods must not
+	// import "context".
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{{
+			Name: "X", ProtoPackage: "x.v1", GoPackage: "x/v1",
+			Methods: []*parser.Method{{
+				Name: "Stream", HTTPMethod: "GET", HTTPPath: "/stream",
+				StreamType: parser.StreamServer,
+				InputType:  &parser.MessageType{Name: "Req", FullName: ".x.v1.Req"},
+				OutputType: &parser.MessageType{Name: "Msg", FullName: ".x.v1.Msg"},
+			}},
+		}},
+	}
+	content, err := generateServiceFile(api.Services[0], api)
+	if err != nil {
+		t.Fatalf("generateServiceFile: %v", err)
+	}
+	assertImports(t, content, nil, []string{"context"})
+}
+
+func TestGenerateMain_NoUnusedImports(t *testing.T) {
+	// main.go must not import "fmt" (template never references it) and must
+	// not import every service's proto package via a per-service alias —
+	// only the auth service's proto package is actually referenced from
+	// main.go's auth function.
+	api := testAPI()
+	content, err := generateMain(api)
+	if err != nil {
+		t.Fatalf("generateMain: %v", err)
+	}
+	imports := importsOf(t, content)
+	if _, ok := imports["fmt"]; ok {
+		t.Errorf("main.go must not import fmt (never used in template); imports=%v", keys(imports))
+	}
+	// testAPI has one service named "ChatService" (proto pkg "chat.v1") and
+	// an auth service "AuthService" (proto pkg "auth.v1"). main.go references
+	// only the auth proto package, so the chat alias must NOT be imported.
+	if _, ok := imports["chat/v1"]; ok {
+		t.Errorf("main.go imports chat proto pkg but never references it: %v", keys(imports))
+	}
+}
+
+func TestGenerateMain_GofmtStable(t *testing.T) {
+	api := testAPI()
+	content, err := generateMain(api)
+	if err != nil {
+		t.Fatalf("generateMain: %v", err)
+	}
+	formatted, err := format.Source([]byte(content))
+	if err != nil {
+		t.Fatalf("format.Source: %v\n%s", err, content)
+	}
+	if string(formatted) != content {
+		t.Errorf("generated main.go is not gofmt-stable; diff:\n--- generated\n%s\n--- gofmt\n%s", content, formatted)
+	}
+}
+
 func TestGenerateServiceFile_NoUnusedImports_WSBidi(t *testing.T) {
 	api := &parser.ParsedAPI{
 		Services: []*parser.Service{{
