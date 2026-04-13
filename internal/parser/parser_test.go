@@ -286,6 +286,48 @@ func TestParseAuthMethod(t *testing.T) {
 	}
 }
 
+func TestParseMCPOnly_NoHTTPAnnotation_StillEmittedForMCPPlugin(t *testing.T) {
+	// Regression: an RPC marked (protobridge.mcp)=true but without any
+	// google.api.http annotation must still land in the parsed model so
+	// protoc-gen-mcp can see it. HTTPMethod stays empty so the REST plugin
+	// skips it.
+	mcpOpts := &descriptorpb.MethodOptions{}
+	proto.SetExtension(mcpOpts, optionspb.E_Mcp, true)
+
+	req := makeRequest("test.v1", "test.proto",
+		[]*descriptorpb.DescriptorProto{
+			makeSimpleMessage("Req", "id"),
+			makeSimpleMessage("Resp", "id"),
+		},
+		nil,
+		[]*descriptorpb.ServiceDescriptorProto{{
+			Name: sp("S"),
+			Method: []*descriptorpb.MethodDescriptorProto{{
+				Name:       sp("MCPOnly"),
+				InputType:  sp(".test.v1.Req"),
+				OutputType: sp(".test.v1.Resp"),
+				Options:    mcpOpts,
+			}},
+		}},
+	)
+
+	api, err := Parse(req)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(api.Services) != 1 || len(api.Services[0].Methods) != 1 {
+		t.Fatalf("expected the MCP-only method to be parsed; got services=%d methods=%d",
+			len(api.Services), len(api.Services[0].Methods))
+	}
+	m := api.Services[0].Methods[0]
+	if !m.MCP {
+		t.Error("MCP flag must be set")
+	}
+	if m.HTTPMethod != "" || m.HTTPPath != "" {
+		t.Errorf("HTTP fields should be empty for MCP-only method: %+v", m)
+	}
+}
+
 func TestParseAuthMethod_WithHTTPAnnotation_AlsoExposedAsREST(t *testing.T) {
 	// When (protobridge.auth_method) is combined with (google.api.http), the
 	// auth method must also be emitted as a regular REST method so callers
@@ -1057,6 +1099,127 @@ func TestGetPathPrefix_NilOptions(t *testing.T) {
 	s := &descriptorpb.ServiceDescriptorProto{Name: sp("Test")}
 	if got := getPathPrefix(s); got != "" {
 		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestGetMCP_NilOptions(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("M")}
+	val, set := getMCP(m)
+	if val || set {
+		t.Errorf("nil options → (%v,%v)", val, set)
+	}
+	if got := getMCPScope(m); got != "" {
+		t.Errorf("scope nil: %q", got)
+	}
+	if got := getMCPDescription(m); got != "" {
+		t.Errorf("desc nil: %q", got)
+	}
+	s := &descriptorpb.ServiceDescriptorProto{Name: sp("S")}
+	if getMCPDefault(s) {
+		t.Error("mcp_default nil → false")
+	}
+}
+
+func TestGetMCP_NotSet(t *testing.T) {
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("M")}
+	val, set := getMCP(m)
+	if val || set {
+		t.Errorf("expected (false,false), got (%v,%v)", val, set)
+	}
+}
+
+func TestGetMCP_ExplicitTrue(t *testing.T) {
+	opts := &descriptorpb.MethodOptions{}
+	proto.SetExtension(opts, optionspb.E_Mcp, true)
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("M"), Options: opts}
+	val, set := getMCP(m)
+	if !val || !set {
+		t.Errorf("expected (true,true), got (%v,%v)", val, set)
+	}
+}
+
+func TestGetMCP_ExplicitFalse(t *testing.T) {
+	// Important: an explicit (mcp) = false must report set=true so the
+	// service-level mcp_default opt-in can be overridden per method.
+	opts := &descriptorpb.MethodOptions{}
+	proto.SetExtension(opts, optionspb.E_Mcp, false)
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("M"), Options: opts}
+	val, set := getMCP(m)
+	if val {
+		t.Error("val should be false")
+	}
+	if !set {
+		t.Error("set should be true (explicit opt-out)")
+	}
+}
+
+func TestParseMCP_DefaultOptInWithPerMethodOptOut(t *testing.T) {
+	// Service has mcp_default=true; one method opts out via (mcp)=false.
+	svcOpts := &descriptorpb.ServiceOptions{}
+	proto.SetExtension(svcOpts, optionspb.E_McpDefault, true)
+
+	optOut := &descriptorpb.MethodOptions{}
+	proto.SetExtension(optOut, optionspb.E_Mcp, false)
+
+	scopeOpts := &descriptorpb.MethodOptions{}
+	proto.SetExtension(scopeOpts, optionspb.E_McpScope, "chat session")
+
+	// Both methods need an HTTP rule so they're emitted as REST methods
+	// (parser only attaches MCP attrs to methods that survive HTTP filtering).
+	addHTTP := func(opts *descriptorpb.MethodOptions, path string) *descriptorpb.MethodOptions {
+		proto.SetExtension(opts, annotations.E_Http, &annotations.HttpRule{
+			Pattern: &annotations.HttpRule_Get{Get: path},
+		})
+		return opts
+	}
+
+	req := makeRequest("test.v1", "test.proto",
+		[]*descriptorpb.DescriptorProto{
+			makeSimpleMessage("Req", "id"),
+			makeSimpleMessage("Resp", "id"),
+		},
+		nil,
+		[]*descriptorpb.ServiceDescriptorProto{
+			{
+				Name: sp("S"), Options: svcOpts,
+				Method: []*descriptorpb.MethodDescriptorProto{
+					{Name: sp("Inherited"),
+						InputType: sp(".test.v1.Req"), OutputType: sp(".test.v1.Resp"),
+						Options: addHTTP(scopeOpts, "/inherited")},
+					{Name: sp("OptedOut"),
+						InputType: sp(".test.v1.Req"), OutputType: sp(".test.v1.Resp"),
+						Options: addHTTP(optOut, "/opted-out")},
+				},
+			},
+		},
+	)
+
+	api, err := Parse(req)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(api.Services) != 1 {
+		t.Fatalf("services: %d", len(api.Services))
+	}
+	svc := api.Services[0]
+	if !svc.MCPDefault {
+		t.Error("MCPDefault should be true on service")
+	}
+	byName := map[string]*Method{}
+	for _, m := range svc.Methods {
+		byName[m.Name] = m
+	}
+	if !byName["Inherited"].MCP {
+		t.Error("Inherited method should inherit MCP=true from mcp_default")
+	}
+	if byName["OptedOut"].MCP {
+		t.Error("OptedOut method must respect explicit (mcp)=false")
+	}
+	if !byName["OptedOut"].MCPSet {
+		t.Error("OptedOut method must report MCPSet=true so service default is overridden")
+	}
+	if byName["Inherited"].MCPScope != "chat session" {
+		t.Errorf("MCPScope: got %q", byName["Inherited"].MCPScope)
 	}
 }
 

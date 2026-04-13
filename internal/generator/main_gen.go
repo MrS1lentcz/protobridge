@@ -36,6 +36,7 @@ import (
 	{{ if .HasAuth }}"google.golang.org/protobuf/proto"{{ end }}
 
 	"github.com/mrs1lentcz/protobridge/runtime"
+	"{{ .HandlerPkg }}"
 	{{ if .HasAuth }}{{ .AuthPkgAlias }} "{{ .AuthProtoImport }}"{{ end }}
 )
 
@@ -133,7 +134,7 @@ func main() {
 
 	{{ range .Services -}}
 	{{ if .HasREST -}}
-	register{{ .ServiceName }}(r, {{ .EnvAddr }}, pool, scalingCfg, authFn)
+	handler.Register{{ .ServiceName }}(r, {{ .EnvAddr }}, pool, scalingCfg, authFn)
 	{{ end -}}
 	{{ end }}
 
@@ -278,6 +279,7 @@ func dialOpts(tlsEnvKey, grpcOptsEnvKey string) []grpc.DialOption {
 
 type mainData struct {
 	Services        []mainServiceData
+	HandlerPkg      string // Go import path of the generated handler subpackage
 	HasAuth         bool
 	AuthConnVar     string
 	AuthAddrVar     string // e.g. "authServiceAddr"
@@ -303,8 +305,8 @@ type mainServiceData struct {
 	HasREST bool
 }
 
-func generateMain(api *parser.ParsedAPI) (string, error) {
-	data := mainData{}
+func generateMain(api *parser.ParsedAPI, handlerPkg string) (string, error) {
+	data := mainData{HandlerPkg: handlerPkg}
 
 	for _, svc := range api.Services {
 		screaming := toScreamingSnake(svc.Name)

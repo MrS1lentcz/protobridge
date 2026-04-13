@@ -24,12 +24,17 @@ func Run(r io.Reader) *pluginpb.CodeGeneratorResponse {
 		return errResponse(err)
 	}
 
+	opts, err := ParseOptions(req.GetParameter())
+	if err != nil {
+		return errResponse(err)
+	}
+
 	api, err := parser.Parse(&req)
 	if err != nil {
 		return errResponse(err)
 	}
 
-	resp, err := Generate(api)
+	resp, err := Generate(api, opts)
 	if err != nil {
 		return errResponse(err)
 	}
@@ -44,16 +49,23 @@ func errResponse(err error) *pluginpb.CodeGeneratorResponse {
 
 // Generate takes a ParsedAPI and produces a CodeGeneratorResponse with all
 // generated Go source files and the OpenAPI spec.
-func Generate(api *parser.ParsedAPI) (*pluginpb.CodeGeneratorResponse, error) {
+func Generate(api *parser.ParsedAPI, opts Options) (*pluginpb.CodeGeneratorResponse, error) {
 	resp := &pluginpb.CodeGeneratorResponse{}
 
-	// Generate a handler file for each service.
+	handlerPkg, err := resolveHandlerPkg(opts, "--protobridge_opt")
+	if err != nil {
+		return nil, err
+	}
+
+	// Generate a handler file for each service. Files live under handler/
+	// (separate Go package) so the proxy directory stays clean — only main.go
+	// and deployment manifests sit at the root.
 	for _, svc := range api.Services {
 		content, err := generateServiceFile(svc, api)
 		if err != nil {
 			return nil, fmt.Errorf("generating %s: %w", svc.Name, err)
 		}
-		name := toSnakeCase(svc.Name) + ".go"
+		name := "handler/" + toSnakeCase(svc.Name) + ".go"
 		resp.File = append(resp.File, &pluginpb.CodeGeneratorResponse_File{
 			Name:    &name,
 			Content: &content,
@@ -61,7 +73,7 @@ func Generate(api *parser.ParsedAPI) (*pluginpb.CodeGeneratorResponse, error) {
 	}
 
 	// Generate main.go.
-	mainContent, err := generateMain(api)
+	mainContent, err := generateMain(api, handlerPkg)
 	if err != nil {
 		return nil, fmt.Errorf("generating main.go: %w", err)
 	}

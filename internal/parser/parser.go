@@ -45,19 +45,27 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 		}
 
 		goPackage := extractGoPackage(file)
+		comments := buildLeadingComments(file)
 
-		for _, svc := range file.Service {
+		for svcIdx, svc := range file.Service {
 			pathPrefix := getPathPrefix(svc)
+			mcpDefault := getMCPDefault(svc)
 			service := &Service{
 				Name:         svc.GetName(),
 				ProtoPackage: file.GetPackage(),
 				GoPackage:    goPackage,
 				DisplayName:  getDisplayName(svc),
 				PathPrefix:   pathPrefix,
+				MCPDefault:   mcpDefault,
 			}
 
-			for _, m := range svc.Method {
+			for methodIdx, m := range svc.Method {
 				isAuth := getAuthMethod(m)
+				mcpVal, mcpSet := getMCP(m)
+				mcpEnabled := mcpVal
+				if !mcpSet {
+					mcpEnabled = mcpDefault
+				}
 				if isAuth {
 					if api.AuthMethod != nil {
 						return nil, fmt.Errorf("multiple auth_method annotations found: %s.%s and %s.%s",
@@ -74,13 +82,20 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 				}
 
 				httpMethod, httpPath := extractHTTPRule(m)
-				if httpMethod == "" {
-					// No HTTP annotation – skip (not exposed as REST).
+				// Methods without an HTTP annotation AND without MCP opt-in
+				// are not exposed by any proxy — skip outright. Methods with
+				// MCP=true but no HTTP rule still need to land in the model
+				// so protoc-gen-mcp can see them; HTTPMethod stays empty
+				// and the REST plugin filters on that.
+				if httpMethod == "" && !mcpEnabled {
 					continue
 				}
 
-				// Apply service-level path prefix.
-				fullPath := pathPrefix + httpPath
+				// Apply service-level path prefix when there is a path.
+				fullPath := ""
+				if httpPath != "" {
+					fullPath = pathPrefix + httpPath
+				}
 
 				method := &Method{
 					Name:              m.GetName(),
@@ -97,6 +112,11 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 					StreamType:        resolveStreamType(m),
 					SSE:               getSSE(m),
 					WSMode:            getWSMode(m),
+					MCP:               mcpEnabled,
+					MCPSet:            mcpSet,
+					MCPScope:          getMCPScope(m),
+					MCPDescription:    getMCPDescription(m),
+					LeadingComment:    comments.method(svcIdx, methodIdx),
 				}
 				service.Methods = append(service.Methods, method)
 			}

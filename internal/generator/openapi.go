@@ -28,7 +28,7 @@ func GenerateOpenAPI(api *parser.ParsedAPI) string {
 	var pathOrder []string
 	for _, svc := range api.Services {
 		for _, m := range svc.Methods {
-			if m.StreamType != parser.StreamUnary {
+			if m.StreamType != parser.StreamUnary || m.HTTPMethod == "" {
 				continue
 			}
 			if _, exists := pathGroups[m.HTTPPath]; !exists {

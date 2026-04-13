@@ -44,6 +44,24 @@ extend google.protobuf.MethodOptions {
   //   "broadcast" – all WS connections share the same event stream.
   //                 Backend pushes to everyone. No per-user routing.
   string ws_mode = 50022;
+
+  // Expose this RPC as an MCP tool in the generated MCP proxy.
+  // The tool name defaults to snake_case of the method name.
+  // Description comes from the method's leading proto comment (or
+  // mcp_description override below).
+  bool mcp = 50050;
+
+  // Optional MCP scope hint. Free-form string appended to the tool
+  // description so an LLM client knows when the tool is applicable
+  // (e.g. "chat session", "worker scope", "validation"). Enforcement
+  // of scope rules belongs in the gRPC backend; this is documentation.
+  string mcp_scope = 50051;
+
+  // Override for the MCP tool description. Use only when the proto
+  // leading comment is unsuitable (e.g. you want different prose for
+  // human readers than for an LLM). When empty, the proto comment
+  // extracted from SourceCodeInfo is used.
+  string mcp_description = 50052;
 }
 
 // --- Service options ---
@@ -56,6 +74,12 @@ extend google.protobuf.ServiceOptions {
   // Path prefix prepended to all HTTP paths in this service.
   // Must start with "/" and not end with "/". Example: "/api/v1"
   string path_prefix = 50041;
+
+  // When true, every method in this service is exposed as an MCP tool
+  // by default. Per-method (protobridge.mcp) = false opts a method out.
+  // Without this, methods are MCP-exposed only when they explicitly
+  // set (protobridge.mcp) = true.
+  bool mcp_default = 50042;
 }
 
 // --- Enum value options ---

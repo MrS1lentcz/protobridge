@@ -151,8 +151,8 @@ func TestGenerateServiceFile(t *testing.T) {
 	}
 
 	checks := []string{
-		"package main",
-		"registerChatService",
+		"package handler",
+		"RegisterChatService",
 		"func sendMessageHandler(",
 		"func getChatHandler(",
 		`r.Post("/api/v1/chats/{chat_id}/messages"`,
@@ -248,7 +248,7 @@ func TestGenerateServiceFileWithQueryParamsTarget(t *testing.T) {
 func TestGenerateMain(t *testing.T) {
 	api := testAPI()
 
-	content, err := generateMain(api)
+	content, err := generateMain(api, "example.com/test/handler")
 	if err != nil {
 		t.Fatalf("generateMain() error: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestGenerateMain(t *testing.T) {
 		"chatServiceAddr",
 		"ConnectScaled",
 		"ScalingConfig",
-		"registerChatService(r,",
+		"handler.RegisterChatService(r,",
 		// Auth service should be wired
 		"Authenticate",
 		"PROTOBRIDGE_AUTH_SERVICE_ADDR",
@@ -292,10 +292,10 @@ func TestGenerateMain(t *testing.T) {
 	// Regression: register*Service must be called with the resolved address
 	// variable, not the env var key string literal. Passing the literal would
 	// make the pool dial the literal "PROTOBRIDGE_..." hostname.
-	if strings.Contains(content, `registerChatService(r, "PROTOBRIDGE_CHAT_SERVICE_ADDR"`) {
+	if strings.Contains(content, `handler.RegisterChatService(r, "PROTOBRIDGE_CHAT_SERVICE_ADDR"`) {
 		t.Error("registerChatService called with env var key literal instead of resolved address")
 	}
-	if !strings.Contains(content, "registerChatService(r, chatServiceAddr,") {
+	if !strings.Contains(content, "handler.RegisterChatService(r, chatServiceAddr,") {
 		t.Errorf("expected registerChatService(r, chatServiceAddr, ...) in generated main.go")
 	}
 }
@@ -323,14 +323,14 @@ func TestGenerateMain_AuthOnlyService_NoRegisterCall(t *testing.T) {
 			OutputType:  &parser.MessageType{Name: "AuthResp", FullName: ".x.v1.AuthResp"},
 		},
 	}
-	content, err := generateMain(api)
+	content, err := generateMain(api, "example.com/test/handler")
 	if err != nil {
 		t.Fatalf("generateMain: %v", err)
 	}
-	if strings.Contains(content, "registerAuthService(") {
+	if strings.Contains(content, "handler.RegisterAuthService(") {
 		t.Errorf("must not call registerAuthService when auth service has no REST endpoints:\n%s", content)
 	}
-	if !strings.Contains(content, "registerChatService(") {
+	if !strings.Contains(content, "handler.RegisterChatService(") {
 		t.Error("expected registerChatService(...) for non-auth service")
 	}
 	// Connection still needs to be pre-created.
@@ -359,7 +359,7 @@ func TestGenerateMainNoAuth(t *testing.T) {
 		},
 	}
 
-	content, err := generateMain(api)
+	content, err := generateMain(api, "example.com/test/handler")
 	if err != nil {
 		t.Fatalf("generateMain() error: %v", err)
 	}
@@ -819,7 +819,7 @@ func TestGenerateWSHandler(t *testing.T) {
 func TestGenerateFullPipeline(t *testing.T) {
 	api := testAPI()
 
-	resp, err := Generate(api)
+	resp, err := Generate(api, Options{HandlerPkg: "example.com/test/handler"})
 	if err != nil {
 		t.Fatalf("Generate() error: %v", err)
 	}
@@ -832,7 +832,7 @@ func TestGenerateFullPipeline(t *testing.T) {
 	}
 
 	expected := []string{
-		"chat_service.go",
+		"handler/chat_service.go",
 		"main.go",
 		"schema/openapi.yaml",
 		"Dockerfile",
@@ -856,7 +856,7 @@ func TestGenerateFullPipeline(t *testing.T) {
 func TestGenerateFullPipelineWithStreaming(t *testing.T) {
 	api := testStreamingAPI()
 
-	resp, err := Generate(api)
+	resp, err := Generate(api, Options{HandlerPkg: "example.com/test/handler"})
 	if err != nil {
 		t.Fatalf("Generate() error: %v", err)
 	}
@@ -1231,7 +1231,7 @@ func TestGenerateMain_NoUnusedImports(t *testing.T) {
 	// only the auth service's proto package is actually referenced from
 	// main.go's auth function.
 	api := testAPI()
-	content, err := generateMain(api)
+	content, err := generateMain(api, "example.com/test/handler")
 	if err != nil {
 		t.Fatalf("generateMain: %v", err)
 	}
@@ -1249,7 +1249,7 @@ func TestGenerateMain_NoUnusedImports(t *testing.T) {
 
 func TestGenerateMain_GofmtStable(t *testing.T) {
 	api := testAPI()
-	content, err := generateMain(api)
+	content, err := generateMain(api, "example.com/test/handler")
 	if err != nil {
 		t.Fatalf("generateMain: %v", err)
 	}
@@ -1345,6 +1345,7 @@ func TestRun_ValidRequest(t *testing.T) {
 	// Build a valid CodeGeneratorRequest
 	req := &pluginpb.CodeGeneratorRequest{
 		FileToGenerate: []string{"test.proto"},
+		Parameter:      strPtr("handler_pkg=example.com/test/handler"),
 		ProtoFile: []*descriptorpb.FileDescriptorProto{
 			{
 				Name:    strPtr("test.proto"),
@@ -1400,6 +1401,37 @@ func TestRun_InvalidBytes(t *testing.T) {
 		t.Fatal("expected error for invalid protobuf")
 	}
 }
+
+func TestRun_BadParameter(t *testing.T) {
+	// Run must surface ParseOptions errors via the response.Error.
+	req := &pluginpb.CodeGeneratorRequest{
+		Parameter:      strPtr("bogus=x"),
+		FileToGenerate: []string{"test.proto"},
+	}
+	data, _ := proto.Marshal(req)
+	resp := Run(bytes.NewReader(data))
+	if resp.Error == nil {
+		t.Fatal("expected error in response for unknown plugin option")
+	}
+}
+
+func TestRun_ReadError(t *testing.T) {
+	// io.ReadAll error path: pass a reader that always errors.
+	resp := Run(&errReaderGen{})
+	if resp.Error == nil {
+		t.Fatal("expected error from failing reader")
+	}
+}
+
+type errReaderGen struct{}
+
+func (e *errReaderGen) Read(_ []byte) (int, error) { return 0, errReaderGenFail }
+
+var errReaderGenFail = errStrGen("read failed")
+
+type errStrGen string
+
+func (e errStrGen) Error() string { return string(e) }
 
 func TestRun_EmptyReader(t *testing.T) {
 	resp := Run(&errReader{})
@@ -1776,7 +1808,7 @@ func TestGenerateMainAuthServiceNotInServicesList(t *testing.T) {
 		},
 	}
 
-	content, err := generateMain(api)
+	content, err := generateMain(api, "example.com/test/handler")
 	if err != nil {
 		t.Fatalf("generateMain() error: %v", err)
 	}
@@ -2029,7 +2061,7 @@ func TestGenerateMainAuthServiceInServicesList(t *testing.T) {
 		},
 	}
 
-	content, err := generateMain(api)
+	content, err := generateMain(api, "example.com/test/handler")
 	if err != nil {
 		t.Fatalf("generateMain() error: %v", err)
 	}

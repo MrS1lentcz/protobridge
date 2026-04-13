@@ -1,0 +1,189 @@
+package mcp
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	mcpserver "github.com/mark3labs/mcp-go/server"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+)
+
+// Server wraps an mcp-go server and centralises the auth/metadata pipeline
+// so generated handler files only have to register tools.
+type Server struct {
+	inner *mcpserver.MCPServer
+	auth  MCPAuthFunc
+}
+
+// NewServer constructs a Server with the given name/version and auth
+// translator. The auth translator runs once per tool call and produces the
+// gRPC metadata appended to every backend invocation. Passing nil auth is
+// equivalent to a no-op translator (no metadata attached) — useful for
+// servers that don't need per-call identity.
+func NewServer(name, version string, auth MCPAuthFunc) *Server {
+	if auth == nil {
+		auth = func(_ context.Context, _ ConnectionInfo) (metadata.MD, error) {
+			return metadata.MD{}, nil
+		}
+	}
+	return &Server{
+		inner: mcpserver.NewMCPServer(name, version),
+		auth:  auth,
+	}
+}
+
+// AddTool registers an MCP tool. The handler should perform the gRPC call
+// and return a CallToolResult; use UnaryHandler to build a standard one.
+func (s *Server) AddTool(name, description string, rawInputSchema json.RawMessage, handler mcpserver.ToolHandlerFunc) {
+	tool := mcp.Tool{
+		Name:           name,
+		Description:    description,
+		RawInputSchema: rawInputSchema,
+	}
+	s.inner.AddTool(tool, handler)
+}
+
+// Inner exposes the underlying mcp-go server for advanced use cases
+// (custom middlewares, prompts, resources). Generated code should not need it.
+func (s *Server) Inner() *mcpserver.MCPServer { return s.inner }
+
+// AuthFunc returns the configured MCPAuthFunc. Generated dispatchers use
+// it to build gRPC metadata for each tool call.
+func (s *Server) AuthFunc() MCPAuthFunc { return s.auth }
+
+// ServeStdio runs the server over stdio (newline-delimited JSON-RPC).
+// This is the transport used by Claude Desktop and most local MCP clients.
+// The provided ctx is propagated into every per-request context so generated
+// dispatchers see cancellation when the parent process exits.
+func (s *Server) ServeStdio(ctx context.Context) error {
+	return mcpserver.ServeStdio(s.inner, mcpserver.WithStdioContextFunc(func(_ context.Context) context.Context {
+		return ctx
+	}))
+}
+
+// ServeStreamableHTTP runs the server over the streamable HTTP transport
+// at the given address. Used for remote MCP clients and proxies behind
+// reverse proxies.
+//
+// The provided ctx controls graceful shutdown: when ctx is cancelled the
+// HTTP server's Shutdown(ctx) is invoked. Per-request HTTP headers are
+// stashed on the request context via WithHTTPContextFunc so the auth
+// translator can read them through HTTPHeadersFromContext.
+func (s *Server) ServeStreamableHTTP(ctx context.Context, addr string) error {
+	srv := mcpserver.NewStreamableHTTPServer(s.inner,
+		mcpserver.WithHTTPContextFunc(func(ctx context.Context, r *http.Request) context.Context {
+			return context.WithValue(ctx, httpHeadersCtxKey{}, r.Header)
+		}),
+	)
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Start(addr) }()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		return err
+	}
+}
+
+// ServeFromEnv selects the transport based on PROTOBRIDGE_MCP_TRANSPORT
+// (`stdio` or `http`, default `stdio`) and PROTOBRIDGE_MCP_HTTP_ADDR
+// (default `:8081`).
+func (s *Server) ServeFromEnv(ctx context.Context) error {
+	switch transport := strings.ToLower(os.Getenv("PROTOBRIDGE_MCP_TRANSPORT")); transport {
+	case "", "stdio":
+		return s.ServeStdio(ctx)
+	case "http", "streamable", "streamable_http":
+		addr := os.Getenv("PROTOBRIDGE_MCP_HTTP_ADDR")
+		if addr == "" {
+			addr = ":8081"
+		}
+		return s.ServeStreamableHTTP(ctx, addr)
+	default:
+		return fmt.Errorf("unknown PROTOBRIDGE_MCP_TRANSPORT %q (want: stdio | http)", transport)
+	}
+}
+
+// HTTPHeadersFromContext extracts HTTP headers from the incoming MCP
+// request when the transport is streamable HTTP. Returns nil for stdio
+// (no inbound HTTP request) or when the value was not stashed (e.g. a
+// caller using the underlying mcp-go server directly without going
+// through ServeStreamableHTTP).
+func HTTPHeadersFromContext(ctx context.Context) http.Header {
+	if v, ok := ctx.Value(httpHeadersCtxKey{}).(http.Header); ok {
+		return v
+	}
+	return nil
+}
+
+// httpHeadersCtxKey is the unexported context key used to stash incoming
+// HTTP headers between the streamable-HTTP transport and the auth translator.
+// Unexported type prevents collisions with caller-defined keys.
+type httpHeadersCtxKey struct{}
+
+// CallUnary is the generic dispatcher used by every generated tool handler.
+// It decodes the MCP arguments JSON into reqMsg, runs the auth translator,
+// attaches metadata to the outgoing context, calls invoke (which performs
+// the typed gRPC call and returns the response message), then marshals
+// that response back into a text-content CallToolResult.
+//
+// invoke takes the prepared context and the populated request message and
+// returns the response message — never copy a proto.Message by value
+// (they hold a Mutex), so we never write into a caller-supplied respMsg.
+func (s *Server) CallUnary(
+	ctx context.Context,
+	req mcp.CallToolRequest,
+	reqMsg proto.Message,
+	invoke func(ctx context.Context, reqMsg proto.Message) (proto.Message, error),
+) (*mcp.CallToolResult, error) {
+	if raw := req.GetRawArguments(); raw != nil {
+		data, err := json.Marshal(raw)
+		if err != nil {
+			return nil, fmt.Errorf("encode arguments: %w", err)
+		}
+		if len(data) > 0 && string(data) != "null" {
+			opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+			if err := opts.Unmarshal(data, reqMsg); err != nil {
+				return nil, fmt.Errorf("decode arguments into %T: %w", reqMsg, err)
+			}
+		}
+	}
+
+	conn := ConnectionInfo{
+		HTTPHeaders: HTTPHeadersFromContext(ctx),
+	}
+	md, err := s.auth(ctx, conn)
+	if err != nil {
+		return nil, fmt.Errorf("mcp auth: %w", err)
+	}
+	if len(md) > 0 {
+		// Merge with any pre-existing outgoing metadata instead of replacing
+		// it — middlewares or callers may have already attached their own.
+		if existing, ok := metadata.FromOutgoingContext(ctx); ok {
+			md = metadata.Join(existing, md)
+		}
+		ctx = metadata.NewOutgoingContext(ctx, md)
+	}
+
+	respMsg, err := invoke(ctx, reqMsg)
+	if err != nil {
+		return nil, err
+	}
+
+	out, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(respMsg)
+	if err != nil {
+		return nil, fmt.Errorf("marshal response: %w", err)
+	}
+	return mcp.NewToolResultText(string(out)), nil
+}

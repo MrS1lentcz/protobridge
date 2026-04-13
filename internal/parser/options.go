@@ -106,6 +106,44 @@ func getPathPrefix(s *descriptorpb.ServiceDescriptorProto) string {
 	return val
 }
 
+// getMCP returns (value, set). The "set" flag is needed to detect explicit
+// per-method opt-out (`(protobridge.mcp) = false`) when service-level
+// `mcp_default = true` is in effect.
+func getMCP(m *descriptorpb.MethodDescriptorProto) (val, set bool) {
+	if m.Options == nil || !proto.HasExtension(m.Options, optionspb.E_Mcp) {
+		return false, false
+	}
+	v, ok := proto.GetExtension(m.Options, optionspb.E_Mcp).(bool)
+	if !ok {
+		return false, false
+	}
+	return v, true
+}
+
+func getMCPScope(m *descriptorpb.MethodDescriptorProto) string {
+	if m.Options == nil {
+		return ""
+	}
+	v, _ := proto.GetExtension(m.Options, optionspb.E_McpScope).(string)
+	return v
+}
+
+func getMCPDescription(m *descriptorpb.MethodDescriptorProto) string {
+	if m.Options == nil {
+		return ""
+	}
+	v, _ := proto.GetExtension(m.Options, optionspb.E_McpDescription).(string)
+	return v
+}
+
+func getMCPDefault(s *descriptorpb.ServiceDescriptorProto) bool {
+	if s.Options == nil {
+		return false
+	}
+	v, _ := proto.GetExtension(s.Options, optionspb.E_McpDefault).(bool)
+	return v
+}
+
 func getXVarName(v *descriptorpb.EnumValueDescriptorProto) string {
 	if v.Options == nil {
 		return ""

@@ -5,17 +5,32 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/mrs1lentcz/protobridge.svg)](https://pkg.go.dev/github.com/mrs1lentcz/protobridge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Zero-code gRPC-to-REST proxy generator for Go. Define your API in `.proto` files, run `protoc`, get a fully compilable REST gateway with WebSocket support, OpenAPI spec, authentication, and structured error handling -- no handwritten Go required.
+Multi-protocol gateway generator for gRPC services. Write your business logic once as a gRPC server, then generate proxies that expose it as REST + WebSocket + SSE (`protoc-gen-protobridge`) and as MCP tools (`protoc-gen-mcp`) — all driven by `.proto` annotations, no handwritten glue code.
+
+```
+                  ┌──────────────┐
+                  │  REST proxy  │── HTTP / WS / SSE  ─┐
+                  └──────────────┘                     │
+                                                       ├──→  ┌──────────────┐
+                  ┌──────────────┐                     │     │ gRPC backend │
+                  │   MCP proxy  │── stdio / HTTP  ────┤     │  (your code) │
+                  └──────────────┘                     │     └──────────────┘
+                                                       │
+                  (more proxies on the way) ───────────┘
+```
 
 ## Why protobridge
 
-Existing gRPC-REST gateways (grpc-gateway, etc.) fall short in areas that frontend teams care about most:
+One implementation, many wire formats. The same gRPC service can be exposed to a browser (REST + OpenAPI), to an LLM agent (MCP tools), and to a backend consumer (raw gRPC) without rewriting business logic. Auth, metadata, observability, and validation share one pipeline — set up once at the gRPC layer, every proxy inherits it.
 
-- **Broken `oneof` / union types** -- `protojson` produces flat objects with no discriminator. Frontend can't tell which variant it received. protobridge generates clean discriminated unions with a `"protobridge_disc"` field, validated for global uniqueness at generation time. Oneof variant messages have strict usage rules enforced by the generator, so the API surface is always consistent.
-- **Unusable enums** -- proto enums expose raw `SCREAMING_CASE` names and the meaningless `0` default to the API consumer. protobridge strips the zero member entirely and lets you define clean names via `x_var_name` (`"low"`, `"high"` instead of `TASK_PRIORITY_LOW`). The result is an OpenAPI spec that frontend codegen tools can consume directly.
-- **No streaming story** -- most gateways either ignore streaming RPCs or require separate configuration. protobridge automatically maps all stream types (server, client, bidi) to WebSocket or SSE endpoints with configurable connection modes (`private` per-user streams vs `broadcast` fan-out). Multiple browser tabs from the same user share a single gRPC stream.
-- **No observability out of the box** -- grpc-gateway leaves tracing, metrics, and error reporting as an exercise for the reader. protobridge generates OpenTelemetry integration from day one: W3C trace propagation (`traceparent` from nginx/Envoy → gRPC backends), Prometheus metrics (`/metrics` endpoint), Sentry error reporting, and automatic connection health monitoring with transparent retry on transient failures.
-- **Boilerplate everywhere** -- even with a gateway, you still write middleware, auth wiring, connection management, error mapping, validation, and a `main.go`. protobridge generates all of it -- including a Dockerfile and Kubernetes manifest. The output compiles and runs with zero handwritten Go.
+Compared to single-purpose gateways:
+
+- **Broken `oneof` / union types** in other gateways — `protojson` produces flat objects with no discriminator. Frontend can't tell which variant it received. protobridge generates clean discriminated unions with a `"protobridge_disc"` field, validated for global uniqueness at generation time.
+- **Unusable enums** elsewhere — proto enums expose raw `SCREAMING_CASE` names and the meaningless `0` default. protobridge strips the zero member entirely and lets you define clean names via `x_var_name` (`"low"` instead of `TASK_PRIORITY_LOW`). Aliases work for both input and output, in REST, MCP and OpenAPI.
+- **No streaming story** in most gateways. protobridge automatically maps all stream types (server, client, bidi) to WebSocket or SSE with configurable connection modes (`private` per-user vs `broadcast` fan-out).
+- **No MCP path at all** elsewhere. `protoc-gen-mcp` emits a stdio + streamable-HTTP MCP server with JSON Schema derived from your proto types and tool descriptions pulled from proto leading comments — drop a binary into Claude Desktop / Cursor / your custom MCP host.
+- **No observability out of the box** elsewhere. protobridge generates OpenTelemetry integration day one: W3C trace propagation, Prometheus metrics, Sentry error reporting, automatic connection health monitoring with transparent retry.
+- **Boilerplate everywhere** in alternatives — even with a gateway you still write middleware, auth wiring, connection management, `main.go`. protobridge generates all of it for every proxy, including Dockerfile and Kubernetes manifest.
 
 ## Performance
 
@@ -66,7 +81,8 @@ protobridge reads your annotated `.proto` files and generates:
 ## Installation
 
 ```bash
-go install github.com/mrs1lentcz/protobridge/cmd/protoc-gen-protobridge@latest
+go install github.com/mrs1lentcz/protobridge/cmd/protoc-gen-protobridge@latest  # REST + WS + SSE proxy
+go install github.com/mrs1lentcz/protobridge/cmd/protoc-gen-mcp@latest          # MCP proxy
 ```
 
 Requirements: `protoc`, `protoc-gen-go`, `protoc-gen-go-grpc`
@@ -96,21 +112,73 @@ service TaskService {
 ```bash
 protoc \
   --protobridge_out=./gateway \
+  --protobridge_opt=handler_pkg=your/module/gateway/handler \
   -I . -I path/to/protobridge/proto -I path/to/googleapis \
   your/service.proto
 ```
+
+The `handler_pkg` option is the **Go import path** that the generated `main.go` uses to import the `handler/` subpackage. It must match where you put the output: if `--protobridge_out=./gateway` and your module is `github.com/you/myapp`, then `handler_pkg=github.com/you/myapp/gateway/handler`.
+
+If you omit `handler_pkg`, the plugin walks up from the current directory to find `go.mod` and, if it sees a conventional output dir (`gen/protobridge/`, `protobridge/`, or `gen/`), uses that. Reproducible CI builds should pass it explicitly.
 
 **3. Build and run the generated proxy:**
 
 ```bash
 cd gateway
-go mod init your/gateway && go mod tidy
 go build -o gateway .
 
 PROTOBRIDGE_TASK_SERVICE_ADDR=localhost:50051 ./gateway
 ```
 
+The proxy directory layout:
+
+```
+gateway/
+├── main.go              # entry point — package main
+├── handler/             # one file per service — package handler
+│   └── task_service.go
+├── Dockerfile
+├── k8s.yaml
+├── .env.example
+└── schema/
+    ├── openapi.yaml
+    └── asyncapi.yaml    # only if you have streaming methods
+```
+
 The proxy is now listening on `:8080` and forwarding requests to your gRPC backend.
+
+### Generate the MCP proxy too
+
+Annotate the methods you want exposed to LLM clients:
+
+```protobuf
+import "protobridge/options.proto";
+
+service ToolService {
+  // Creates a task in the current project.
+  rpc CreateTask(CreateTaskRequest) returns (Task) {
+    option (protobridge.mcp) = true;
+    option (protobridge.mcp_scope) = "chat session";
+  }
+}
+```
+
+Run the second plugin:
+
+```bash
+protoc \
+  --mcp_out=./mcp \
+  --mcp_opt=handler_pkg=your/module/mcp/handler \
+  -I . -I path/to/protobridge/proto \
+  your/service.proto
+
+cd mcp && go build -o mcp-proxy .
+PROTOBRIDGE_TOOL_SERVICE_ADDR=localhost:50051 SESSION_ID=$(uuidgen) ./mcp-proxy
+```
+
+By default the binary speaks **stdio** (Claude Desktop / Cursor / `mcp-cli`); set `PROTOBRIDGE_MCP_TRANSPORT=http` for streamable HTTP mode (`PROTOBRIDGE_MCP_HTTP_ADDR=:8081` to choose the port). Identity (e.g. `SESSION_ID`) is forwarded into gRPC metadata so the same backend handles REST and MCP requests with one auth pipeline.
+
+See [`docs/mcp.md`](docs/mcp.md) for the full MCP guide and [`docs/rest.md`](docs/rest.md) for the REST plugin reference.
 
 ## Proto annotations
 

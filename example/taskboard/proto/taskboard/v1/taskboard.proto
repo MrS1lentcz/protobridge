@@ -168,19 +168,26 @@ service TaskService {
 
   // --- Unary CRUD ---
 
+  // Creates a new task on the board. Returns the created task with its
+  // server-assigned ID.
   rpc CreateTask(CreateTaskRequest) returns (Task) {
     option (google.api.http) = {post: "/tasks"};
     option (protobridge.required_headers) = "user_id";
+    option (protobridge.mcp) = true;
   }
 
+  // Returns a single task by ID.
   rpc GetTask(GetTaskRequest) returns (Task) {
     option (google.api.http) = {get: "/tasks/{task_id}"};
     option (protobridge.required_headers) = "user_id";
+    option (protobridge.mcp) = true;
   }
 
+  // Updates an existing task. Provide only the fields you want to change.
   rpc UpdateTask(UpdateTaskRequest) returns (Task) {
     option (google.api.http) = {put: "/tasks/{task_id}"};
     option (protobridge.required_headers) = "user_id";
+    option (protobridge.mcp) = true;
   }
 
   rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse) {
@@ -188,10 +195,13 @@ service TaskService {
     option (protobridge.required_headers) = "user_id";
   }
 
+  // Lists tasks for the authenticated user. Useful when the LLM needs an
+  // overview of what's open before suggesting next actions.
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse) {
     option (google.api.http) = {get: "/tasks"};
     option (protobridge.required_headers) = "user_id";
     option (protobridge.query_params_target) = "paging";
+    option (protobridge.mcp) = true;
   }
 
   // --- Server streaming: watch task events (private WS – per user) ---

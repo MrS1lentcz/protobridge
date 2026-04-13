@@ -1,0 +1,119 @@
+{
+  "tools": [
+    {
+      "name": "create_task",
+      "description": "Creates a new task on the board. Returns the created task with its\nserver-assigned ID.",
+      "inputSchema": {
+        "properties": {
+          "assignee_id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "priority": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "priority"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_task",
+      "description": "Returns a single task by ID.",
+      "inputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_tasks",
+      "description": "Lists tasks for the authenticated user. Useful when the LLM needs an\noverview of what's open before suggesting next actions.",
+      "inputSchema": {
+        "properties": {
+          "paging": {
+            "title": "Paging",
+            "type": "object"
+          },
+          "priority_filter": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "type": "string"
+          },
+          "status_filter": {
+            "enum": [
+              "todo",
+              "in_progress",
+              "done"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "update_task",
+      "description": "Updates an existing task. Provide only the fields you want to change.",
+      "inputSchema": {
+        "properties": {
+          "assignee_id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "priority": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "todo",
+              "in_progress",
+              "done"
+            ],
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  ]
+}

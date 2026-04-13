@@ -15,7 +15,7 @@ func GenerateAsyncAPI(api *parser.ParsedAPI) string {
 	var channels []asyncChannel
 	for _, svc := range api.Services {
 		for _, m := range svc.Methods {
-			if m.StreamType == parser.StreamUnary {
+			if m.StreamType == parser.StreamUnary || m.HTTPMethod == "" {
 				continue
 			}
 			channels = append(channels, asyncChannel{
