@@ -153,6 +153,35 @@ func TestResolveHandlerPkg_GoModButNoConventionalDir(t *testing.T) {
 	}
 }
 
+func TestResolveHandlerPkg_PublicAlias(t *testing.T) {
+	// The public ResolveHandlerPkg alias is what mcpgen consumes; cover it
+	// directly so a refactor that breaks the wrapper is caught.
+	got, err := ResolveHandlerPkg(Options{HandlerPkg: "github.com/x/y/handler"}, "--mcp_opt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "github.com/x/y/handler" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestFindGoModule_GoModWithNoModuleDeclaration(t *testing.T) {
+	// A go.mod missing the `module` line should produce a clear error
+	// instead of silently returning an empty path that breaks codegen later.
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"),
+		[]byte("go 1.22\n\n// no module line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := findGoModule(root)
+	if err == nil {
+		t.Fatal("expected error for go.mod without module declaration")
+	}
+	if !strings.Contains(err.Error(), "module declaration") {
+		t.Errorf("error should mention missing module decl; got: %v", err)
+	}
+}
+
 func TestParseModulePath(t *testing.T) {
 	cases := []struct {
 		in, want string

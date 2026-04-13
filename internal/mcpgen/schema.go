@@ -13,14 +13,16 @@ import (
 // the proto request message. Returned as compact JSON suitable for embedding
 // into the generated handler as a string literal.
 //
-// Nested messages are inlined (no $ref) because MCP tool consumers (LLMs)
-// generally fare better with self-contained schemas.
-func jsonSchemaForInput(mt *parser.MessageType) string {
+// Nested messages are inlined using messages (ParsedAPI.Messages) so
+// consumers see the full field list instead of an empty object stub. Cycles
+// in the message graph are broken via a shared seen-set that tracks which
+// full names are already on the current recursion stack.
+func jsonSchemaForInput(mt *parser.MessageType, messages map[string]*parser.MessageType) string {
 	if mt == nil || len(mt.Fields) == 0 {
 		// google.protobuf.Empty and other field-less messages → empty schema.
 		return `{"type":"object"}`
 	}
-	schema := messageSchema(mt, map[string]bool{})
+	schema := messageSchema(mt, map[string]bool{}, messages)
 	out, err := json.Marshal(schema)
 	if err != nil {
 		// All values produced by messageSchema/fieldSchema are
@@ -33,11 +35,15 @@ func jsonSchemaForInput(mt *parser.MessageType) string {
 	return string(out)
 }
 
-func messageSchema(mt *parser.MessageType, seen map[string]bool) map[string]any {
+func messageSchema(mt *parser.MessageType, seen map[string]bool, messages map[string]*parser.MessageType) map[string]any {
 	if seen[mt.FullName] {
-		// Self-referential message: emit a generic object stub to break
-		// the cycle. Rare in practice for MCP tool inputs.
-		return map[string]any{"type": "object"}
+		// Cycle: emit a typed stub so the enclosing schema stays valid
+		// JSON without unbounded recursion.
+		stub := map[string]any{"type": "object"}
+		if mt.Name != "" {
+			stub["title"] = mt.Name
+		}
+		return stub
 	}
 	seenCopy := make(map[string]bool, len(seen)+1)
 	for k, v := range seen {
@@ -51,7 +57,7 @@ func messageSchema(mt *parser.MessageType, seen map[string]bool) map[string]any 
 		if f.OneofIndex != nil {
 			continue // oneof variants are emitted separately if needed
 		}
-		props[f.Name] = fieldSchema(f, seenCopy)
+		props[f.Name] = fieldSchema(f, seenCopy, messages)
 		if f.Required {
 			required = append(required, f.Name)
 		}
@@ -66,17 +72,17 @@ func messageSchema(mt *parser.MessageType, seen map[string]bool) map[string]any 
 	return out
 }
 
-func fieldSchema(f *parser.Field, seen map[string]bool) map[string]any {
+func fieldSchema(f *parser.Field, seen map[string]bool, messages map[string]*parser.MessageType) map[string]any {
 	if f.Repeated {
 		return map[string]any{
 			"type":  "array",
-			"items": scalarOrMessageSchema(f, seen),
+			"items": scalarOrMessageSchema(f, seen, messages),
 		}
 	}
-	return scalarOrMessageSchema(f, seen)
+	return scalarOrMessageSchema(f, seen, messages)
 }
 
-func scalarOrMessageSchema(f *parser.Field, seen map[string]bool) map[string]any {
+func scalarOrMessageSchema(f *parser.Field, seen map[string]bool, messages map[string]*parser.MessageType) map[string]any {
 	switch f.Type {
 	case descriptorpb.FieldDescriptorProto_TYPE_STRING:
 		return map[string]any{"type": "string"}
@@ -117,15 +123,20 @@ func scalarOrMessageSchema(f *parser.Field, seen map[string]bool) map[string]any
 		}
 		return out
 	case descriptorpb.FieldDescriptorProto_TYPE_MESSAGE:
-		// Nested message — inline if we have full info, else emit an empty
-		// object stub. Without a resolver the parser leaves only Name/FullName
-		// for messages outside the requested files (well-known types etc.).
+		// Well-known empty type: no fields to expose.
 		if f.TypeName == ".google.protobuf.Empty" {
 			return map[string]any{"type": "object"}
 		}
-		// Inline the type name as a hint — full inlining would require a
-		// resolver indexed by FullName; today the parser's resolveMessageType
-		// only walks one level, so we mirror that and emit a typed stub.
+		// Recurse into the fully-resolved message from the global index so
+		// LLM clients see the actual field list instead of a bare
+		// {"type": "object"} stub. Falls back to the stub only when the
+		// referenced type is absent from the messages index (e.g. an
+		// imported proto that protoc didn't include in the plugin request,
+		// or a field-less message where the index holds a pointer-stable
+		// stub with Fields==nil).
+		if nested, ok := messages[f.TypeName]; ok && nested != nil && len(nested.Fields) > 0 {
+			return messageSchema(nested, seen, messages)
+		}
 		short := lastSegmentOfTypeName(f.TypeName)
 		stub := map[string]any{"type": "object"}
 		if short != "" {

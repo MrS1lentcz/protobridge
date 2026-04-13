@@ -6,6 +6,7 @@ import (
 	"go/format"
 	parser2 "go/parser"
 	"go/token"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -1399,6 +1400,21 @@ func TestRun_InvalidBytes(t *testing.T) {
 	resp := Run(bytes.NewReader([]byte("not valid protobuf")))
 	if resp.Error == nil {
 		t.Fatal("expected error for invalid protobuf")
+	}
+}
+
+func TestGenerate_HandlerPkgResolveFails(t *testing.T) {
+	// No HandlerPkg in opts AND a CWD without go.mod → resolveHandlerPkg
+	// errors out via the documented remediation message. Mirrors the same
+	// test in mcpgen so the REST plugin's error-surfacing path is covered.
+	tmp := t.TempDir()
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd) //nolint:errcheck
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Generate(testAPI(), Options{}); err == nil {
+		t.Fatal("expected error from resolveHandlerPkg")
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/mrs1lentcz/protobridge/internal/generator"
 	"github.com/mrs1lentcz/protobridge/internal/parser"
 )
 
@@ -14,7 +15,10 @@ import (
 // declares an Add<Service>ToServer(srv *mcp.Server, addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConfig)
 // function that registers every MCP-enabled method as an mcp.Tool with a
 // JSON Schema input and a closure that performs the gRPC call.
-func generateHandlerFile(svc *parser.Service) (string, error) {
+//
+// messages is the ParsedAPI-wide message index used to recursively inline
+// nested-message field schemas.
+func generateHandlerFile(svc *parser.Service, messages map[string]*parser.MessageType) (string, error) {
 	tools := []toolData{}
 	for _, m := range svc.Methods {
 		if !m.MCP {
@@ -28,7 +32,7 @@ func generateHandlerFile(svc *parser.Service) (string, error) {
 			MethodName:    m.Name,
 			ToolName:      toSnakeCase(m.Name),
 			Description:   buildDescription(m),
-			InputSchema:   jsonSchemaForInput(m.InputType),
+			InputSchema:   jsonSchemaForInput(m.InputType, messages),
 			InputTypeRef:  protoTypeRef(m.InputType),
 			OutputTypeRef: protoTypeRef(m.OutputType),
 		}
@@ -169,21 +173,10 @@ func isEmpty(mt *parser.MessageType) bool {
 }
 
 // toSnakeCase converts CamelCase method names into snake_case tool names per
-// the MCP convention: GetOpenTasks → get_open_tasks.
-func toSnakeCase(s string) string {
-	var b strings.Builder
-	for i, r := range s {
-		if i > 0 && r >= 'A' && r <= 'Z' {
-			b.WriteByte('_')
-		}
-		if r >= 'A' && r <= 'Z' {
-			b.WriteRune(r + 32)
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
+// the MCP convention, keeping acronyms glued (GitCreatePR → git_create_pr,
+// not git_create_p_r). Delegates to the shared generator.ToSnakeCase so
+// the REST and MCP plugins produce matching identifiers.
+func toSnakeCase(s string) string { return generator.ToSnakeCase(s) }
 
 func protoImportPath(svc *parser.Service) string {
 	if svc.GoPackage != "" {

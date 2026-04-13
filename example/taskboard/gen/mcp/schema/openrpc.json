@@ -166,7 +166,16 @@
         {
           "name": "paging",
           "schema": {
-            "title": "Paging",
+            "properties": {
+              "limit": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "page": {
+                "format": "int32",
+                "type": "integer"
+              }
+            },
             "type": "object"
           }
         },
@@ -200,7 +209,49 @@
           "properties": {
             "tasks": {
               "items": {
-                "title": "Task",
+                "properties": {
+                  "assignee_id": {
+                    "type": "string"
+                  },
+                  "created_by": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "critical"
+                    ],
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "todo",
+                      "in_progress",
+                      "done"
+                    ],
+                    "type": "string"
+                  },
+                  "tags": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "updated_by": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               },
               "type": "array"

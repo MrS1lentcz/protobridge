@@ -12,6 +12,15 @@ enum Status {
   STATUS_INACTIVE = 2 [(protobridge.x_var_name) = "inactive"];
 }
 
+// Color has no x_var_name aliases on any value — exercises the
+// "no aliases, cache stores nil, second call returns from cache" path
+// in enumAliases / reverseEnumAliases.
+enum Color {
+  COLOR_UNSPECIFIED = 0;
+  COLOR_RED = 1;
+  COLOR_GREEN = 2;
+}
+
 message SimpleRequest {
   string name = 1;
   int32 age = 2;
@@ -92,6 +101,12 @@ message MapOnlyEnumRequest {
 // transitively carries an alias-bearing enum.
 message WrapperRequest {
   SimpleResponse inner = 1;
+}
+
+// ColorRequest carries an alias-free enum field so the cache-nil branch
+// in enumAliases / reverseEnumAliases is hit on the second call.
+message ColorRequest {
+  Color color = 1;
 }
 
 message QueryParams {

@@ -36,10 +36,10 @@ func generateOpenRPC(api *parser.ParsedAPI) string {
 				Name:        toSnakeCase(m.Name),
 				Summary:     summaryLine(m.LeadingComment),
 				Description: buildDescription(m),
-				Params:      paramsFromMessage(m.InputType),
+				Params:      paramsFromMessage(m.InputType, api.Messages),
 				Result: openRPCContentDescriptor{
 					Name:   "result",
-					Schema: messageSchemaOrEmpty(m.OutputType),
+					Schema: messageSchemaOrEmpty(m.OutputType, api.Messages),
 				},
 			})
 		}
@@ -68,7 +68,7 @@ func generateMCPTools(api *parser.ParsedAPI) string {
 			doc.Tools = append(doc.Tools, mcpTool{
 				Name:        toSnakeCase(m.Name),
 				Description: buildDescription(m),
-				InputSchema: messageSchemaOrEmpty(m.InputType),
+				InputSchema: messageSchemaOrEmpty(m.InputType, api.Messages),
 			})
 		}
 	}
@@ -81,7 +81,7 @@ func generateMCPTools(api *parser.ParsedAPI) string {
 
 // --- helpers ---
 
-func paramsFromMessage(mt *parser.MessageType) []openRPCContentDescriptor {
+func paramsFromMessage(mt *parser.MessageType, messages map[string]*parser.MessageType) []openRPCContentDescriptor {
 	if mt == nil || len(mt.Fields) == 0 {
 		return nil
 	}
@@ -92,18 +92,18 @@ func paramsFromMessage(mt *parser.MessageType) []openRPCContentDescriptor {
 		}
 		out = append(out, openRPCContentDescriptor{
 			Name:     f.Name,
-			Schema:   fieldSchema(f, map[string]bool{}),
+			Schema:   fieldSchema(f, map[string]bool{}, messages),
 			Required: f.Required,
 		})
 	}
 	return out
 }
 
-func messageSchemaOrEmpty(mt *parser.MessageType) map[string]any {
+func messageSchemaOrEmpty(mt *parser.MessageType, messages map[string]*parser.MessageType) map[string]any {
 	if mt == nil || len(mt.Fields) == 0 {
 		return map[string]any{"type": "object"}
 	}
-	return messageSchema(mt, map[string]bool{})
+	return messageSchema(mt, map[string]bool{}, messages)
 }
 
 // summaryLine extracts the first line of a multi-line proto comment. Used

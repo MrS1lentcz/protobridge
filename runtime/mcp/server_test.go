@@ -137,6 +137,29 @@ func TestServer_ServeStdio_RespectsCancelledContext(t *testing.T) {
 	}
 }
 
+func TestServer_ServeStreamableHTTP_HappyPathShutdownOnCtxCancel(t *testing.T) {
+	// Bind to a free OS-assigned port (`:0`), let the server come up, then
+	// cancel the context — the goroutine must return cleanly via Shutdown.
+	srv := mcp.NewServer("t", "0", mcp.DefaultAuthFunc())
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan error, 1)
+	go func() { done <- srv.ServeStreamableHTTP(ctx, "127.0.0.1:0") }()
+
+	// Give the listener ~50ms to come up before we cancel.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		// Either nil (clean shutdown) or http.ErrServerClosed-style error
+		// is acceptable. The point is the goroutine returns.
+		_ = err
+	case <-time.After(5 * time.Second):
+		t.Fatal("ServeStreamableHTTP did not honor cancelled context within 5s")
+	}
+}
+
 func TestServer_ServeStreamableHTTP_BadAddr(t *testing.T) {
 	srv := mcp.NewServer("t", "0", mcp.DefaultAuthFunc())
 	// Address not preceded by ':' is invalid per net.Listen — exercises the
