@@ -23,6 +23,7 @@ proto-go:
 proto-bridge: plugin
 	PATH="../../bin:$$PATH" protoc \
 		--protobridge_out=gen/protobridge \
+		--protobridge_opt=handler_pkg=github.com/mrs1lentcz/protobridge/example/taskboard/gen/protobridge/handler \
 		-I proto -I ../../proto -I "$(GOOGLEAPIS_DIR)" \
 		$(PROTO_FILE)
 

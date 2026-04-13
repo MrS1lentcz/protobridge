@@ -87,7 +87,7 @@ func TestE2E_GeneratedCodeIsSyntacticallyValid(t *testing.T) {
 		},
 	}
 
-	resp, err := Generate(api)
+	resp, err := Generate(api, Options{HandlerPkg: "example.com/test/handler"})
 	if err != nil {
 		t.Fatalf("Generate() error: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestE2E_GeneratedCodeIsSyntacticallyValid(t *testing.T) {
 	}
 
 	expectedFiles := []string{
-		"task_service.go",
+		"handler/task_service.go",
 		"main.go",
 		"schema/openapi.yaml",
 		"schema/asyncapi.yaml",
@@ -164,7 +164,7 @@ func TestE2E_GeneratedCodeIsSyntacticallyValid(t *testing.T) {
 	// Verify service file contains all handler types.
 	svcContent := ""
 	for _, f := range resp.File {
-		if f.GetName() == "task_service.go" {
+		if f.GetName() == "handler/task_service.go" {
 			svcContent = f.GetContent()
 			break
 		}
@@ -229,7 +229,7 @@ func TestE2E_StreamingHandlersHaveErrorChecks(t *testing.T) {
 		},
 	}
 
-	resp, err := Generate(api)
+	resp, err := Generate(api, Options{HandlerPkg: "example.com/test/handler"})
 	if err != nil {
 		t.Fatalf("Generate() error: %v", err)
 	}
@@ -237,13 +237,13 @@ func TestE2E_StreamingHandlersHaveErrorChecks(t *testing.T) {
 	// Find the service file.
 	var svcContent string
 	for _, f := range resp.File {
-		if f.GetName() == "event_service.go" {
+		if f.GetName() == "handler/event_service.go" {
 			svcContent = f.GetContent()
 			break
 		}
 	}
 	if svcContent == "" {
-		t.Fatal("event_service.go not generated")
+		t.Fatal("handler/event_service.go not generated")
 	}
 
 	// The generated code must NOT use `data, _ :=` pattern for protojson.Marshal.

@@ -96,18 +96,37 @@ service TaskService {
 ```bash
 protoc \
   --protobridge_out=./gateway \
+  --protobridge_opt=handler_pkg=your/module/gateway/handler \
   -I . -I path/to/protobridge/proto -I path/to/googleapis \
   your/service.proto
 ```
+
+The `handler_pkg` option is the **Go import path** that the generated `main.go` uses to import the `handler/` subpackage. It must match where you put the output: if `--protobridge_out=./gateway` and your module is `github.com/you/myapp`, then `handler_pkg=github.com/you/myapp/gateway/handler`.
+
+If you omit `handler_pkg`, the plugin walks up from the current directory to find `go.mod` and, if it sees a conventional output dir (`gen/protobridge/`, `protobridge/`, or `gen/`), uses that. Reproducible CI builds should pass it explicitly.
 
 **3. Build and run the generated proxy:**
 
 ```bash
 cd gateway
-go mod init your/gateway && go mod tidy
 go build -o gateway .
 
 PROTOBRIDGE_TASK_SERVICE_ADDR=localhost:50051 ./gateway
+```
+
+The proxy directory layout:
+
+```
+gateway/
+├── main.go              # entry point — package main
+├── handler/             # one file per service — package handler
+│   └── task_service.go
+├── Dockerfile
+├── k8s.yaml
+├── .env.example
+└── schema/
+    ├── openapi.yaml
+    └── asyncapi.yaml    # only if you have streaming methods
 ```
 
 The proxy is now listening on `:8080` and forwarding requests to your gRPC backend.
