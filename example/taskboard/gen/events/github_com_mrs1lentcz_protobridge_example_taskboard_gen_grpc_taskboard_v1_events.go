@@ -16,7 +16,9 @@ import (
 const SubjectTaskCompletedEvent = "task_completed_event"
 
 // EmitTaskCompletedEvent marshals ev and publishes it on the bus using the
-// kind declared in the proto annotation.
+// kind declared in the proto annotation. Labels stashed on ctx via
+// events.WithLabels are forwarded as message headers so subscribers
+// (and the broadcast WS endpoint) can route on them.
 func EmitTaskCompletedEvent(ctx context.Context, bus events.Bus, ev *pb.TaskCompletedEvent) error {
 	if ev == nil {
 		return fmt.Errorf("EmitTaskCompletedEvent: nil event")
@@ -25,7 +27,8 @@ func EmitTaskCompletedEvent(ctx context.Context, bus events.Bus, ev *pb.TaskComp
 	if err != nil {
 		return fmt.Errorf("EmitTaskCompletedEvent: marshal: %w", err)
 	}
-	return bus.Publish(ctx, SubjectTaskCompletedEvent, payload, events.KindBroadcast, nil)
+	headers := events.LabelsToHeaders(events.LabelsFromContext(ctx), nil)
+	return bus.Publish(ctx, SubjectTaskCompletedEvent, payload, events.KindBroadcast, headers)
 }
 
 // TaskCompletedEventHandler is the typed signature for TaskCompletedEvent
@@ -51,7 +54,9 @@ func SubscribeBroadcastTaskCompletedEvent(bus events.Bus, h TaskCompletedEventHa
 const SubjectTaskCreatedEvent = "task_created_event"
 
 // EmitTaskCreatedEvent marshals ev and publishes it on the bus using the
-// kind declared in the proto annotation.
+// kind declared in the proto annotation. Labels stashed on ctx via
+// events.WithLabels are forwarded as message headers so subscribers
+// (and the broadcast WS endpoint) can route on them.
 //
 // Fired when a task is created. Workers can pick it up from the durable queue; UIs see a flash notification.
 func EmitTaskCreatedEvent(ctx context.Context, bus events.Bus, ev *pb.TaskCreatedEvent) error {
@@ -62,7 +67,8 @@ func EmitTaskCreatedEvent(ctx context.Context, bus events.Bus, ev *pb.TaskCreate
 	if err != nil {
 		return fmt.Errorf("EmitTaskCreatedEvent: marshal: %w", err)
 	}
-	return bus.Publish(ctx, SubjectTaskCreatedEvent, payload, events.KindBoth, nil)
+	headers := events.LabelsToHeaders(events.LabelsFromContext(ctx), nil)
+	return bus.Publish(ctx, SubjectTaskCreatedEvent, payload, events.KindBoth, headers)
 }
 
 // TaskCreatedEventHandler is the typed signature for TaskCreatedEvent
@@ -111,7 +117,9 @@ func SubscribeBroadcastTaskCreatedEvent(bus events.Bus, h TaskCreatedEventHandle
 const SubjectTaskGCRequested = "task_gc_requested"
 
 // EmitTaskGCRequested marshals ev and publishes it on the bus using the
-// kind declared in the proto annotation.
+// kind declared in the proto annotation. Labels stashed on ctx via
+// events.WithLabels are forwarded as message headers so subscribers
+// (and the broadcast WS endpoint) can route on them.
 func EmitTaskGCRequested(ctx context.Context, bus events.Bus, ev *pb.TaskGCRequested) error {
 	if ev == nil {
 		return fmt.Errorf("EmitTaskGCRequested: nil event")
@@ -120,7 +128,8 @@ func EmitTaskGCRequested(ctx context.Context, bus events.Bus, ev *pb.TaskGCReque
 	if err != nil {
 		return fmt.Errorf("EmitTaskGCRequested: marshal: %w", err)
 	}
-	return bus.Publish(ctx, SubjectTaskGCRequested, payload, events.KindDurable, nil)
+	headers := events.LabelsToHeaders(events.LabelsFromContext(ctx), nil)
+	return bus.Publish(ctx, SubjectTaskGCRequested, payload, events.KindDurable, headers)
 }
 
 // TaskGCRequestedHandler is the typed signature for TaskGCRequested
