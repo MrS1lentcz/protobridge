@@ -80,6 +80,7 @@ import (
 	mcpsdk "github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 	"github.com/mrs1lentcz/gox/grpcx"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/mrs1lentcz/protobridge/runtime/mcp"
 	pb "{{ .ProtoImport }}"
@@ -102,14 +103,8 @@ func Add{{ .ServiceName }}ToServer(srv *mcp.Server, addr string, pool *grpcx.Poo
 			defer pool.Release(addr, conn)
 			client := pb.New{{ $.ServiceName }}Client(conn)
 			in := &{{ .InputTypeRef }}{}
-			out := &{{ .OutputTypeRef }}{}
-			return srv.CallUnary(ctx, req, in, out, func(ctx context.Context) error {
-				resp, err := client.{{ .MethodName }}(ctx, in)
-				if err != nil {
-					return err
-				}
-				*out = *resp
-				return nil
+			return srv.CallUnary(ctx, req, in, func(ctx context.Context, msg proto.Message) (proto.Message, error) {
+				return client.{{ .MethodName }}(ctx, msg.(*{{ .InputTypeRef }}))
 			})
 		},
 	)

@@ -10,6 +10,7 @@ import (
 
 	mcpsdk "github.com/mark3labs/mcp-go/mcp"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/mrs1lentcz/protobridge/runtime/mcp"
 	pb "github.com/mrs1lentcz/protobridge/runtime/testdata"
@@ -55,7 +56,7 @@ func TestServer_CallUnary_DispatchAndAuth(t *testing.T) {
 	reqMsg := &pb.SimpleRequest{}
 	respMsg := &pb.SimpleResponse{Id: "r1", Name: "alice"}
 
-	out, err := srv.CallUnary(context.Background(), req, reqMsg, respMsg, func(ctx context.Context) error {
+	out, err := srv.CallUnary(context.Background(), req, reqMsg, func(ctx context.Context, _ proto.Message) (proto.Message, error) {
 		md, ok := metadata.FromOutgoingContext(ctx)
 		if !ok {
 			t.Fatal("expected outgoing metadata")
@@ -65,7 +66,7 @@ func TestServer_CallUnary_DispatchAndAuth(t *testing.T) {
 		if reqMsg.Name != "alice" || reqMsg.Age != 30 {
 			t.Errorf("arguments not unmarshaled: %+v", reqMsg)
 		}
-		return nil
+		return respMsg, nil
 	})
 	if err != nil {
 		t.Fatalf("CallUnary: %v", err)
@@ -89,8 +90,11 @@ func TestServer_CallUnary_AuthError(t *testing.T) {
 	srv := mcp.NewServer("t", "0", auth)
 
 	req := mcpsdk.CallToolRequest{}
-	_, err := srv.CallUnary(context.Background(), req, &pb.SimpleRequest{}, &pb.SimpleResponse{},
-		func(_ context.Context) error { t.Fatal("invoke should not run on auth failure"); return nil })
+	_, err := srv.CallUnary(context.Background(), req, &pb.SimpleRequest{},
+		func(_ context.Context, _ proto.Message) (proto.Message, error) {
+			t.Fatal("invoke should not run on auth failure")
+			return nil, nil
+		})
 	if err == nil {
 		t.Fatal("expected error from auth failure")
 	}
@@ -100,8 +104,8 @@ func TestServer_CallUnary_InvokeError(t *testing.T) {
 	srv := mcp.NewServer("t", "0", mcp.DefaultAuthFunc())
 	req := mcpsdk.CallToolRequest{}
 	want := errors.New("backend down")
-	_, err := srv.CallUnary(context.Background(), req, &pb.SimpleRequest{}, &pb.SimpleResponse{},
-		func(_ context.Context) error { return want })
+	_, err := srv.CallUnary(context.Background(), req, &pb.SimpleRequest{},
+		func(_ context.Context, _ proto.Message) (proto.Message, error) { return nil, want })
 	if !errors.Is(err, want) {
 		t.Errorf("expected backend error to surface, got %v", err)
 	}
@@ -161,8 +165,9 @@ func TestServer_CallUnary_NoArguments(t *testing.T) {
 	// message has no fields) gets an empty MCP arguments map — must not error.
 	srv := mcp.NewServer("t", "0", mcp.DefaultAuthFunc())
 	req := mcpsdk.CallToolRequest{}
-	out, err := srv.CallUnary(context.Background(), req, &pb.SimpleRequest{}, &pb.SimpleResponse{Id: "x"},
-		func(_ context.Context) error { return nil })
+	resp := &pb.SimpleResponse{Id: "x"}
+	out, err := srv.CallUnary(context.Background(), req, &pb.SimpleRequest{},
+		func(_ context.Context, _ proto.Message) (proto.Message, error) { return resp, nil })
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

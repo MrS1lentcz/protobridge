@@ -98,15 +98,19 @@ func HTTPHeadersFromContext(ctx context.Context) http.Header {
 }
 
 // CallUnary is the generic dispatcher used by every generated tool handler.
-// It unmarshals the MCP arguments JSON into reqMsg, runs the gRPC call via
-// invoke (which is closure over the typed gRPC client method), then marshals
-// respMsg back into a text-content CallToolResult. metadata is computed by
-// the Server's MCPAuthFunc and merged into the outgoing context.
+// It decodes the MCP arguments JSON into reqMsg, runs the auth translator,
+// attaches metadata to the outgoing context, calls invoke (which performs
+// the typed gRPC call and returns the response message), then marshals
+// that response back into a text-content CallToolResult.
+//
+// invoke takes the prepared context and the populated request message and
+// returns the response message — never copy a proto.Message by value
+// (they hold a Mutex), so we never write into a caller-supplied respMsg.
 func (s *Server) CallUnary(
 	ctx context.Context,
 	req mcp.CallToolRequest,
-	reqMsg, respMsg proto.Message,
-	invoke func(ctx context.Context) error,
+	reqMsg proto.Message,
+	invoke func(ctx context.Context, reqMsg proto.Message) (proto.Message, error),
 ) (*mcp.CallToolResult, error) {
 	if raw := req.GetRawArguments(); raw != nil {
 		data, err := json.Marshal(raw)
@@ -132,7 +136,8 @@ func (s *Server) CallUnary(
 		ctx = metadata.NewOutgoingContext(ctx, md)
 	}
 
-	if err := invoke(ctx); err != nil {
+	respMsg, err := invoke(ctx, reqMsg)
+	if err != nil {
 		return nil, err
 	}
 
