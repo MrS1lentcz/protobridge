@@ -1,9 +1,6 @@
 package mcpgen
 
 import (
-	"bytes"
-	"fmt"
-	"go/format"
 	"strings"
 	"text/template"
 
@@ -18,7 +15,7 @@ import (
 //
 // messages is the ParsedAPI-wide message index used to recursively inline
 // nested-message field schemas.
-func generateHandlerFile(svc *parser.Service, messages map[string]*parser.MessageType) (string, error) {
+func generateHandlerFile(svc *parser.Service, messages map[string]*parser.MessageType) string {
 	tools := []toolData{}
 	for _, m := range svc.Methods {
 		if !m.MCP {
@@ -46,15 +43,7 @@ func generateHandlerFile(svc *parser.Service, messages map[string]*parser.Messag
 		UsesEmpty:   anyEmpty(svc),
 	}
 
-	var buf bytes.Buffer
-	if err := handlerTmpl.Execute(&buf, data); err != nil {
-		return "", err
-	}
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		return "", fmt.Errorf("gofmt mcp handler: %w\n%s", err, buf.String())
-	}
-	return string(formatted), nil
+	return generator.RenderTemplate(handlerTmpl, data)
 }
 
 type handlerFileData struct {

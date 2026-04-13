@@ -177,6 +177,28 @@ func TestDecodeRequest_EnumAliasPrepass_NullNestedMessage(t *testing.T) {
 	}
 }
 
+func TestDecodeRequest_EnumAliasPrepass_WrongTypeForMapField(t *testing.T) {
+	// JSON sends a non-object value where the proto schema expects a map.
+	// The prepass walker must skip the field gracefully (typed-assertion
+	// failure → no rewrite) and let protojson surface the type mismatch.
+	body := `{"by_name":"not-a-map"}`
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	msg := &pb.EnumContainerRequest{}
+	// We don't assert the error shape — protojson handles type mismatch
+	// downstream. The point is that the prepass didn't panic on the
+	// invalid map value.
+	_ = runtime.DecodeRequest(r, msg)
+}
+
+func TestDecodeRequest_EnumAliasPrepass_WrongTypeForRepeatedField(t *testing.T) {
+	// Same idea for repeated enum fields — JSON sends a string where
+	// schema expects an array.
+	body := `{"statuses":"not-an-array"}`
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	msg := &pb.EnumContainerRequest{}
+	_ = runtime.DecodeRequest(r, msg)
+}
+
 func TestDecodeRequest_EnumAliasPrepass_NonObjectBody(t *testing.T) {
 	// Top-level JSON array bypasses the prepass and protojson surfaces the error.
 	body := `[1,2,3]`

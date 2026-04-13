@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package protobridge;
+
+option go_package = "github.com/mrs1lentcz/protobridge/proto/protobridge";
+
+import "google/protobuf/descriptor.proto";
+
+// Event marks a proto message as a protobridge event. The MessageOptions
+// extension is consumed by protoc-gen-events-go (publisher/subscriber codegen)
+// and protoc-gen-protobridge (broadcast service WS expose).
+extend google.protobuf.MessageOptions {
+  EventOptions event = 51234;
+}
+
+message EventOptions {
+  // Subject / topic / routing key on the bus. Empty → derived from the
+  // message name in snake_case (e.g. OrderCreated → order_created).
+  // Exact-match only; wildcards are not supported.
+  string subject = 1;
+
+  // How the bus should route this event.
+  EventKind kind = 2;
+
+  // For DURABLE / BOTH only: name of the consumer group for at-least-once
+  // delivery. Multiple subscribers in the same group load-balance the stream.
+  // Empty → derived from the subscriber's identity at registration.
+  string durable_group = 3;
+
+  // For BROADCAST / BOTH only: visibility filter for the gateway broadcast
+  // service. PUBLIC events flow to browser clients via WS/SSE; INTERNAL
+  // events are visible only to in-cluster gRPC subscribers.
+  Visibility visibility = 4;
+
+  // Optional human-readable description, used in generated AsyncAPI docs.
+  string description = 5;
+}
+
+enum EventKind {
+  EVENT_KIND_UNSPECIFIED = 0;
+
+  // Fire-and-forget fan-out. Subscribers that are offline miss messages;
+  // no replay. Backed by core NATS / Redis Pub/Sub / RabbitMQ fanout.
+  BROADCAST = 1;
+
+  // Persistent at-least-once delivery with consumer groups. Failed
+  // handlers cause redelivery (backend-specific retry policy). Backed by
+  // NATS JetStream / Redis Streams / RabbitMQ durable queues.
+  DURABLE = 2;
+
+  // Both paths in sequence: durable first (must succeed; error fails the
+  // publish), then broadcast (best-effort; failure is logged and ignored).
+  // Subscribers must be idempotent — they may see the same event from
+  // both paths.
+  BOTH = 3;
+}
+
+enum Visibility {
+  VISIBILITY_UNSPECIFIED = 0;
+
+  // Default. Event reaches the gateway broadcast service and is exposed
+  // to external WS/SSE subscribers.
+  PUBLIC = 1;
+
+  // Event flows only to in-process / in-cluster gRPC subscribers. The
+  // generated broadcast service omits these from its oneof envelope.
+  INTERNAL = 2;
+}

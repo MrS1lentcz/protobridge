@@ -1,7 +1,6 @@
 package generator
 
 import (
-	"bytes"
 	"text/template"
 
 	"github.com/mrs1lentcz/protobridge/internal/parser"
@@ -55,7 +54,7 @@ type wsData struct {
 	ExcludeAuth     bool
 }
 
-func generateWSHandler(svc *parser.Service, m *parser.Method) (string, error) {
+func generateWSHandler(svc *parser.Service, m *parser.Method) string {
 	data := wsData{
 		ServiceName:     svc.Name,
 		MethodName:      m.Name,
@@ -65,10 +64,9 @@ func generateWSHandler(svc *parser.Service, m *parser.Method) (string, error) {
 		InputTypeName:   m.InputType.Name,
 		ExcludeAuth:     m.ExcludeAuth,
 	}
-
-	var buf bytes.Buffer
-	if err := wsHandlerTmpl.Execute(&buf, data); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
+	// wsHandlerTmpl emits a Go fragment (no package/imports) that the parent
+	// template inlines, so we skip format.Source here — it would reject the
+	// fragment as invalid syntax. The enclosing service file gets gofmt'd
+	// in renderTemplate after assembly.
+	return renderFragment(wsHandlerTmpl, data)
 }

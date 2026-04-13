@@ -1,9 +1,7 @@
 package generator
 
 import (
-	"bytes"
 	"fmt"
-	"go/format"
 	"strings"
 	"text/template"
 
@@ -328,7 +326,7 @@ type headerData struct {
 	VarName    string
 }
 
-func generateServiceFile(svc *parser.Service, api *parser.ParsedAPI) (string, error) {
+func generateServiceFile(svc *parser.Service, api *parser.ParsedAPI) string {
 	data := serviceFileData{
 		ServiceName: svc.Name,
 		ProtoImport: protoImportPath(svc),
@@ -408,18 +406,12 @@ func generateServiceFile(svc *parser.Service, api *parser.ParsedAPI) (string, er
 		data.Methods = append(data.Methods, md)
 	}
 
-	var buf bytes.Buffer
-	if err := serviceFileTmpl.Execute(&buf, data); err != nil {
-		return "", err
-	}
-	// Conditional imports leave blank lines / empty groups — gofmt the output
-	// so the emitted file is byte-stable and integrators don't need to run
-	// goimports after every protoc invocation.
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		return "", fmt.Errorf("gofmt generated handler: %w\n%s", err, buf.String())
-	}
-	return string(formatted), nil
+	// Conditional imports leave blank lines / empty groups — gofmt the
+	// output so the emitted file is byte-stable and integrators don't need
+	// to run goimports after every protoc invocation. Failures here are
+	// generator bugs, not input bugs, so renderTemplate panics instead of
+	// silently surfacing an unreachable error.
+	return renderTemplate(serviceFileTmpl, data)
 }
 
 func chiMethodName(httpMethod string) string {

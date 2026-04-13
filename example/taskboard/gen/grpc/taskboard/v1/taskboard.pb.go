@@ -1001,6 +1001,170 @@ func (x *TaskEvent) GetTask() *Task {
 	return nil
 }
 
+// TaskCreatedEvent is emitted by the gRPC backend whenever a new task lands
+// on the board. PUBLIC + BOTH means workers see it via the durable queue
+// AND every connected browser receives a real-time WS notification.
+type TaskCreatedEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Priority      TaskPriority           `protobuf:"varint,3,opt,name=priority,proto3,enum=taskboard.v1.TaskPriority" json:"priority,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskCreatedEvent) Reset() {
+	*x = TaskCreatedEvent{}
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskCreatedEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskCreatedEvent) ProtoMessage() {}
+
+func (x *TaskCreatedEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskCreatedEvent.ProtoReflect.Descriptor instead.
+func (*TaskCreatedEvent) Descriptor() ([]byte, []int) {
+	return file_taskboard_v1_taskboard_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *TaskCreatedEvent) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskCreatedEvent) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *TaskCreatedEvent) GetPriority() TaskPriority {
+	if x != nil {
+		return x.Priority
+	}
+	return TaskPriority_TASK_PRIORITY_UNSPECIFIED
+}
+
+// TaskCompletedEvent is a fan-out notification. No durable consumer needs
+// it (status is already in the database), but every browser tab gets to
+// celebrate the completion.
+type TaskCompletedEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	AssigneeId    string                 `protobuf:"bytes,2,opt,name=assignee_id,json=assigneeId,proto3" json:"assignee_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskCompletedEvent) Reset() {
+	*x = TaskCompletedEvent{}
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskCompletedEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskCompletedEvent) ProtoMessage() {}
+
+func (x *TaskCompletedEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskCompletedEvent.ProtoReflect.Descriptor instead.
+func (*TaskCompletedEvent) Descriptor() ([]byte, []int) {
+	return file_taskboard_v1_taskboard_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *TaskCompletedEvent) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskCompletedEvent) GetAssigneeId() string {
+	if x != nil {
+		return x.AssigneeId
+	}
+	return ""
+}
+
+// TaskGCRequested is a worker-only signal — the housekeeping job that
+// purges stale tasks. No browser cares, hence INTERNAL.
+type TaskGCRequested struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OlderThanUnix int64                  `protobuf:"varint,1,opt,name=older_than_unix,json=olderThanUnix,proto3" json:"older_than_unix,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskGCRequested) Reset() {
+	*x = TaskGCRequested{}
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskGCRequested) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskGCRequested) ProtoMessage() {}
+
+func (x *TaskGCRequested) ProtoReflect() protoreflect.Message {
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskGCRequested.ProtoReflect.Descriptor instead.
+func (*TaskGCRequested) Descriptor() ([]byte, []int) {
+	return file_taskboard_v1_taskboard_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *TaskGCRequested) GetOlderThanUnix() int64 {
+	if x != nil {
+		return x.OlderThanUnix
+	}
+	return 0
+}
+
 type WatchTasksRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1009,7 +1173,7 @@ type WatchTasksRequest struct {
 
 func (x *WatchTasksRequest) Reset() {
 	*x = WatchTasksRequest{}
-	mi := &file_taskboard_v1_taskboard_proto_msgTypes[14]
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1021,7 +1185,7 @@ func (x *WatchTasksRequest) String() string {
 func (*WatchTasksRequest) ProtoMessage() {}
 
 func (x *WatchTasksRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_taskboard_v1_taskboard_proto_msgTypes[14]
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1034,7 +1198,7 @@ func (x *WatchTasksRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchTasksRequest.ProtoReflect.Descriptor instead.
 func (*WatchTasksRequest) Descriptor() ([]byte, []int) {
-	return file_taskboard_v1_taskboard_proto_rawDescGZIP(), []int{14}
+	return file_taskboard_v1_taskboard_proto_rawDescGZIP(), []int{17}
 }
 
 type BulkCreateTaskRequest struct {
@@ -1048,7 +1212,7 @@ type BulkCreateTaskRequest struct {
 
 func (x *BulkCreateTaskRequest) Reset() {
 	*x = BulkCreateTaskRequest{}
-	mi := &file_taskboard_v1_taskboard_proto_msgTypes[15]
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1060,7 +1224,7 @@ func (x *BulkCreateTaskRequest) String() string {
 func (*BulkCreateTaskRequest) ProtoMessage() {}
 
 func (x *BulkCreateTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_taskboard_v1_taskboard_proto_msgTypes[15]
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1073,7 +1237,7 @@ func (x *BulkCreateTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BulkCreateTaskRequest.ProtoReflect.Descriptor instead.
 func (*BulkCreateTaskRequest) Descriptor() ([]byte, []int) {
-	return file_taskboard_v1_taskboard_proto_rawDescGZIP(), []int{15}
+	return file_taskboard_v1_taskboard_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *BulkCreateTaskRequest) GetTitle() string {
@@ -1107,7 +1271,7 @@ type BulkCreateTaskResponse struct {
 
 func (x *BulkCreateTaskResponse) Reset() {
 	*x = BulkCreateTaskResponse{}
-	mi := &file_taskboard_v1_taskboard_proto_msgTypes[16]
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1119,7 +1283,7 @@ func (x *BulkCreateTaskResponse) String() string {
 func (*BulkCreateTaskResponse) ProtoMessage() {}
 
 func (x *BulkCreateTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_taskboard_v1_taskboard_proto_msgTypes[16]
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1132,7 +1296,7 @@ func (x *BulkCreateTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BulkCreateTaskResponse.ProtoReflect.Descriptor instead.
 func (*BulkCreateTaskResponse) Descriptor() ([]byte, []int) {
-	return file_taskboard_v1_taskboard_proto_rawDescGZIP(), []int{16}
+	return file_taskboard_v1_taskboard_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *BulkCreateTaskResponse) GetCreatedCount() int32 {
@@ -1159,7 +1323,7 @@ type ChatMessage struct {
 
 func (x *ChatMessage) Reset() {
 	*x = ChatMessage{}
-	mi := &file_taskboard_v1_taskboard_proto_msgTypes[17]
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1171,7 +1335,7 @@ func (x *ChatMessage) String() string {
 func (*ChatMessage) ProtoMessage() {}
 
 func (x *ChatMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_taskboard_v1_taskboard_proto_msgTypes[17]
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1184,7 +1348,7 @@ func (x *ChatMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatMessage.ProtoReflect.Descriptor instead.
 func (*ChatMessage) Descriptor() ([]byte, []int) {
-	return file_taskboard_v1_taskboard_proto_rawDescGZIP(), []int{17}
+	return file_taskboard_v1_taskboard_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ChatMessage) GetContent() string {
@@ -1205,7 +1369,7 @@ var File_taskboard_v1_taskboard_proto protoreflect.FileDescriptor
 
 const file_taskboard_v1_taskboard_proto_rawDesc = "" +
 	"\n" +
-	"\x1ctaskboard/v1/taskboard.proto\x12\ftaskboard.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x19protobridge/options.proto\"\xa1\x03\n" +
+	"\x1ctaskboard/v1/taskboard.proto\x12\ftaskboard.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x19protobridge/options.proto\x1a\x18protobridge/events.proto\"\xa1\x03\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
@@ -1275,7 +1439,17 @@ const file_taskboard_v1_taskboard_proto_rawDesc = "" +
 	"\tTaskEvent\x12\x1d\n" +
 	"\n" +
 	"event_type\x18\x01 \x01(\tR\teventType\x12&\n" +
-	"\x04task\x18\x02 \x01(\v2\x12.taskboard.v1.TaskR\x04task\"\x13\n" +
+	"\x04task\x18\x02 \x01(\v2\x12.taskboard.v1.TaskR\x04task\"\xef\x01\n" +
+	"\x10TaskCreatedEvent\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x126\n" +
+	"\bpriority\x18\x03 \x01(\x0e2\x1a.taskboard.v1.TaskPriorityR\bpriority:t\x92\x82\x19p\x10\x03 \x01*jFired when a task is created. Workers can pick it up from the durable queue; UIs see a flash notification.\"X\n" +
+	"\x12TaskCompletedEvent\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1f\n" +
+	"\vassignee_id\x18\x02 \x01(\tR\n" +
+	"assigneeId:\b\x92\x82\x19\x04\x10\x01 \x01\"L\n" +
+	"\x0fTaskGCRequested\x12&\n" +
+	"\x0folder_than_unix\x18\x01 \x01(\x03R\rolderThanUnix:\x11\x92\x82\x19\r\x10\x02\x1a\atask-gc \x02\"\x13\n" +
 	"\x11WatchTasksRequest\"\x87\x01\n" +
 	"\x15BulkCreateTaskRequest\x12\x14\n" +
 	"\x05title\x18\x01 \x01(\tR\x05title\x12 \n" +
@@ -1301,16 +1475,16 @@ const file_taskboard_v1_taskboard_proto_rawDesc = "" +
 	"\x17TASK_STATUS_IN_PROGRESS\x10\x02\x1a\x0f\xf2\xb6\x18\vin_progress\x12\x1e\n" +
 	"\x10TASK_STATUS_DONE\x10\x03\x1a\b\xf2\xb6\x18\x04done2Z\n" +
 	"\vAuthService\x12K\n" +
-	"\fAuthenticate\x12\x19.taskboard.v1.AuthRequest\x1a\x1a.taskboard.v1.AuthResponse\"\x04\xa0\xb6\x18\x012\xa9\t\n" +
-	"\vTaskService\x12\\\n" +
+	"\fAuthenticate\x12\x19.taskboard.v1.AuthRequest\x1a\x1a.taskboard.v1.AuthResponse\"\x04\xa0\xb6\x18\x012\xb9\t\n" +
+	"\vTaskService\x12`\n" +
 	"\n" +
-	"CreateTask\x12\x1f.taskboard.v1.CreateTaskRequest\x1a\x12.taskboard.v1.Task\"\x19ҵ\x18\auser_id\x82\xd3\xe4\x93\x02\b\"\x06/tasks\x12`\n" +
-	"\aGetTask\x12\x1c.taskboard.v1.GetTaskRequest\x1a\x12.taskboard.v1.Task\"#ҵ\x18\auser_id\x82\xd3\xe4\x93\x02\x12\x12\x10/tasks/{task_id}\x12f\n" +
+	"CreateTask\x12\x1f.taskboard.v1.CreateTaskRequest\x1a\x12.taskboard.v1.Task\"\x1dҵ\x18\auser_id\x90\xb8\x18\x01\x82\xd3\xe4\x93\x02\b\"\x06/tasks\x12d\n" +
+	"\aGetTask\x12\x1c.taskboard.v1.GetTaskRequest\x1a\x12.taskboard.v1.Task\"'ҵ\x18\auser_id\x90\xb8\x18\x01\x82\xd3\xe4\x93\x02\x12\x12\x10/tasks/{task_id}\x12j\n" +
 	"\n" +
-	"UpdateTask\x12\x1f.taskboard.v1.UpdateTaskRequest\x1a\x12.taskboard.v1.Task\"#ҵ\x18\auser_id\x82\xd3\xe4\x93\x02\x12\x1a\x10/tasks/{task_id}\x12t\n" +
+	"UpdateTask\x12\x1f.taskboard.v1.UpdateTaskRequest\x1a\x12.taskboard.v1.Task\"'ҵ\x18\auser_id\x90\xb8\x18\x01\x82\xd3\xe4\x93\x02\x12\x1a\x10/tasks/{task_id}\x12t\n" +
 	"\n" +
-	"DeleteTask\x12\x1f.taskboard.v1.DeleteTaskRequest\x1a .taskboard.v1.DeleteTaskResponse\"#ҵ\x18\auser_id\x82\xd3\xe4\x93\x02\x12*\x10/tasks/{task_id}\x12q\n" +
-	"\tListTasks\x12\x1e.taskboard.v1.ListTasksRequest\x1a\x1f.taskboard.v1.ListTasksResponse\"#ҵ\x18\auser_idڵ\x18\x06paging\x82\xd3\xe4\x93\x02\b\x12\x06/tasks\x12t\n" +
+	"DeleteTask\x12\x1f.taskboard.v1.DeleteTaskRequest\x1a .taskboard.v1.DeleteTaskResponse\"#ҵ\x18\auser_id\x82\xd3\xe4\x93\x02\x12*\x10/tasks/{task_id}\x12u\n" +
+	"\tListTasks\x12\x1e.taskboard.v1.ListTasksRequest\x1a\x1f.taskboard.v1.ListTasksResponse\"'ҵ\x18\auser_idڵ\x18\x06paging\x90\xb8\x18\x01\x82\xd3\xe4\x93\x02\b\x12\x06/tasks\x12t\n" +
 	"\n" +
 	"WatchTasks\x12\x1f.taskboard.v1.WatchTasksRequest\x1a\x17.taskboard.v1.TaskEvent\"*ҵ\x18\auser_id\xb2\xb6\x18\aprivate\x82\xd3\xe4\x93\x02\x0e\x12\f/tasks/watch0\x01\x12\x87\x01\n" +
 	"\x11TaskNotifications\x12\x1f.taskboard.v1.WatchTasksRequest\x1a\x17.taskboard.v1.TaskEvent\"6ҵ\x18\auser_id\xa8\xb6\x18\x01\xb2\xb6\x18\aprivate\x82\xd3\xe4\x93\x02\x16\x12\x14/tasks/notifications0\x01\x12\x89\x01\n" +
@@ -1331,7 +1505,7 @@ func file_taskboard_v1_taskboard_proto_rawDescGZIP() []byte {
 }
 
 var file_taskboard_v1_taskboard_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_taskboard_v1_taskboard_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_taskboard_v1_taskboard_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_taskboard_v1_taskboard_proto_goTypes = []any{
 	(TaskPriority)(0),              // 0: taskboard.v1.TaskPriority
 	(TaskStatus)(0),                // 1: taskboard.v1.TaskStatus
@@ -1349,18 +1523,21 @@ var file_taskboard_v1_taskboard_proto_goTypes = []any{
 	(*Paging)(nil),                 // 13: taskboard.v1.Paging
 	(*ListTasksResponse)(nil),      // 14: taskboard.v1.ListTasksResponse
 	(*TaskEvent)(nil),              // 15: taskboard.v1.TaskEvent
-	(*WatchTasksRequest)(nil),      // 16: taskboard.v1.WatchTasksRequest
-	(*BulkCreateTaskRequest)(nil),  // 17: taskboard.v1.BulkCreateTaskRequest
-	(*BulkCreateTaskResponse)(nil), // 18: taskboard.v1.BulkCreateTaskResponse
-	(*ChatMessage)(nil),            // 19: taskboard.v1.ChatMessage
-	nil,                            // 20: taskboard.v1.AuthRequest.HeadersEntry
+	(*TaskCreatedEvent)(nil),       // 16: taskboard.v1.TaskCreatedEvent
+	(*TaskCompletedEvent)(nil),     // 17: taskboard.v1.TaskCompletedEvent
+	(*TaskGCRequested)(nil),        // 18: taskboard.v1.TaskGCRequested
+	(*WatchTasksRequest)(nil),      // 19: taskboard.v1.WatchTasksRequest
+	(*BulkCreateTaskRequest)(nil),  // 20: taskboard.v1.BulkCreateTaskRequest
+	(*BulkCreateTaskResponse)(nil), // 21: taskboard.v1.BulkCreateTaskResponse
+	(*ChatMessage)(nil),            // 22: taskboard.v1.ChatMessage
+	nil,                            // 23: taskboard.v1.AuthRequest.HeadersEntry
 }
 var file_taskboard_v1_taskboard_proto_depIdxs = []int32{
 	0,  // 0: taskboard.v1.Task.priority:type_name -> taskboard.v1.TaskPriority
 	1,  // 1: taskboard.v1.Task.status:type_name -> taskboard.v1.TaskStatus
 	3,  // 2: taskboard.v1.Task.file:type_name -> taskboard.v1.FileAttachment
 	4,  // 3: taskboard.v1.Task.link:type_name -> taskboard.v1.LinkAttachment
-	20, // 4: taskboard.v1.AuthRequest.headers:type_name -> taskboard.v1.AuthRequest.HeadersEntry
+	23, // 4: taskboard.v1.AuthRequest.headers:type_name -> taskboard.v1.AuthRequest.HeadersEntry
 	0,  // 5: taskboard.v1.CreateTaskRequest.priority:type_name -> taskboard.v1.TaskPriority
 	0,  // 6: taskboard.v1.UpdateTaskRequest.priority:type_name -> taskboard.v1.TaskPriority
 	1,  // 7: taskboard.v1.UpdateTaskRequest.status:type_name -> taskboard.v1.TaskStatus
@@ -1369,34 +1546,35 @@ var file_taskboard_v1_taskboard_proto_depIdxs = []int32{
 	0,  // 10: taskboard.v1.ListTasksRequest.priority_filter:type_name -> taskboard.v1.TaskPriority
 	2,  // 11: taskboard.v1.ListTasksResponse.tasks:type_name -> taskboard.v1.Task
 	2,  // 12: taskboard.v1.TaskEvent.task:type_name -> taskboard.v1.Task
-	0,  // 13: taskboard.v1.BulkCreateTaskRequest.priority:type_name -> taskboard.v1.TaskPriority
-	5,  // 14: taskboard.v1.AuthService.Authenticate:input_type -> taskboard.v1.AuthRequest
-	7,  // 15: taskboard.v1.TaskService.CreateTask:input_type -> taskboard.v1.CreateTaskRequest
-	8,  // 16: taskboard.v1.TaskService.GetTask:input_type -> taskboard.v1.GetTaskRequest
-	9,  // 17: taskboard.v1.TaskService.UpdateTask:input_type -> taskboard.v1.UpdateTaskRequest
-	10, // 18: taskboard.v1.TaskService.DeleteTask:input_type -> taskboard.v1.DeleteTaskRequest
-	12, // 19: taskboard.v1.TaskService.ListTasks:input_type -> taskboard.v1.ListTasksRequest
-	16, // 20: taskboard.v1.TaskService.WatchTasks:input_type -> taskboard.v1.WatchTasksRequest
-	16, // 21: taskboard.v1.TaskService.TaskNotifications:input_type -> taskboard.v1.WatchTasksRequest
-	17, // 22: taskboard.v1.TaskService.BulkCreateTasks:input_type -> taskboard.v1.BulkCreateTaskRequest
-	19, // 23: taskboard.v1.TaskService.TaskChat:input_type -> taskboard.v1.ChatMessage
-	16, // 24: taskboard.v1.TaskService.ActivityFeed:input_type -> taskboard.v1.WatchTasksRequest
-	6,  // 25: taskboard.v1.AuthService.Authenticate:output_type -> taskboard.v1.AuthResponse
-	2,  // 26: taskboard.v1.TaskService.CreateTask:output_type -> taskboard.v1.Task
-	2,  // 27: taskboard.v1.TaskService.GetTask:output_type -> taskboard.v1.Task
-	2,  // 28: taskboard.v1.TaskService.UpdateTask:output_type -> taskboard.v1.Task
-	11, // 29: taskboard.v1.TaskService.DeleteTask:output_type -> taskboard.v1.DeleteTaskResponse
-	14, // 30: taskboard.v1.TaskService.ListTasks:output_type -> taskboard.v1.ListTasksResponse
-	15, // 31: taskboard.v1.TaskService.WatchTasks:output_type -> taskboard.v1.TaskEvent
-	15, // 32: taskboard.v1.TaskService.TaskNotifications:output_type -> taskboard.v1.TaskEvent
-	18, // 33: taskboard.v1.TaskService.BulkCreateTasks:output_type -> taskboard.v1.BulkCreateTaskResponse
-	19, // 34: taskboard.v1.TaskService.TaskChat:output_type -> taskboard.v1.ChatMessage
-	15, // 35: taskboard.v1.TaskService.ActivityFeed:output_type -> taskboard.v1.TaskEvent
-	25, // [25:36] is the sub-list for method output_type
-	14, // [14:25] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	0,  // 13: taskboard.v1.TaskCreatedEvent.priority:type_name -> taskboard.v1.TaskPriority
+	0,  // 14: taskboard.v1.BulkCreateTaskRequest.priority:type_name -> taskboard.v1.TaskPriority
+	5,  // 15: taskboard.v1.AuthService.Authenticate:input_type -> taskboard.v1.AuthRequest
+	7,  // 16: taskboard.v1.TaskService.CreateTask:input_type -> taskboard.v1.CreateTaskRequest
+	8,  // 17: taskboard.v1.TaskService.GetTask:input_type -> taskboard.v1.GetTaskRequest
+	9,  // 18: taskboard.v1.TaskService.UpdateTask:input_type -> taskboard.v1.UpdateTaskRequest
+	10, // 19: taskboard.v1.TaskService.DeleteTask:input_type -> taskboard.v1.DeleteTaskRequest
+	12, // 20: taskboard.v1.TaskService.ListTasks:input_type -> taskboard.v1.ListTasksRequest
+	19, // 21: taskboard.v1.TaskService.WatchTasks:input_type -> taskboard.v1.WatchTasksRequest
+	19, // 22: taskboard.v1.TaskService.TaskNotifications:input_type -> taskboard.v1.WatchTasksRequest
+	20, // 23: taskboard.v1.TaskService.BulkCreateTasks:input_type -> taskboard.v1.BulkCreateTaskRequest
+	22, // 24: taskboard.v1.TaskService.TaskChat:input_type -> taskboard.v1.ChatMessage
+	19, // 25: taskboard.v1.TaskService.ActivityFeed:input_type -> taskboard.v1.WatchTasksRequest
+	6,  // 26: taskboard.v1.AuthService.Authenticate:output_type -> taskboard.v1.AuthResponse
+	2,  // 27: taskboard.v1.TaskService.CreateTask:output_type -> taskboard.v1.Task
+	2,  // 28: taskboard.v1.TaskService.GetTask:output_type -> taskboard.v1.Task
+	2,  // 29: taskboard.v1.TaskService.UpdateTask:output_type -> taskboard.v1.Task
+	11, // 30: taskboard.v1.TaskService.DeleteTask:output_type -> taskboard.v1.DeleteTaskResponse
+	14, // 31: taskboard.v1.TaskService.ListTasks:output_type -> taskboard.v1.ListTasksResponse
+	15, // 32: taskboard.v1.TaskService.WatchTasks:output_type -> taskboard.v1.TaskEvent
+	15, // 33: taskboard.v1.TaskService.TaskNotifications:output_type -> taskboard.v1.TaskEvent
+	21, // 34: taskboard.v1.TaskService.BulkCreateTasks:output_type -> taskboard.v1.BulkCreateTaskResponse
+	22, // 35: taskboard.v1.TaskService.TaskChat:output_type -> taskboard.v1.ChatMessage
+	15, // 36: taskboard.v1.TaskService.ActivityFeed:output_type -> taskboard.v1.TaskEvent
+	26, // [26:37] is the sub-list for method output_type
+	15, // [15:26] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_taskboard_v1_taskboard_proto_init() }
@@ -1414,7 +1592,7 @@ func file_taskboard_v1_taskboard_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_taskboard_v1_taskboard_proto_rawDesc), len(file_taskboard_v1_taskboard_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   19,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

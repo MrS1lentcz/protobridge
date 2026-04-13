@@ -2,12 +2,13 @@ GOOGLEAPIS_DIR := $(shell find $$(go env GOMODCACHE) -path "*/grpc-ecosystem/grp
 PLUGIN_BIN     := ../../bin/protoc-gen-protobridge
 PROTO_FILE     := proto/taskboard/v1/taskboard.proto
 
-MCP_PLUGIN_BIN := ../../bin/protoc-gen-mcp
+MCP_PLUGIN_BIN    := ../../bin/protoc-gen-mcp
+EVENTS_PLUGIN_BIN := ../../bin/protoc-gen-events-go
 
-.PHONY: all plugin mcp-plugin proto-go proto-bridge proto-mcp server clean
+.PHONY: all plugin mcp-plugin events-plugin proto-go proto-bridge proto-mcp proto-events server clean
 
-# Build everything: plugins → gRPC stubs → REST proxy + MCP proxy
-all: plugin mcp-plugin proto-go proto-bridge proto-mcp
+# Build everything: plugins → gRPC stubs → REST proxy + MCP proxy + events
+all: plugin mcp-plugin events-plugin proto-go proto-bridge proto-mcp proto-events
 
 # 1. Build the protoc plugins
 plugin:
@@ -15,6 +16,9 @@ plugin:
 
 mcp-plugin:
 	go build -o $(MCP_PLUGIN_BIN) ../../cmd/protoc-gen-mcp/
+
+events-plugin:
+	go build -o $(EVENTS_PLUGIN_BIN) ../../cmd/protoc-gen-events-go/
 
 # 2. Generate Go + gRPC stubs (standard protoc-gen-go + protoc-gen-go-grpc)
 proto-go:
@@ -38,6 +42,14 @@ proto-mcp: mcp-plugin
 	PATH="../../bin:$$PATH" protoc \
 		--mcp_out=gen/mcp \
 		--mcp_opt=handler_pkg=github.com/mrs1lentcz/protobridge/example/taskboard/gen/mcp/handler,forward=user_id \
+		-I proto -I ../../proto -I "$(GOOGLEAPIS_DIR)" \
+		$(PROTO_FILE)
+
+# 5. Generate typed publishers / subscribers + AsyncAPI via protoc-gen-events-go
+proto-events: events-plugin
+	mkdir -p gen/events
+	PATH="../../bin:$$PATH" protoc \
+		--events-go_out=gen/events \
 		-I proto -I ../../proto -I "$(GOOGLEAPIS_DIR)" \
 		$(PROTO_FILE)
 

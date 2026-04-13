@@ -146,10 +146,7 @@ func TestGenerateServiceFile(t *testing.T) {
 	api := testAPI()
 	svc := api.Services[0]
 
-	content, err := generateServiceFile(svc, api)
-	if err != nil {
-		t.Fatalf("generateServiceFile() error: %v", err)
-	}
+	content := generateServiceFile(svc, api)
 
 	checks := []string{
 		"package handler",
@@ -237,10 +234,7 @@ func TestGenerateServiceFileWithQueryParamsTarget(t *testing.T) {
 		},
 	}
 
-	content, err := generateServiceFile(api.Services[0], api)
-	if err != nil {
-		t.Fatalf("generateServiceFile() error: %v", err)
-	}
+	content := generateServiceFile(api.Services[0], api)
 	if !strings.Contains(content, `DecodeQueryParams(r, req, "filter")`) {
 		t.Error("expected DecodeQueryParams with filter target")
 	}
@@ -249,10 +243,7 @@ func TestGenerateServiceFileWithQueryParamsTarget(t *testing.T) {
 func TestGenerateMain(t *testing.T) {
 	api := testAPI()
 
-	content, err := generateMain(api, "example.com/test/handler")
-	if err != nil {
-		t.Fatalf("generateMain() error: %v", err)
-	}
+	content := generateMain(api, "example.com/test/handler")
 
 	checks := []string{
 		"package main",
@@ -324,10 +315,7 @@ func TestGenerateMain_AuthOnlyService_NoRegisterCall(t *testing.T) {
 			OutputType:  &parser.MessageType{Name: "AuthResp", FullName: ".x.v1.AuthResp"},
 		},
 	}
-	content, err := generateMain(api, "example.com/test/handler")
-	if err != nil {
-		t.Fatalf("generateMain: %v", err)
-	}
+	content := generateMain(api, "example.com/test/handler")
 	if strings.Contains(content, "handler.RegisterAuthService(") {
 		t.Errorf("must not call registerAuthService when auth service has no REST endpoints:\n%s", content)
 	}
@@ -360,10 +348,7 @@ func TestGenerateMainNoAuth(t *testing.T) {
 		},
 	}
 
-	content, err := generateMain(api, "example.com/test/handler")
-	if err != nil {
-		t.Fatalf("generateMain() error: %v", err)
-	}
+	content := generateMain(api, "example.com/test/handler")
 	if !strings.Contains(content, "runtime.NoAuth()") {
 		t.Error("expected NoAuth() when no auth method is set")
 	}
@@ -791,10 +776,7 @@ func TestGenerateWSHandler(t *testing.T) {
 		},
 	}
 
-	content, err := generateWSHandler(svc, m)
-	if err != nil {
-		t.Fatalf("generateWSHandler() error: %v", err)
-	}
+	content := generateWSHandler(svc, m)
 
 	checks := []string{
 		"streamEventsWSHandler",
@@ -983,10 +965,7 @@ func TestGenerateServiceFile_HeaderWithHyphenIsValidIdentifier(t *testing.T) {
 			}},
 		}},
 	}
-	content, err := generateServiceFile(api.Services[0], api)
-	if err != nil {
-		t.Fatalf("generateServiceFile: %v", err)
-	}
+	content := generateServiceFile(api.Services[0], api)
 	if strings.Contains(content, "headerx-github-event") || strings.Contains(content, "headerX-github-event") {
 		t.Fatalf("emitted invalid Go identifier with hyphen:\n%s", content)
 	}
@@ -1019,10 +998,7 @@ func TestGenerateServiceFile_StreamingMarshalGoesThroughRuntime(t *testing.T) {
 			},
 		}},
 	}
-	content, err := generateServiceFile(api.Services[0], api)
-	if err != nil {
-		t.Fatalf("generateServiceFile: %v", err)
-	}
+	content := generateServiceFile(api.Services[0], api)
 	if strings.Contains(content, "protojson.Marshal(") {
 		t.Errorf("streaming handler must not call protojson.Marshal directly (bypasses x_var_name postprocess):\n%s", content)
 	}
@@ -1046,10 +1022,7 @@ func TestGenerateServiceFile_GoogleProtobufEmpty(t *testing.T) {
 			}},
 		}},
 	}
-	content, err := generateServiceFile(api.Services[0], api)
-	if err != nil {
-		t.Fatalf("generateServiceFile: %v", err)
-	}
+	content := generateServiceFile(api.Services[0], api)
 	// Match `pb.Empty` only when not preceded by alphanumerics (so emptypb.Empty doesn't trip).
 	if regexp.MustCompile(`\bpb\.Empty\b`).MatchString(content) {
 		t.Errorf("must not reference pb.Empty (external well-known type):\n%s", content)
@@ -1126,10 +1099,7 @@ func TestGenerateServiceFile_NoUnusedImports_UnaryOnly(t *testing.T) {
 	// protojson) — Go refuses to compile with unused imports, forcing
 	// integrators to run goimports after every codegen.
 	api := unaryOnlyAPI()
-	content, err := generateServiceFile(api.Services[0], api)
-	if err != nil {
-		t.Fatalf("generateServiceFile: %v", err)
-	}
+	content := generateServiceFile(api.Services[0], api)
 	assertImports(t, content, nil, []string{
 		"fmt",
 		"io",
@@ -1151,10 +1121,7 @@ func TestGenerateServiceFile_NoUnusedImports_SSE(t *testing.T) {
 			}},
 		}},
 	}
-	content, err := generateServiceFile(api.Services[0], api)
-	if err != nil {
-		t.Fatalf("generateServiceFile: %v", err)
-	}
+	content := generateServiceFile(api.Services[0], api)
 	assertImports(t, content,
 		[]string{"fmt", "io"},
 		[]string{"github.com/coder/websocket", "google.golang.org/protobuf/encoding/protojson"},
@@ -1176,10 +1143,7 @@ func TestGenerateServiceFile_NoUnusedImports_WSServerStream(t *testing.T) {
 			}},
 		}},
 	}
-	content, err := generateServiceFile(api.Services[0], api)
-	if err != nil {
-		t.Fatalf("generateServiceFile: %v", err)
-	}
+	content := generateServiceFile(api.Services[0], api)
 	assertImports(t, content,
 		[]string{"github.com/coder/websocket", "io"},
 		[]string{"fmt", "google.golang.org/protobuf/encoding/protojson"},
@@ -1191,10 +1155,7 @@ func TestGenerateServiceFile_GofmtStable_UnaryOnly(t *testing.T) {
 	// must not change a single byte. Catches stray blank lines / misaligned
 	// import groups that compile but make every regen produce a noisy diff.
 	api := unaryOnlyAPI()
-	content, err := generateServiceFile(api.Services[0], api)
-	if err != nil {
-		t.Fatalf("generateServiceFile: %v", err)
-	}
+	content := generateServiceFile(api.Services[0], api)
 	formatted, err := format.Source([]byte(content))
 	if err != nil {
 		t.Fatalf("format.Source: %v\n%s", err, content)
@@ -1219,10 +1180,7 @@ func TestGenerateServiceFile_StreamingOnly_NoContextImport(t *testing.T) {
 			}},
 		}},
 	}
-	content, err := generateServiceFile(api.Services[0], api)
-	if err != nil {
-		t.Fatalf("generateServiceFile: %v", err)
-	}
+	content := generateServiceFile(api.Services[0], api)
 	assertImports(t, content, nil, []string{"context"})
 }
 
@@ -1232,10 +1190,7 @@ func TestGenerateMain_NoUnusedImports(t *testing.T) {
 	// only the auth service's proto package is actually referenced from
 	// main.go's auth function.
 	api := testAPI()
-	content, err := generateMain(api, "example.com/test/handler")
-	if err != nil {
-		t.Fatalf("generateMain: %v", err)
-	}
+	content := generateMain(api, "example.com/test/handler")
 	imports := importsOf(t, content)
 	if _, ok := imports["fmt"]; ok {
 		t.Errorf("main.go must not import fmt (never used in template); imports=%v", keys(imports))
@@ -1250,10 +1205,7 @@ func TestGenerateMain_NoUnusedImports(t *testing.T) {
 
 func TestGenerateMain_GofmtStable(t *testing.T) {
 	api := testAPI()
-	content, err := generateMain(api, "example.com/test/handler")
-	if err != nil {
-		t.Fatalf("generateMain: %v", err)
-	}
+	content := generateMain(api, "example.com/test/handler")
 	formatted, err := format.Source([]byte(content))
 	if err != nil {
 		t.Fatalf("format.Source: %v\n%s", err, content)
@@ -1275,10 +1227,7 @@ func TestGenerateServiceFile_NoUnusedImports_WSBidi(t *testing.T) {
 			}},
 		}},
 	}
-	content, err := generateServiceFile(api.Services[0], api)
-	if err != nil {
-		t.Fatalf("generateServiceFile: %v", err)
-	}
+	content := generateServiceFile(api.Services[0], api)
 	assertImports(t, content,
 		// Bidi calls context.WithCancel(ctx) → context import is required
 		// even though there is no unary closure.
@@ -1415,6 +1364,50 @@ func TestGenerate_HandlerPkgResolveFails(t *testing.T) {
 	}
 	if _, err := Generate(testAPI(), Options{}); err == nil {
 		t.Fatal("expected error from resolveHandlerPkg")
+	}
+}
+
+func TestRun_GenerateError_SurfacesViaResponse(t *testing.T) {
+	// Run with a CWD where the handler_pkg resolver cannot find a go.mod
+	// and no explicit handler_pkg is set — Generate fails, the error must
+	// land in resp.Error rather than panic.
+	tmp := t.TempDir()
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd) //nolint:errcheck
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
+
+	req := &pluginpb.CodeGeneratorRequest{
+		FileToGenerate: []string{"test.proto"},
+		ProtoFile: []*descriptorpb.FileDescriptorProto{
+			{
+				Name:    strPtr("test.proto"),
+				Package: strPtr("test.v1"),
+				MessageType: []*descriptorpb.DescriptorProto{
+					{Name: strPtr("Req"), Field: []*descriptorpb.FieldDescriptorProto{
+						{Name: strPtr("id"), Number: int32Ptr(1), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()},
+					}},
+					{Name: strPtr("Resp"), Field: []*descriptorpb.FieldDescriptorProto{
+						{Name: strPtr("id"), Number: int32Ptr(1), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum()},
+					}},
+				},
+				Service: []*descriptorpb.ServiceDescriptorProto{{
+					Name: strPtr("S"),
+					Method: []*descriptorpb.MethodDescriptorProto{{
+						Name:       strPtr("Get"),
+						InputType:  strPtr(".test.v1.Req"),
+						OutputType: strPtr(".test.v1.Resp"),
+						Options:    makeHTTPOpts("GET", "/x"),
+					}},
+				}},
+			},
+		},
+	}
+	data, _ := proto.Marshal(req)
+	resp := Run(bytes.NewReader(data))
+	if resp.Error == nil {
+		t.Fatal("expected Generate failure to surface in resp.Error")
 	}
 }
 
@@ -1824,10 +1817,7 @@ func TestGenerateMainAuthServiceNotInServicesList(t *testing.T) {
 		},
 	}
 
-	content, err := generateMain(api, "example.com/test/handler")
-	if err != nil {
-		t.Fatalf("generateMain() error: %v", err)
-	}
+	content := generateMain(api, "example.com/test/handler")
 
 	// Auth service should get its own address variable
 	if !strings.Contains(content, "authServiceAddr") {
@@ -1855,10 +1845,7 @@ func TestGenerateWSHandlerServerStreaming(t *testing.T) {
 		OutputType: &parser.MessageType{Name: "Event", FullName: ".events.v1.Event"},
 	}
 
-	content, err := generateWSHandler(svc, m)
-	if err != nil {
-		t.Fatalf("generateWSHandler() error: %v", err)
-	}
+	content := generateWSHandler(svc, m)
 
 	checks := []string{
 		"streamEventsWSHandler",
@@ -1887,10 +1874,7 @@ func TestGenerateWSHandlerExcludeAuth(t *testing.T) {
 		OutputType:  &parser.MessageType{Name: "Resp", FullName: ".events.v1.Resp"},
 	}
 
-	content, err := generateWSHandler(svc, m)
-	if err != nil {
-		t.Fatalf("generateWSHandler() error: %v", err)
-	}
+	content := generateWSHandler(svc, m)
 
 	if !strings.Contains(content, "true") {
 		t.Error("expected ExcludeAuth=true in WS handler")
@@ -1997,10 +1981,7 @@ func TestGenerateServiceFileStreamingMethod(t *testing.T) {
 		},
 	}
 
-	content, err := generateServiceFile(api.Services[0], api)
-	if err != nil {
-		t.Fatalf("generateServiceFile() error: %v", err)
-	}
+	content := generateServiceFile(api.Services[0], api)
 
 	// Streaming methods should still produce a handler function
 	if !strings.Contains(content, "bidiChatHandler") {
@@ -2077,10 +2058,7 @@ func TestGenerateMainAuthServiceInServicesList(t *testing.T) {
 		},
 	}
 
-	content, err := generateMain(api, "example.com/test/handler")
-	if err != nil {
-		t.Fatalf("generateMain() error: %v", err)
-	}
+	content := generateMain(api, "example.com/test/handler")
 	if !strings.Contains(content, "AuthService") {
 		t.Error("expected AuthService in auth function")
 	}

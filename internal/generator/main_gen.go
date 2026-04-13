@@ -1,9 +1,6 @@
 package generator
 
 import (
-	"bytes"
-	"fmt"
-	"go/format"
 	"text/template"
 
 	"github.com/mrs1lentcz/protobridge/internal/parser"
@@ -305,7 +302,7 @@ type mainServiceData struct {
 	HasREST bool
 }
 
-func generateMain(api *parser.ParsedAPI, handlerPkg string) (string, error) {
+func generateMain(api *parser.ParsedAPI, handlerPkg string) string {
 	data := mainData{HandlerPkg: handlerPkg}
 
 	for _, svc := range api.Services {
@@ -361,13 +358,5 @@ func generateMain(api *parser.ParsedAPI, handlerPkg string) (string, error) {
 		}
 	}
 
-	var buf bytes.Buffer
-	if err := mainTmpl.Execute(&buf, data); err != nil {
-		return "", err
-	}
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		return "", fmt.Errorf("gofmt generated main: %w\n%s", err, buf.String())
-	}
-	return string(formatted), nil
+	return renderTemplate(mainTmpl, data)
 }

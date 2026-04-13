@@ -6,6 +6,7 @@ option go_package = "github.com/mrs1lentcz/protobridge/example/taskboard/gen/grp
 
 import "google/api/annotations.proto";
 import "protobridge/options.proto";
+import "protobridge/events.proto";
 
 // =============================================================================
 // Enums
@@ -129,6 +130,48 @@ message ListTasksResponse {
 message TaskEvent {
   string event_type = 1; // "created", "updated", "deleted"
   Task task = 2;
+}
+
+// =============================================================================
+// Events – pub/sub via protoc-gen-events-go
+// =============================================================================
+
+// TaskCreatedEvent is emitted by the gRPC backend whenever a new task lands
+// on the board. PUBLIC + BOTH means workers see it via the durable queue
+// AND every connected browser receives a real-time WS notification.
+message TaskCreatedEvent {
+  option (protobridge.event) = {
+    kind: BOTH
+    visibility: PUBLIC
+    description: "Fired when a task is created. Workers can pick it up from "
+                 "the durable queue; UIs see a flash notification."
+  };
+  string task_id = 1;
+  string title = 2;
+  TaskPriority priority = 3;
+}
+
+// TaskCompletedEvent is a fan-out notification. No durable consumer needs
+// it (status is already in the database), but every browser tab gets to
+// celebrate the completion.
+message TaskCompletedEvent {
+  option (protobridge.event) = {
+    kind: BROADCAST
+    visibility: PUBLIC
+  };
+  string task_id = 1;
+  string assignee_id = 2;
+}
+
+// TaskGCRequested is a worker-only signal — the housekeeping job that
+// purges stale tasks. No browser cares, hence INTERNAL.
+message TaskGCRequested {
+  option (protobridge.event) = {
+    kind: DURABLE
+    durable_group: "task-gc"
+    visibility: INTERNAL
+  };
+  int64 older_than_unix = 1;
 }
 
 message WatchTasksRequest {

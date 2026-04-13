@@ -139,10 +139,16 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type TaskServiceClient interface {
+	// Creates a new task on the board. Returns the created task with its
+	// server-assigned ID.
 	CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*Task, error)
+	// Returns a single task by ID.
 	GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*Task, error)
+	// Updates an existing task. Provide only the fields you want to change.
 	UpdateTask(ctx context.Context, in *UpdateTaskRequest, opts ...grpc.CallOption) (*Task, error)
 	DeleteTask(ctx context.Context, in *DeleteTaskRequest, opts ...grpc.CallOption) (*DeleteTaskResponse, error)
+	// Lists tasks for the authenticated user. Useful when the LLM needs an
+	// overview of what's open before suggesting next actions.
 	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*ListTasksResponse, error)
 	WatchTasks(ctx context.Context, in *WatchTasksRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskEvent], error)
 	TaskNotifications(ctx context.Context, in *WatchTasksRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskEvent], error)
@@ -296,10 +302,16 @@ type TaskService_ActivityFeedClient = grpc.ServerStreamingClient[TaskEvent]
 // All implementations must embed UnimplementedTaskServiceServer
 // for forward compatibility.
 type TaskServiceServer interface {
+	// Creates a new task on the board. Returns the created task with its
+	// server-assigned ID.
 	CreateTask(context.Context, *CreateTaskRequest) (*Task, error)
+	// Returns a single task by ID.
 	GetTask(context.Context, *GetTaskRequest) (*Task, error)
+	// Updates an existing task. Provide only the fields you want to change.
 	UpdateTask(context.Context, *UpdateTaskRequest) (*Task, error)
 	DeleteTask(context.Context, *DeleteTaskRequest) (*DeleteTaskResponse, error)
+	// Lists tasks for the authenticated user. Useful when the LLM needs an
+	// overview of what's open before suggesting next actions.
 	ListTasks(context.Context, *ListTasksRequest) (*ListTasksResponse, error)
 	WatchTasks(*WatchTasksRequest, grpc.ServerStreamingServer[TaskEvent]) error
 	TaskNotifications(*WatchTasksRequest, grpc.ServerStreamingServer[TaskEvent]) error
