@@ -3,6 +3,7 @@ package events_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -178,7 +179,8 @@ func TestBroadcast_LabelFilteringOnlyDeliversMatchingEvents(t *testing.T) {
 	bus := events.NewInMemoryBus()
 	t.Cleanup(func() { _ = bus.Close() })
 
-	srv := httptest.NewServer(events.NewBroadcastHandler(events.BroadcastConfig{
+	ready := make(chan struct{})
+	srv := httptest.NewServer(events.NewBroadcastHandler(events.WithOnSubscribed(events.BroadcastConfig{
 		Bus:      bus,
 		Subjects: []string{"orders.created"},
 		Marshal: func(subject string, payload []byte, headers map[string]string) ([]byte, error) {
@@ -189,7 +191,7 @@ func TestBroadcast_LabelFilteringOnlyDeliversMatchingEvents(t *testing.T) {
 		PrincipalLabels: func(_ *http.Request) (map[string]string, error) {
 			return map[string]string{"tenant_id": "abc"}, nil
 		},
-	}))
+	}, func() { close(ready) })))
 	t.Cleanup(srv.Close)
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
@@ -202,7 +204,7 @@ func TestBroadcast_LabelFilteringOnlyDeliversMatchingEvents(t *testing.T) {
 	}
 	defer conn.CloseNow() //nolint:errcheck
 
-	time.Sleep(50 * time.Millisecond)
+	<-ready // deterministic: wait until the handler has subscribed.
 
 	// Foreign-tenant event — must be filtered out by the server-side matcher.
 	pubCtx := events.WithLabels(ctx, "tenant_id", "xyz")
@@ -255,6 +257,12 @@ func TestBroadcast_PrincipalLabelsAuthFailureRejectsBeforeUpgrade(t *testing.T) 
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("expected 401 on PrincipalLabels error, got %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	// Response body must never contain the underlying auth error (could
+	// leak backend reasons / IDs). A generic "unauthorized" string is fine.
+	if strings.Contains(string(body), "subscribe down") {
+		t.Errorf("response body leaked internal auth error: %q", string(body))
 	}
 }
 

@@ -114,26 +114,18 @@ func MetricsHandler() http.Handler {
 }
 
 // ActiveConnections provides a gauge for tracking active WS/SSE connections.
-var activeConnectionsMeter = otel.Meter("protobridge")
+// The counter is instantiated once at init — Int64UpDownCounter only fails
+// on genuinely bogus instrument names, which we control.
+var activeConnectionsCounter, _ = otel.Meter("protobridge").Int64UpDownCounter("protobridge.active_connections")
 
 // RecordConnectionOpen increments the active connections gauge.
 func RecordConnectionOpen(connType string) {
-	counter, err := activeConnectionsMeter.Int64UpDownCounter("protobridge.active_connections")
-	if err != nil {
-		logError(err)
-		return
-	}
-	counter.Add(context.Background(), 1)
+	activeConnectionsCounter.Add(context.Background(), 1)
 }
 
 // RecordConnectionClose decrements the active connections gauge.
 func RecordConnectionClose(connType string) {
-	counter, err := activeConnectionsMeter.Int64UpDownCounter("protobridge.active_connections")
-	if err != nil {
-		logError(err)
-		return
-	}
-	counter.Add(context.Background(), -1)
+	activeConnectionsCounter.Add(context.Background(), -1)
 }
 
 // GracefulShutdownOTel flushes and shuts down OTel providers.

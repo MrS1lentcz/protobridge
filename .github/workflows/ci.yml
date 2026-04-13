@@ -26,8 +26,8 @@ jobs:
       - name: Test coverage
         run: |
           go test \
-            ./runtime/ ./runtime/mcp/ \
-            ./internal/generator/ ./internal/mcpgen/ ./internal/parser/ \
+            ./runtime/ ./runtime/mcp/ ./runtime/events/ \
+            ./internal/generator/ ./internal/mcpgen/ ./internal/parser/ ./internal/eventsgen/ \
             -coverprofile=coverage.out -covermode=atomic -count=1
           echo "### Coverage" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY

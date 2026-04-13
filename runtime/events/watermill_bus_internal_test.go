@@ -261,17 +261,26 @@ func TestSubscribeDurable_NonEmptyGroupLogsWarning(t *testing.T) {
 
 func TestDispatch_AckNackClosuresInvokeWatermillMessage(t *testing.T) {
 	// The Ack/Nack closures stamped on Message wrap the underlying
-	// watermill message. Generated subscriber helpers always call one of
-	// them before returning; cover the closures by exercising the explicit
-	// Ack path through a real handler call.
+	// watermill message. Generated subscriber helpers always call exactly
+	// one of them before returning; exercise each closure on a separate
+	// delivery so this test mirrors the intended handler contract (no
+	// double-termination of a single message).
 	bus := NewInMemoryBus()
 	t.Cleanup(func() { _ = bus.Close() })
 
-	done := make(chan struct{})
+	ackDone, nackDone := make(chan struct{}), make(chan struct{})
+	var once sync.Once
 	sub, err := bus.SubscribeBroadcast("x", func(_ context.Context, m Message) error {
-		m.Ack()  // exercises the Ack closure
-		m.Nack() // exercises the Nack closure (no-op for gochannel after ack)
-		close(done)
+		// First delivery acks; second nacks. Each delivery terminates
+		// via exactly one of the two closures.
+		select {
+		case <-ackDone:
+			m.Nack()
+			once.Do(func() { close(nackDone) })
+		default:
+			m.Ack()
+			close(ackDone)
+		}
 		return nil
 	})
 	if err != nil {
@@ -279,13 +288,15 @@ func TestDispatch_AckNackClosuresInvokeWatermillMessage(t *testing.T) {
 	}
 	defer sub.Unsubscribe() //nolint:errcheck
 
-	if err := bus.Publish(context.Background(), "x", []byte("p"), KindBroadcast, nil); err != nil {
-		t.Fatalf("publish: %v", err)
+	for i := 0; i < 2; i++ {
+		if err := bus.Publish(context.Background(), "x", []byte("p"), KindBroadcast, nil); err != nil {
+			t.Fatalf("publish %d: %v", i, err)
+		}
 	}
 	select {
-	case <-done:
+	case <-nackDone:
 	case <-time.After(2 * time.Second):
-		t.Fatal("handler never ran")
+		t.Fatal("both Ack and Nack closures should have fired across two deliveries")
 	}
 }
 
@@ -328,4 +339,26 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// failingCloser errors from Close — exercises the firstErr branch in
+// WatermillBus.Close() that swallows all but the first error.
+type failingCloser struct{ closeErr error }
+
+func (c *failingCloser) Publish(_ string, _ ...*wmsg.Message) error { return nil }
+func (c *failingCloser) Close() error                                { return c.closeErr }
+
+func TestClose_PropagatesFirstPublisherCloseError(t *testing.T) {
+	bus := &WatermillBus{
+		BroadcastPublisher: &failingCloser{closeErr: errors.New("pub1 down")},
+		DurablePublisher:   &failingCloser{closeErr: errors.New("pub2 down")},
+	}
+	err := bus.Close()
+	if err == nil || err.Error() != "pub1 down" {
+		t.Errorf("Close should surface the first publisher error; got %v", err)
+	}
+	// Second Close is a no-op (closed flag).
+	if err := bus.Close(); err != nil {
+		t.Errorf("second Close: %v", err)
+	}
 }

@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"strings"
 	"text/template"
 
 	"github.com/mrs1lentcz/protobridge/internal/parser"
@@ -33,6 +34,8 @@ import (
 	{{ if .HasAuth }}"google.golang.org/protobuf/proto"{{ end }}
 
 	"github.com/mrs1lentcz/protobridge/runtime"
+	{{ if .HasBroadcasts }}"github.com/mrs1lentcz/protobridge/runtime/events"
+	eventspb "{{ .EventsPkg }}"{{ end }}
 	"{{ .HandlerPkg }}"
 	{{ if .HasAuth }}{{ .AuthPkgAlias }} "{{ .AuthProtoImport }}"{{ end }}
 )
@@ -133,6 +136,48 @@ func main() {
 	{{ if .HasREST -}}
 	handler.Register{{ .ServiceName }}(r, {{ .EnvAddr }}, pool, scalingCfg, authFn)
 	{{ end -}}
+	{{ end }}
+
+	{{ if .HasBroadcasts -}}
+	// Events bus — mounted once, shared across every (protobridge.broadcast)
+	// service. PROTOBRIDGE_BUS_URL selects the backend (defaults to in-memory).
+	bus, err := events.NewBusFromEnv()
+	if err != nil {
+		log.Fatalf("events bus init: %v", err)
+	}
+	defer func() { _ = bus.(interface{ Close() error }).Close() }()
+
+	{{ if and .HasAuth .AuthHasLabels -}}
+	// Auth response declares a labels map — extract per request and feed
+	// into BroadcastConfig.PrincipalLabels so the WS handler filters events
+	// to the authenticated user's label set.
+	principalLabelsFn := func(r *http.Request) (map[string]string, error) {
+		conn, err := pool.ConnectScaled({{ .AuthAddrVar }}, scalingCfg)
+		if err != nil {
+			return nil, err
+		}
+		defer pool.Release({{ .AuthAddrVar }}, conn)
+		client := {{ .AuthPkgAlias }}.New{{ .AuthServiceName }}Client(conn)
+		headers := make(map[string]string)
+		for k, v := range r.Header {
+			if len(v) > 0 {
+				headers[k] = v[0]
+			}
+		}
+		resp, err := client.{{ .AuthMethodName }}(r.Context(), &{{ .AuthPkgAlias }}.{{ .AuthInputType }}{Headers: headers})
+		if err != nil {
+			return nil, err
+		}
+		return resp.GetLabels(), nil
+	}
+	{{ else -}}
+	var principalLabelsFn func(*http.Request) (map[string]string, error)
+	{{ end }}
+	{{ range .BroadcastServices }}
+	r.Method(http.MethodGet, {{ printf "%q" .Route }}, eventspb.New{{ .ServiceName }}Handler(bus, events.BroadcastConfig{
+		PrincipalLabels: principalLabelsFn,
+	}))
+	{{ end }}
 	{{ end }}
 
 	// Prometheus metrics endpoint
@@ -285,6 +330,43 @@ type mainData struct {
 	AuthPkgAlias    string // e.g. "authServicepb"
 	AuthProtoImport string // Go import path of the auth service's proto package
 	AuthInputType   string // e.g. "AuthRequest"
+	AuthHasLabels   bool   // AuthResponse has a `labels` field — enables per-principal filtering
+
+	// Broadcast WS endpoints generated from (protobridge.broadcast) services.
+	// Empty when no broadcast service is declared; main.go then omits the
+	// events-runtime import and bus initialisation.
+	HasBroadcasts     bool
+	EventsPkg         string // import path of the events plugin output
+	BroadcastServices []mainBroadcastData
+}
+
+type mainBroadcastData struct {
+	ServiceName string // source service name, e.g. "OrderBroadcast" — generated symbol is New<ServiceName>Handler
+	Route       string // HTTP path
+}
+
+// hasLabelsMapField returns true when the AuthResponse declares
+// `map<string, string> labels = N;`. The proto3 map encoding is a
+// TYPE_MESSAGE repeated field whose TypeName ends with ".LabelsEntry",
+// so we check all three facets to avoid false positives on a scalar
+// field that happens to be named `labels`.
+func hasLabelsMapField(mt *parser.MessageType) bool {
+	if mt == nil {
+		return false
+	}
+	for _, f := range mt.Fields {
+		if f.Name != "labels" {
+			continue
+		}
+		if !f.Repeated {
+			continue
+		}
+		if !strings.HasSuffix(f.TypeName, ".LabelsEntry") {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 type mainServiceData struct {
@@ -302,8 +384,16 @@ type mainServiceData struct {
 	HasREST bool
 }
 
-func generateMain(api *parser.ParsedAPI, handlerPkg string) string {
-	data := mainData{HandlerPkg: handlerPkg}
+func generateMain(api *parser.ParsedAPI, handlerPkg, eventsPkg string) string {
+	data := mainData{HandlerPkg: handlerPkg, EventsPkg: eventsPkg}
+
+	for _, bs := range api.BroadcastServices {
+		data.BroadcastServices = append(data.BroadcastServices, mainBroadcastData{
+			ServiceName: bs.Name,
+			Route:       bs.Route,
+		})
+	}
+	data.HasBroadcasts = len(data.BroadcastServices) > 0
 
 	for _, svc := range api.Services {
 		screaming := toScreamingSnake(svc.Name)
@@ -323,6 +413,7 @@ func generateMain(api *parser.ParsedAPI, handlerPkg string) string {
 
 	if api.AuthMethod != nil {
 		data.HasAuth = true
+		data.AuthHasLabels = hasLabelsMapField(api.AuthMethod.OutputType)
 		data.AuthServiceName = api.AuthMethod.ServiceName
 		data.AuthMethodName = api.AuthMethod.MethodName
 		data.AuthInputType = api.AuthMethod.InputType.Name

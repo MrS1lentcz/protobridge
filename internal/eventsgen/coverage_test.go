@@ -282,67 +282,77 @@ func TestAsyncAPI_EmptyAndCycle(t *testing.T) {
 	}
 }
 
-func TestTitleCaseLeaf(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"", ""},
-		{"myapp", "Myapp"},
-		{"Already", "Already"},
-		{"v1", "V1"},
-	}
-	for _, tc := range cases {
-		if got := titleCaseLeaf(tc.in); got != tc.want {
-			t.Errorf("titleCaseLeaf(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
-func TestBroadcastFilename(t *testing.T) {
+func TestBroadcastServiceFilename(t *testing.T) {
 	cases := []struct {
-		pkgPath, outputPkg, want string
+		svcName, outputPkg, want string
 	}{
-		{"example.com/foo/myapp", "events", "example_com_foo_myapp_broadcast.go"},
-		{"example.com/foo/myapp", "eventspkg", "eventspkg/example_com_foo_myapp_broadcast.go"},
-		{"single", "events", "single_broadcast.go"},
+		{"OrderBroadcast", "events", "order_broadcast_broadcast.go"},
+		{"OrderBroadcast", "eventspkg", "eventspkg/order_broadcast_broadcast.go"},
 	}
 	for _, tc := range cases {
-		if got := broadcastFilename(tc.pkgPath, tc.outputPkg); got != tc.want {
-			t.Errorf("broadcastFilename(%q, %q) = %q, want %q", tc.pkgPath, tc.outputPkg, got, tc.want)
+		if got := broadcastServiceFilename(tc.svcName, tc.outputPkg); got != tc.want {
+			t.Errorf("broadcastServiceFilename(%q, %q) = %q, want %q", tc.svcName, tc.outputPkg, got, tc.want)
 		}
 	}
 }
 
-func TestGenerateBroadcastFile_NoPublicEventsReturnsEmpty(t *testing.T) {
-	// Pure DURABLE event — must not produce a broadcast file.
-	api := &parserpkg.ParsedAPI{}
-	mt := &parserpkg.MessageType{Name: "X", FullName: ".x.X"}
-	api.Messages = map[string]*parserpkg.MessageType{mt.FullName: mt}
-	api.Events = []*parserpkg.Event{{
-		Message: mt, Subject: "x", Kind: parserpkg.EventKindDurable,
-		Visibility: parserpkg.EventVisibilityInternal, GoPackage: "example.com/x",
-	}}
-	got := generateBroadcastFile("example.com/x", "events", api.Events)
-	if got != "" {
-		t.Errorf("expected empty content for non-public-fan-out events, got: %s", got)
+func TestGenerateServiceBroadcastFile_SinglePackage(t *testing.T) {
+	mt := &parserpkg.MessageType{Name: "OrderCreated", FullName: ".myapp.OrderCreated"}
+	svc := &parserpkg.BroadcastService{
+		Name:         "OrderBroadcast",
+		Route:        "/api/v1/events/orders",
+		GoPackage:    "example.com/myapp",
+		ProtoPackage: "myapp",
+		Events: []*parserpkg.BroadcastEvent{{
+			OneofFieldName: "order_created",
+			Message:        mt,
+			Subject:        "order_created",
+			Visibility:     parserpkg.EventVisibilityPublic,
+			GoPackage:      "example.com/myapp",
+		}},
 	}
-}
-
-func TestGenerateBroadcastFile_PublicFanOutEmitsExportedSymbols(t *testing.T) {
-	mt := &parserpkg.MessageType{Name: "OrderCreated", FullName: ".x.OrderCreated"}
-	events := []*parserpkg.Event{{
-		Message: mt, Subject: "order_created",
-		Kind: parserpkg.EventKindBroadcast, Visibility: parserpkg.EventVisibilityPublic,
-		GoPackage: "example.com/myapp",
-	}}
-	got := generateBroadcastFile("example.com/myapp", "events", events)
+	got := generateServiceBroadcastFile(svc, "events")
 	for _, want := range []string{
-		"MyappBroadcastSubjects",
-		"MyappBroadcastEnvelope",
-		"RegisterMyappBroadcast",
-		`"order_created"`,
+		"OrderBroadcastRoute",
+		"/api/v1/events/orders",
+		"OrderBroadcastSubjects",
+		"OrderBroadcastEnvelope",
+		"NewOrderBroadcastHandler",
+		`pb "example.com/myapp"`,
+		"&pb.OrderCreated{}",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("missing %q in generated broadcast file:\n%s", want, got)
+			t.Errorf("missing %q in generated broadcast service file:\n%s", want, got)
 		}
+	}
+}
+
+func TestGenerateServiceBroadcastFile_MultiPackage(t *testing.T) {
+	orderMt := &parserpkg.MessageType{Name: "OrderCreated", FullName: ".orders.OrderCreated"}
+	shipMt := &parserpkg.MessageType{Name: "ShipmentDispatched", FullName: ".shipping.ShipmentDispatched"}
+	svc := &parserpkg.BroadcastService{
+		Name:         "LogisticsBroadcast",
+		Route:        "/api/v1/logistics",
+		GoPackage:    "example.com/orders",
+		ProtoPackage: "logistics",
+		Events: []*parserpkg.BroadcastEvent{
+			{OneofFieldName: "order_created", Message: orderMt, Subject: "order_created", GoPackage: "example.com/orders"},
+			{OneofFieldName: "shipment_dispatched", Message: shipMt, Subject: "shipment_dispatched", GoPackage: "example.com/shipping"},
+		},
+	}
+	got := generateServiceBroadcastFile(svc, "events")
+	// Multi-pkg → aliased imports, each message references its own alias.
+	if !strings.Contains(got, `pb0 "example.com/orders"`) {
+		t.Errorf("missing aliased import pb0:\n%s", got)
+	}
+	if !strings.Contains(got, `pb1 "example.com/shipping"`) {
+		t.Errorf("missing aliased import pb1:\n%s", got)
+	}
+	if !strings.Contains(got, "&pb0.OrderCreated{}") {
+		t.Errorf("OrderCreated should be resolved to pb0 alias:\n%s", got)
+	}
+	if !strings.Contains(got, "&pb1.ShipmentDispatched{}") {
+		t.Errorf("ShipmentDispatched should be resolved to pb1 alias:\n%s", got)
 	}
 }
 
@@ -358,3 +368,89 @@ func TestLastSegment(t *testing.T) {
 // helpers shared with plugin_test.go
 func sp(s string) *string { return &s }
 func i32(v int32) *int32  { return &v }
+
+func TestGenerate_IncludesBroadcastServices(t *testing.T) {
+	mt := &parserpkg.MessageType{Name: "OrderCreated", FullName: ".myapp.OrderCreated"}
+	api := &parserpkg.ParsedAPI{
+		Messages: map[string]*parserpkg.MessageType{mt.FullName: mt},
+		Events: []*parserpkg.Event{{
+			Message: mt, Subject: "order_created",
+			Kind: parserpkg.EventKindBroadcast, Visibility: parserpkg.EventVisibilityPublic,
+			GoPackage: "example.com/myapp",
+		}},
+		BroadcastServices: []*parserpkg.BroadcastService{{
+			Name:         "OrderBroadcast",
+			Route:        "/api/v1/events/orders",
+			GoPackage:    "example.com/myapp",
+			ProtoPackage: "myapp",
+			Events: []*parserpkg.BroadcastEvent{{
+				OneofFieldName: "order_created",
+				Message:        mt,
+				Subject:        "order_created",
+				GoPackage:      "example.com/myapp",
+			}},
+		}},
+	}
+	resp, err := Generate(api, Options{OutputPkg: "events"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, f := range resp.File {
+		if strings.Contains(f.GetName(), "order_broadcast_broadcast.go") {
+			found = true
+			if !strings.Contains(f.GetContent(), "NewOrderBroadcastHandler") {
+				t.Errorf("broadcast file missing handler symbol")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("broadcast service file not emitted; got %d files", len(resp.File))
+	}
+}
+
+func TestGenerateServiceBroadcastFile_EmptyGoPackageFallsBackToService(t *testing.T) {
+	// When BroadcastEvent.GoPackage is empty, the generator falls back to
+	// the service's GoPackage (covers both branches of the pkg-resolution
+	// conditionals).
+	mt := &parserpkg.MessageType{Name: "X", FullName: ".x.X"}
+	svc := &parserpkg.BroadcastService{
+		Name:      "XBroadcast",
+		Route:     "/x",
+		GoPackage: "example.com/x",
+		Events: []*parserpkg.BroadcastEvent{{
+			OneofFieldName: "x", Message: mt, Subject: "x",
+			// GoPackage intentionally empty.
+		}},
+	}
+	got := generateServiceBroadcastFile(svc, "events")
+	if !strings.Contains(got, `pb "example.com/x"`) {
+		t.Errorf("empty BroadcastEvent.GoPackage should fall back to service.GoPackage:\n%s", got)
+	}
+}
+
+func TestGenerate_MultipleBroadcastServicesSortedDeterministically(t *testing.T) {
+	a := &parserpkg.MessageType{Name: "A", FullName: ".x.A"}
+	b := &parserpkg.MessageType{Name: "B", FullName: ".x.B"}
+	api := &parserpkg.ParsedAPI{
+		Messages: map[string]*parserpkg.MessageType{a.FullName: a, b.FullName: b},
+		BroadcastServices: []*parserpkg.BroadcastService{
+			{Name: "ZBroadcast", Route: "/z", GoPackage: "example.com/x", Events: []*parserpkg.BroadcastEvent{{Message: b, Subject: "b", GoPackage: "example.com/x"}}},
+			{Name: "ABroadcast", Route: "/a", GoPackage: "example.com/x", Events: []*parserpkg.BroadcastEvent{{Message: a, Subject: "a", GoPackage: "example.com/x"}}},
+		},
+	}
+	resp, err := Generate(api, Options{OutputPkg: "events"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Collect broadcast-file names in emission order.
+	var names []string
+	for _, f := range resp.File {
+		if strings.Contains(f.GetName(), "_broadcast.go") {
+			names = append(names, f.GetName())
+		}
+	}
+	if len(names) != 2 || names[0] > names[1] {
+		t.Errorf("expected alphabetical order, got %v", names)
+	}
+}

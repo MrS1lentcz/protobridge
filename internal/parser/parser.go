@@ -67,6 +67,32 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 		}
 	}
 
+	// Index events by message FullName so broadcast envelope resolution
+	// can look up subject/visibility per oneof variant in O(1).
+	eventByFQN := make(map[string]*Event, len(api.Events))
+	for _, ev := range api.Events {
+		eventByFQN[ev.Message.FullName] = ev
+	}
+
+	// Second pass: collect (protobridge.broadcast) services. Validates
+	// shape (one server-streaming RPC, oneof'd envelope) and links each
+	// oneof variant back to its (protobridge.event) source.
+	for _, file := range req.ProtoFile {
+		pkg := file.GetPackage()
+		goPackage := extractGoPackage(file)
+		for _, svc := range file.Service {
+			bo, ok := getBroadcastOptions(svc)
+			if !ok {
+				continue
+			}
+			bs, err := buildBroadcastService(svc, bo, pkg, goPackage, api.Messages, eventByFQN)
+			if err != nil {
+				return nil, fmt.Errorf("broadcast service %s: %w", svc.GetName(), err)
+			}
+			api.BroadcastServices = append(api.BroadcastServices, bs)
+		}
+	}
+
 	// Only process files that were explicitly requested for generation.
 	filesToGenerate := make(map[string]bool)
 	for _, name := range req.FileToGenerate {

@@ -40,14 +40,21 @@ func WithLabels(ctx context.Context, kvs ...string) context.Context {
 	return context.WithValue(ctx, labelsCtxKey{}, merged)
 }
 
-// LabelsFromContext returns the labels previously stashed via WithLabels.
-// Returns an empty map (never nil) when no labels are set, so callers can
-// range over the result unconditionally.
+// LabelsFromContext returns a defensive copy of the labels previously
+// stashed via WithLabels. Returns an empty map (never nil) when no labels
+// are set, so callers can range over the result unconditionally. Copy
+// semantics protect the underlying context value from accidental mutation
+// across goroutines — a shared context is common on hot paths.
 func LabelsFromContext(ctx context.Context) map[string]string {
-	if v, ok := ctx.Value(labelsCtxKey{}).(map[string]string); ok && v != nil {
-		return v
+	v, ok := ctx.Value(labelsCtxKey{}).(map[string]string)
+	if !ok || v == nil {
+		return map[string]string{}
 	}
-	return map[string]string{}
+	out := make(map[string]string, len(v))
+	for k, val := range v {
+		out[k] = val
+	}
+	return out
 }
 
 // LabelsToHeaders prefixes every label key with labelHeaderPrefix and

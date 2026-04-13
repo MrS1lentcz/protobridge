@@ -243,7 +243,7 @@ func TestGenerateServiceFileWithQueryParamsTarget(t *testing.T) {
 func TestGenerateMain(t *testing.T) {
 	api := testAPI()
 
-	content := generateMain(api, "example.com/test/handler")
+	content := generateMain(api, "example.com/test/handler", "")
 
 	checks := []string{
 		"package main",
@@ -315,7 +315,7 @@ func TestGenerateMain_AuthOnlyService_NoRegisterCall(t *testing.T) {
 			OutputType:  &parser.MessageType{Name: "AuthResp", FullName: ".x.v1.AuthResp"},
 		},
 	}
-	content := generateMain(api, "example.com/test/handler")
+	content := generateMain(api, "example.com/test/handler", "")
 	if strings.Contains(content, "handler.RegisterAuthService(") {
 		t.Errorf("must not call registerAuthService when auth service has no REST endpoints:\n%s", content)
 	}
@@ -348,7 +348,7 @@ func TestGenerateMainNoAuth(t *testing.T) {
 		},
 	}
 
-	content := generateMain(api, "example.com/test/handler")
+	content := generateMain(api, "example.com/test/handler", "")
 	if !strings.Contains(content, "runtime.NoAuth()") {
 		t.Error("expected NoAuth() when no auth method is set")
 	}
@@ -1190,7 +1190,7 @@ func TestGenerateMain_NoUnusedImports(t *testing.T) {
 	// only the auth service's proto package is actually referenced from
 	// main.go's auth function.
 	api := testAPI()
-	content := generateMain(api, "example.com/test/handler")
+	content := generateMain(api, "example.com/test/handler", "")
 	imports := importsOf(t, content)
 	if _, ok := imports["fmt"]; ok {
 		t.Errorf("main.go must not import fmt (never used in template); imports=%v", keys(imports))
@@ -1205,7 +1205,7 @@ func TestGenerateMain_NoUnusedImports(t *testing.T) {
 
 func TestGenerateMain_GofmtStable(t *testing.T) {
 	api := testAPI()
-	content := generateMain(api, "example.com/test/handler")
+	content := generateMain(api, "example.com/test/handler", "")
 	formatted, err := format.Source([]byte(content))
 	if err != nil {
 		t.Fatalf("format.Source: %v\n%s", err, content)
@@ -1817,7 +1817,7 @@ func TestGenerateMainAuthServiceNotInServicesList(t *testing.T) {
 		},
 	}
 
-	content := generateMain(api, "example.com/test/handler")
+	content := generateMain(api, "example.com/test/handler", "")
 
 	// Auth service should get its own address variable
 	if !strings.Contains(content, "authServiceAddr") {
@@ -2058,7 +2058,7 @@ func TestGenerateMainAuthServiceInServicesList(t *testing.T) {
 		},
 	}
 
-	content := generateMain(api, "example.com/test/handler")
+	content := generateMain(api, "example.com/test/handler", "")
 	if !strings.Contains(content, "AuthService") {
 		t.Error("expected AuthService in auth function")
 	}
@@ -2267,5 +2267,116 @@ func TestGenerateOpenAPIOneofEmptyVariants(t *testing.T) {
 	// Empty oneof should NOT produce a comment
 	if strings.Contains(content, "# oneof: empty") {
 		t.Error("empty oneof should not produce a comment")
+	}
+}
+
+func TestHasLabelsMapField(t *testing.T) {
+	labelsMap := &parser.MessageType{
+		Name: "AuthResponse", FullName: ".auth.AuthResponse",
+		Fields: []*parser.Field{
+			{Name: "user_id", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+			{Name: "labels", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".auth.AuthResponse.LabelsEntry", Repeated: true},
+		},
+	}
+	if !hasLabelsMapField(labelsMap) {
+		t.Error("expected AuthResponse with LabelsEntry map field to be detected")
+	}
+
+	scalarLabels := &parser.MessageType{
+		Name: "AuthResponse",
+		Fields: []*parser.Field{
+			{Name: "labels", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+		},
+	}
+	if hasLabelsMapField(scalarLabels) {
+		t.Error("scalar `labels` field must not be mistaken for a map")
+	}
+
+	// Repeated non-map (TypeName without LabelsEntry suffix) must also be rejected.
+	wrongSuffix := &parser.MessageType{
+		Name: "AuthResponse",
+		Fields: []*parser.Field{
+			{Name: "labels", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".auth.Label", Repeated: true},
+		},
+	}
+	if hasLabelsMapField(wrongSuffix) {
+		t.Error("repeated message field without LabelsEntry suffix must not count as labels map")
+	}
+
+	if hasLabelsMapField(nil) {
+		t.Error("nil message must return false")
+	}
+}
+
+func TestGenerateMain_WithBroadcasts(t *testing.T) {
+	api := &parser.ParsedAPI{
+		BroadcastServices: []*parser.BroadcastService{{
+			Name:         "OrderBroadcast",
+			Route:        "/api/v1/events/orders",
+			GoPackage:    "example.com/myapp/events",
+			ProtoPackage: "myapp.events",
+			Events: []*parser.BroadcastEvent{{
+				OneofFieldName: "order_created",
+				Message:        &parser.MessageType{Name: "OrderCreated", FullName: ".myapp.events.OrderCreated"},
+				Subject:        "order_created",
+				GoPackage:      "example.com/myapp/events",
+			}},
+		}},
+	}
+
+	content := generateMain(api, "example.com/test/handler", "example.com/gen/events")
+	for _, want := range []string{
+		`"github.com/mrs1lentcz/protobridge/runtime/events"`,
+		`eventspb "example.com/gen/events"`,
+		"events.NewBusFromEnv()",
+		`"/api/v1/events/orders"`,
+		"eventspb.NewOrderBroadcastHandler(bus,",
+		"PrincipalLabels: principalLabelsFn",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("broadcast main.go missing %q\n---\n%s", want, content)
+		}
+	}
+
+	// Generated file parses as Go.
+	if _, err := parser2.ParseFile(token.NewFileSet(), "main.go", content, parser2.AllErrors); err != nil {
+		t.Errorf("generated broadcast main.go is not parseable Go: %v\n%s", err, content)
+	}
+}
+
+func TestGenerateMain_NoBroadcastsOmitsEventsImport(t *testing.T) {
+	api := testAPI()
+	content := generateMain(api, "example.com/test/handler", "")
+	// No broadcast services → no events-runtime import, no bus init.
+	for _, forbidden := range []string{
+		"runtime/events",
+		"events.NewBusFromEnv",
+		"eventspb",
+	} {
+		if strings.Contains(content, forbidden) {
+			t.Errorf("non-broadcast main.go must not contain %q", forbidden)
+		}
+	}
+}
+
+func TestGenerate_BroadcastWithoutEventsPkgErrors(t *testing.T) {
+	api := &parser.ParsedAPI{
+		BroadcastServices: []*parser.BroadcastService{{
+			Name: "OrderBroadcast", Route: "/x",
+			Events: []*parser.BroadcastEvent{{OneofFieldName: "x", Message: &parser.MessageType{Name: "X"}, Subject: "x"}},
+		}},
+	}
+	if _, err := Generate(api, Options{HandlerPkg: "example.com/h"}); err == nil || !strings.Contains(err.Error(), "events_pkg") {
+		t.Errorf("expected events_pkg error, got %v", err)
+	}
+}
+
+func TestParseOptions_EventsPkg(t *testing.T) {
+	opts, err := ParseOptions("events_pkg=example.com/gen/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.EventsPkg != "example.com/gen/events" {
+		t.Errorf("EventsPkg: %q", opts.EventsPkg)
 	}
 }

@@ -65,6 +65,13 @@ type BroadcastConfig struct {
 	// Logger receives marshaler errors (one bad event dropped, stream
 	// stays alive). Defaults to slog.Default() when nil.
 	Logger *slog.Logger
+
+	// onSubscribed is a test-only readiness hook fired after every
+	// SubscribeBroadcast has registered but before the handler blocks on
+	// the outbound select. Lets deterministic tests avoid time.Sleep
+	// warm-ups. Intentionally unexported — production callers don't need
+	// this and shouldn't depend on it.
+	onSubscribed func()
 }
 
 // NewBroadcastHandler returns an http.Handler that upgrades the request to
@@ -92,7 +99,16 @@ func NewBroadcastHandler(cfg BroadcastConfig) http.Handler {
 		if cfg.PrincipalLabels != nil {
 			pl, err := cfg.PrincipalLabels(r)
 			if err != nil {
-				http.Error(w, "unauthorized: "+err.Error(), http.StatusUnauthorized)
+				// Never leak the underlying error to the client — it may
+				// carry backend reasons or identifiers. Log via cfg.Logger
+				// (defaults to slog.Default) so operators still see it.
+				logger := cfg.Logger
+				if logger == nil {
+					logger = slog.Default()
+				}
+				logger.Warn("events: broadcast principal labels resolution failed",
+					"remote", r.RemoteAddr, "err", err)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 			principalLabels = pl
@@ -164,6 +180,9 @@ func NewBroadcastHandler(cfg BroadcastConfig) http.Handler {
 				return
 			}
 			subs = append(subs, sub)
+		}
+		if cfg.onSubscribed != nil {
+			cfg.onSubscribed()
 		}
 
 		// Reader goroutine: detect client disconnect / ping. mcp-go has its

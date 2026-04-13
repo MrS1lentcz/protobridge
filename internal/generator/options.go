@@ -14,6 +14,12 @@ type Options struct {
 	// subpackage that main.go imports. Required, but resolveHandlerPkg
 	// can auto-detect it for the common layouts.
 	HandlerPkg string
+
+	// EventsPkg is the full Go import path of the generated events package
+	// (the output of protoc-gen-events-go). Required only when the API has
+	// at least one (protobridge.broadcast) service — main.go must import
+	// the generated `New<Svc>Handler` to mount the WS endpoint.
+	EventsPkg string
 }
 
 // ParseOptions parses the protoc plugin parameter string. Format follows the
@@ -36,6 +42,8 @@ func ParseOptions(raw string) (Options, error) {
 		switch k {
 		case "handler_pkg":
 			opts.HandlerPkg = v
+		case "events_pkg":
+			opts.EventsPkg = v
 		default:
 			return opts, fmt.Errorf("unknown plugin option %q", k)
 		}
