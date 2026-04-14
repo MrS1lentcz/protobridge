@@ -248,7 +248,7 @@ hub := events.NewBroadcastHub(ctx, events.BroadcastConfig{
 r.Method(http.MethodGet, "/api/events/orders", hub)
 ```
 
-A browser opens `ws://api/api/events/orders` and receives every PUBLIC fan-out event in the service as it happens:
+A browser opens `ws://api/events/orders` and receives every PUBLIC fan-out event in the service as it happens:
 
 ```json
 {"subject": "order_created", "labels": {"tenant_id": "abc"}, "event": {"order_id": "o-1", "total_cents": 12000}}

@@ -467,18 +467,26 @@ func TestGenerate_MultipleBroadcastServicesSortedDeterministically(t *testing.T)
 	}
 }
 
-func TestSnakeToPascal(t *testing.T) {
+func TestGoCamelCase(t *testing.T) {
+	// Cases mirror google.golang.org/protobuf/internal/strs.GoCamelCase so a
+	// drift from upstream protoc-gen-go is caught here instead of producing
+	// generated code that doesn't compile.
 	cases := map[string]string{
-		"":                       "",
-		"foo":                    "Foo",
-		"foo_bar":                "FooBar",
-		"task_created_event":     "TaskCreatedEvent",
-		"a__b":                   "AB", // empty segment between underscores
-		"already_PascalCase":     "AlreadyPascalCase",
+		"":                   "",
+		"foo":                "Foo",
+		"foo_bar":            "FooBar",
+		"task_created_event": "TaskCreatedEvent",
+		"a__b":               "A_B",          // empty segment keeps the underscore
+		"_foo":               "XFoo",         // leading _ → X (Go can't start with _)
+		"foo_":               "Foo_",         // trailing _ kept verbatim
+		"foo.bar":            "FooBar",       // .lower elides the dot
+		"foo.Bar":            "Foo_Bar",      // .upper preserves as _
+		"http_url":           "HttpUrl",      // no initialism normalisation
+		"field_1_name":       "Field_1Name",  // digit forms its own word
 	}
 	for in, want := range cases {
-		if got := snakeToPascal(in); got != want {
-			t.Errorf("snakeToPascal(%q) = %q, want %q", in, got, want)
+		if got := goCamelCase(in); got != want {
+			t.Errorf("goCamelCase(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

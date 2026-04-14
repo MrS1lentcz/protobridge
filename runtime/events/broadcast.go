@@ -28,9 +28,10 @@ type BroadcastFrame struct {
 //
 // Run blocks until ctx is cancelled or the source decides to give up
 // permanently. Implementations should handle transient errors internally
-// (reconnect, backoff). Returning a non-nil error tears the hub down — use
-// it only for programmer errors (misconfigured client, etc.). For UX
-// broadcast semantics, prefer logging and reconnecting over returning.
+// (reconnect, backoff). Returning a non-nil error stops the source — the
+// hub logs it but stays serving (existing WS clients remain connected,
+// new ones can attach but receive no frames). For UX broadcast semantics,
+// prefer logging and reconnecting internally over returning.
 type BroadcastSource interface {
 	Run(ctx context.Context, out chan<- BroadcastFrame) error
 }
@@ -106,6 +107,12 @@ type BroadcastConfig struct {
 type BroadcastHub struct {
 	cfg BroadcastConfig
 
+	// ctx is the lifetime context passed to NewBroadcastHub. Cancellation
+	// stops the source goroutine, terminates the dispatch loop, and
+	// disconnects every active WS client (each connection's ctx is linked
+	// in ServeHTTP).
+	ctx context.Context
+
 	mu      sync.Mutex
 	clients map[*hubClient]struct{}
 }
@@ -135,6 +142,7 @@ func NewBroadcastHub(ctx context.Context, cfg BroadcastConfig) *BroadcastHub {
 	}
 	h := &BroadcastHub{
 		cfg:     cfg,
+		ctx:     ctx,
 		clients: make(map[*hubClient]struct{}),
 	}
 	go h.run(ctx)
@@ -154,14 +162,22 @@ func (h *BroadcastHub) run(ctx context.Context) {
 		return
 	}
 	in := make(chan BroadcastFrame, 64)
+	dispatchDone := make(chan struct{})
 
 	// Reader goroutine: dispatch every frame to every connected client.
+	// Exits when ctx is cancelled OR `in` is closed (which happens after
+	// Source.Run returns) — without the close, a Source that exits while
+	// ctx is still live would leak this goroutine forever.
 	go func() {
+		defer close(dispatchDone)
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case f := <-in:
+			case f, ok := <-in:
+				if !ok {
+					return
+				}
 				h.dispatch(f)
 			}
 		}
@@ -170,6 +186,8 @@ func (h *BroadcastHub) run(ctx context.Context) {
 	if err := h.cfg.Source.Run(ctx, in); err != nil && !errors.Is(err, context.Canceled) {
 		h.logger().Error("events: broadcast source terminated", "err", err)
 	}
+	close(in)
+	<-dispatchDone
 }
 
 func (h *BroadcastHub) dispatch(f BroadcastFrame) {
@@ -245,6 +263,20 @@ func (h *BroadcastHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
+
+	// Hub-lifetime cancellation: when the ctx passed to NewBroadcastHub is
+	// cancelled, every active WS connection must terminate too. Without
+	// this link only the source goroutine would stop; existing clients
+	// would sit waiting for r.Context() to die on its own.
+	if h.ctx != nil {
+		go func() {
+			select {
+			case <-h.ctx.Done():
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+	}
 
 	c := &hubClient{
 		out:             make(chan []byte, h.cfg.ClientBuffer),

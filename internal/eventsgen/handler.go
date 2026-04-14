@@ -7,9 +7,7 @@ package eventsgen
 import (
 	"fmt"
 	"sort"
-	"strings"
 	"text/template"
-	"unicode"
 
 	"github.com/mrs1lentcz/protobridge/internal/generator"
 	"github.com/mrs1lentcz/protobridge/internal/parser"
@@ -57,13 +55,11 @@ func generateServiceBroadcastFile(svc *parser.BroadcastService, outputPkg string
 		imports[i] = broadcastImport{Alias: alias, Path: p}
 	}
 	// svcAlias is the import alias under which the streaming service's gRPC
-	// stubs live. When the service's own package wasn't already imported by
-	// any of its events, append it; either way it gets its own alias to
-	// disambiguate from event packages.
+	// stubs live. If the service's own package is already in `imports` (any
+	// event lives in it), reuse that alias — adding a second import for the
+	// same path would not compile. Otherwise add a fresh import.
 	svcAlias := "svcpb"
-	if idx, ok := seen[svc.GoPackage]; ok && len(pkgs) == 1 {
-		// Single-package case: events live in the service's package, so
-		// reuse its alias instead of importing the same path twice.
+	if idx, ok := seen[svc.GoPackage]; ok {
 		svcAlias = imports[idx].Alias
 	} else {
 		imports = append(imports, broadcastImport{Alias: svcAlias, Path: svc.GoPackage})
@@ -79,7 +75,7 @@ func generateServiceBroadcastFile(svc *parser.BroadcastService, outputPkg string
 			MessageName:    ev.Message.Name,
 			Subject:        ev.Subject,
 			Alias:          imports[seen[pkg]].Alias,
-			OneofFieldName: snakeToPascal(ev.OneofFieldName),
+			OneofFieldName: goCamelCase(ev.OneofFieldName),
 		})
 	}
 
@@ -97,20 +93,47 @@ func generateServiceBroadcastFile(svc *parser.BroadcastService, outputPkg string
 	return generator.RenderTemplate(broadcastServiceTmpl, data)
 }
 
-// snakeToPascal converts "task_created_event" to "TaskCreatedEvent" — the
-// Go field name protoc-gen-go emits for a snake_case proto field.
-func snakeToPascal(s string) string {
-	parts := strings.Split(s, "_")
-	for i, p := range parts {
-		if p == "" {
-			continue
+// goCamelCase mirrors protoc-gen-go's camel-casing for proto identifiers used
+// as Go names — verbatim port of google.golang.org/protobuf/internal/strs
+// .GoCamelCase (which is internal and can't be imported). Used to derive
+// oneof wrapper struct names (e.g. `Envelope_<FieldName>`) and accessors so
+// generated code matches what protoc-gen-go emits next to it.
+//
+// Notable rules: leading underscore becomes 'X' (Go can't start with _),
+// internal `_<lower>` drops the underscore and capitalises, dots become '_',
+// digits stay where they are. Initialisms like HTTP/URL are NOT normalised —
+// protoc-gen-go doesn't normalise them either, so the output stays in lock-step.
+func goCamelCase(s string) string {
+	var b []byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '.' && i+1 < len(s) && isASCIILower(s[i+1]):
+			// Skip '.' when followed by lowercase — historic behaviour.
+		case c == '.':
+			b = append(b, '_')
+		case c == '_' && (i == 0 || s[i-1] == '.'):
+			b = append(b, 'X')
+		case c == '_' && i+1 < len(s) && isASCIILower(s[i+1]):
+			// Drop '_' before a lowercase letter; the loop's default branch
+			// will uppercase that letter on the next iteration.
+		case isASCIIDigit(c):
+			b = append(b, c)
+		default:
+			if isASCIILower(c) {
+				c -= 'a' - 'A'
+			}
+			b = append(b, c)
+			for ; i+1 < len(s) && isASCIILower(s[i+1]); i++ {
+				b = append(b, s[i+1])
+			}
 		}
-		runes := []rune(p)
-		runes[0] = unicode.ToUpper(runes[0])
-		parts[i] = string(runes)
 	}
-	return strings.Join(parts, "")
+	return string(b)
 }
+
+func isASCIILower(c byte) bool { return 'a' <= c && c <= 'z' }
+func isASCIIDigit(c byte) bool { return '0' <= c && c <= '9' }
 
 type broadcastImport struct {
 	Alias string
