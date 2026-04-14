@@ -298,11 +298,14 @@ func TestBroadcastServiceFilename(t *testing.T) {
 
 func TestGenerateServiceBroadcastFile_SinglePackage(t *testing.T) {
 	mt := &parserpkg.MessageType{Name: "OrderCreated", FullName: ".myapp.OrderCreated"}
+	envMt := &parserpkg.MessageType{Name: "OrderEnvelope", FullName: ".myapp.OrderEnvelope"}
 	svc := &parserpkg.BroadcastService{
 		Name:         "OrderBroadcast",
+		MethodName:   "Stream",
 		Route:        "/api/v1/events/orders",
 		GoPackage:    "example.com/myapp",
 		ProtoPackage: "myapp",
+		Envelope:     envMt,
 		Events: []*parserpkg.BroadcastEvent{{
 			OneofFieldName: "order_created",
 			Message:        mt,
@@ -317,7 +320,9 @@ func TestGenerateServiceBroadcastFile_SinglePackage(t *testing.T) {
 		"/api/v1/events/orders",
 		"OrderBroadcastSubjects",
 		"OrderBroadcastEnvelope",
-		"NewOrderBroadcastHandler",
+		"NewOrderBroadcastSource",
+		"NewOrderBroadcastServer",
+		"RegisterOrderBroadcastBroadcast",
 		`pb "example.com/myapp"`,
 		"&pb.OrderCreated{}",
 	} {
@@ -330,11 +335,14 @@ func TestGenerateServiceBroadcastFile_SinglePackage(t *testing.T) {
 func TestGenerateServiceBroadcastFile_MultiPackage(t *testing.T) {
 	orderMt := &parserpkg.MessageType{Name: "OrderCreated", FullName: ".orders.OrderCreated"}
 	shipMt := &parserpkg.MessageType{Name: "ShipmentDispatched", FullName: ".shipping.ShipmentDispatched"}
+	envMt := &parserpkg.MessageType{Name: "LogisticsEnvelope", FullName: ".logistics.LogisticsEnvelope"}
 	svc := &parserpkg.BroadcastService{
 		Name:         "LogisticsBroadcast",
+		MethodName:   "Stream",
 		Route:        "/api/v1/logistics",
 		GoPackage:    "example.com/orders",
 		ProtoPackage: "logistics",
+		Envelope:     envMt,
 		Events: []*parserpkg.BroadcastEvent{
 			{OneofFieldName: "order_created", Message: orderMt, Subject: "order_created", GoPackage: "example.com/orders"},
 			{OneofFieldName: "shipment_dispatched", Message: shipMt, Subject: "shipment_dispatched", GoPackage: "example.com/shipping"},
@@ -380,9 +388,11 @@ func TestGenerate_IncludesBroadcastServices(t *testing.T) {
 		}},
 		BroadcastServices: []*parserpkg.BroadcastService{{
 			Name:         "OrderBroadcast",
+			MethodName:   "Stream",
 			Route:        "/api/v1/events/orders",
 			GoPackage:    "example.com/myapp",
 			ProtoPackage: "myapp",
+			Envelope:     &parserpkg.MessageType{Name: "OrderEnvelope", FullName: ".myapp.OrderEnvelope"},
 			Events: []*parserpkg.BroadcastEvent{{
 				OneofFieldName: "order_created",
 				Message:        mt,
@@ -399,8 +409,8 @@ func TestGenerate_IncludesBroadcastServices(t *testing.T) {
 	for _, f := range resp.File {
 		if strings.Contains(f.GetName(), "order_broadcast_broadcast.go") {
 			found = true
-			if !strings.Contains(f.GetContent(), "NewOrderBroadcastHandler") {
-				t.Errorf("broadcast file missing handler symbol")
+			if !strings.Contains(f.GetContent(), "RegisterOrderBroadcastBroadcast") {
+				t.Errorf("broadcast file missing register symbol")
 			}
 		}
 	}
@@ -415,9 +425,11 @@ func TestGenerateServiceBroadcastFile_EmptyGoPackageFallsBackToService(t *testin
 	// conditionals).
 	mt := &parserpkg.MessageType{Name: "X", FullName: ".x.X"}
 	svc := &parserpkg.BroadcastService{
-		Name:      "XBroadcast",
-		Route:     "/x",
-		GoPackage: "example.com/x",
+		Name:       "XBroadcast",
+		MethodName: "Stream",
+		Route:      "/x",
+		GoPackage:  "example.com/x",
+		Envelope:   &parserpkg.MessageType{Name: "XEnvelope", FullName: ".x.XEnvelope"},
 		Events: []*parserpkg.BroadcastEvent{{
 			OneofFieldName: "x", Message: mt, Subject: "x",
 			// GoPackage intentionally empty.
@@ -435,8 +447,8 @@ func TestGenerate_MultipleBroadcastServicesSortedDeterministically(t *testing.T)
 	api := &parserpkg.ParsedAPI{
 		Messages: map[string]*parserpkg.MessageType{a.FullName: a, b.FullName: b},
 		BroadcastServices: []*parserpkg.BroadcastService{
-			{Name: "ZBroadcast", Route: "/z", GoPackage: "example.com/x", Events: []*parserpkg.BroadcastEvent{{Message: b, Subject: "b", GoPackage: "example.com/x"}}},
-			{Name: "ABroadcast", Route: "/a", GoPackage: "example.com/x", Events: []*parserpkg.BroadcastEvent{{Message: a, Subject: "a", GoPackage: "example.com/x"}}},
+			{Name: "ZBroadcast", MethodName: "Stream", Route: "/z", GoPackage: "example.com/x", Envelope: &parserpkg.MessageType{Name: "ZEnvelope", FullName: ".x.ZEnvelope"}, Events: []*parserpkg.BroadcastEvent{{OneofFieldName: "b", Message: b, Subject: "b", GoPackage: "example.com/x"}}},
+			{Name: "ABroadcast", MethodName: "Stream", Route: "/a", GoPackage: "example.com/x", Envelope: &parserpkg.MessageType{Name: "AEnvelope", FullName: ".x.AEnvelope"}, Events: []*parserpkg.BroadcastEvent{{OneofFieldName: "a", Message: a, Subject: "a", GoPackage: "example.com/x"}}},
 		},
 	}
 	resp, err := Generate(api, Options{OutputPkg: "events"})
@@ -452,5 +464,21 @@ func TestGenerate_MultipleBroadcastServicesSortedDeterministically(t *testing.T)
 	}
 	if len(names) != 2 || names[0] > names[1] {
 		t.Errorf("expected alphabetical order, got %v", names)
+	}
+}
+
+func TestSnakeToPascal(t *testing.T) {
+	cases := map[string]string{
+		"":                       "",
+		"foo":                    "Foo",
+		"foo_bar":                "FooBar",
+		"task_created_event":     "TaskCreatedEvent",
+		"a__b":                   "AB", // empty segment between underscores
+		"already_PascalCase":     "AlreadyPascalCase",
+	}
+	for in, want := range cases {
+		if got := snakeToPascal(in); got != want {
+			t.Errorf("snakeToPascal(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

@@ -56,7 +56,7 @@ func broadcastService(name, route string, outputType string) *descriptorpb.Servi
 		Options: withBroadcast(route),
 		Method: []*descriptorpb.MethodDescriptorProto{{
 			Name:            sp("Stream"),
-			InputType:       sp(".myapp.events.StreamRequest"),
+			InputType:       sp(".google.protobuf.Empty"),
 			OutputType:      sp(outputType),
 			ServerStreaming: bp(true),
 		}},
@@ -267,6 +267,7 @@ func TestBuildBroadcastService_EnvelopeLostOneofVariant(t *testing.T) {
 		Name: sp("Svc"),
 		Method: []*descriptorpb.MethodDescriptorProto{{
 			Name:            sp("Stream"),
+			InputType:       sp(".google.protobuf.Empty"),
 			OutputType:      sp(".x.Envelope"),
 			ServerStreaming: bp(true),
 		}},
@@ -279,5 +280,201 @@ func TestBuildBroadcastService_EnvelopeLostOneofVariant(t *testing.T) {
 	)
 	if err == nil || !strings.Contains(err.Error(), "not annotated") {
 		t.Errorf("orphan oneof variant should fall through to not-annotated error, got %v", err)
+	}
+}
+
+func TestIsLabelsMapField(t *testing.T) {
+	stringField := func(name string) *Field {
+		return &Field{Name: name, Type: descriptorpb.FieldDescriptorProto_TYPE_STRING}
+	}
+	makeEntry := func(fields ...*Field) *MessageType {
+		return &MessageType{Name: "LabelsEntry", MapEntry: true, Fields: fields}
+	}
+	goodEntry := makeEntry(stringField("key"), stringField("value"))
+	messages := map[string]*MessageType{".x.Parent.LabelsEntry": goodEntry}
+	good := &Field{
+		Name:     "labels",
+		Type:     descriptorpb.FieldDescriptorProto_TYPE_MESSAGE,
+		TypeName: ".x.Parent.LabelsEntry",
+		Repeated: true,
+	}
+
+	cases := []struct {
+		name string
+		f    *Field
+		msgs map[string]*MessageType
+		want bool
+	}{
+		{"happy", good, messages, true},
+		{"wrong name", &Field{Name: "tags", Type: good.Type, TypeName: good.TypeName, Repeated: true}, messages, false},
+		{"not message type", &Field{Name: "labels", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING, Repeated: true}, messages, false},
+		{"not repeated", &Field{Name: "labels", Type: good.Type, TypeName: good.TypeName}, messages, false},
+		{"entry missing", good, map[string]*MessageType{}, false},
+		{"entry not map entry", good, map[string]*MessageType{".x.Parent.LabelsEntry": {Name: "X", Fields: goodEntry.Fields}}, false},
+		{"entry wrong field count", good, map[string]*MessageType{".x.Parent.LabelsEntry": {Name: "X", MapEntry: true, Fields: []*Field{stringField("key")}}}, false},
+		{"entry missing key", good, map[string]*MessageType{".x.Parent.LabelsEntry": makeEntry(stringField("notkey"), stringField("value"))}, false},
+		{"entry missing value", good, map[string]*MessageType{".x.Parent.LabelsEntry": makeEntry(stringField("key"), stringField("notvalue"))}, false},
+		{"key not string", good, map[string]*MessageType{".x.Parent.LabelsEntry": makeEntry(&Field{Name: "key", Type: descriptorpb.FieldDescriptorProto_TYPE_INT32}, stringField("value"))}, false},
+		{"value not string", good, map[string]*MessageType{".x.Parent.LabelsEntry": makeEntry(stringField("key"), &Field{Name: "value", Type: descriptorpb.FieldDescriptorProto_TYPE_INT32})}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isLabelsMapField(tc.f, tc.msgs); got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildBroadcastService_LabelsField(t *testing.T) {
+	// Envelope has the oneof + a `labels` map<string,string> — must be
+	// accepted and surfaced via BroadcastService.LabelsField.
+	envelope := &MessageType{
+		Name: "Envelope", FullName: ".x.Envelope",
+		Fields: []*Field{
+			{Name: "labels", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".x.Envelope.LabelsEntry", Repeated: true},
+			{Name: "thing", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".x.Thing", OneofIndex: oneofIdx(0)},
+		},
+		OneofDecls: []*OneofDecl{{Name: "event", Variants: []*OneofVariant{{FieldName: "thing", IsMessage: true, MessageName: "Thing"}}}},
+	}
+	thingMsg := &MessageType{Name: "Thing", FullName: ".x.Thing"}
+	labelsEntry := &MessageType{
+		Name: "LabelsEntry", MapEntry: true,
+		Fields: []*Field{
+			{Name: "key", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+			{Name: "value", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+		},
+	}
+	svc := &descriptorpb.ServiceDescriptorProto{
+		Name: sp("Svc"),
+		Method: []*descriptorpb.MethodDescriptorProto{{
+			Name:            sp("Stream"),
+			InputType:       sp(".google.protobuf.Empty"),
+			OutputType:      sp(".x.Envelope"),
+			ServerStreaming: bp(true),
+		}},
+	}
+	bs, err := buildBroadcastService(svc, &optionspb.BroadcastOptions{Route: "/x"},
+		"x", "example.com/x",
+		map[string]*MessageType{
+			".x.Envelope":             envelope,
+			".x.Thing":                thingMsg,
+			".x.Envelope.LabelsEntry": labelsEntry,
+		},
+		map[string]*Event{".x.Thing": {Message: thingMsg, Subject: "thing", Visibility: EventVisibilityPublic, GoPackage: "example.com/x"}},
+	)
+	if err != nil {
+		t.Fatalf("expected ok, got %v", err)
+	}
+	if bs.LabelsField == nil || bs.LabelsField.Name != "labels" {
+		t.Errorf("LabelsField not captured: %+v", bs.LabelsField)
+	}
+}
+
+func TestBuildBroadcastService_DuplicateLabelsRejected(t *testing.T) {
+	envelope := &MessageType{
+		Name: "Envelope", FullName: ".x.Envelope",
+		Fields: []*Field{
+			{Name: "labels", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".x.Envelope.LabelsEntry", Repeated: true},
+			{Name: "labels", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".x.Envelope.LabelsEntry", Repeated: true},
+			{Name: "thing", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".x.Thing", OneofIndex: oneofIdx(0)},
+		},
+		OneofDecls: []*OneofDecl{{Name: "event", Variants: []*OneofVariant{{FieldName: "thing", IsMessage: true, MessageName: "Thing"}}}},
+	}
+	thingMsg := &MessageType{Name: "Thing", FullName: ".x.Thing"}
+	labelsEntry := &MessageType{
+		Name: "LabelsEntry", MapEntry: true,
+		Fields: []*Field{
+			{Name: "key", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+			{Name: "value", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+		},
+	}
+	svc := &descriptorpb.ServiceDescriptorProto{
+		Name: sp("Svc"),
+		Method: []*descriptorpb.MethodDescriptorProto{{
+			Name: sp("Stream"), InputType: sp(".google.protobuf.Empty"),
+			OutputType: sp(".x.Envelope"), ServerStreaming: bp(true),
+		}},
+	}
+	_, err := buildBroadcastService(svc, &optionspb.BroadcastOptions{Route: "/x"},
+		"x", "example.com/x",
+		map[string]*MessageType{
+			".x.Envelope":             envelope,
+			".x.Thing":                thingMsg,
+			".x.Envelope.LabelsEntry": labelsEntry,
+		},
+		map[string]*Event{".x.Thing": {Message: thingMsg, Subject: "thing", Visibility: EventVisibilityPublic, GoPackage: "example.com/x"}},
+	)
+	if err == nil || !strings.Contains(err.Error(), "more than one labels map") {
+		t.Errorf("expected duplicate labels error, got %v", err)
+	}
+}
+
+func TestBuildBroadcastService_NonEmptyInputRejected(t *testing.T) {
+	envelope := envelopeWithOneof("Env", []struct{ field, typeName string }{{"x", ".x.X"}})
+	envMt := &MessageType{Name: "Env", FullName: ".x.Env"}
+	svc := &descriptorpb.ServiceDescriptorProto{
+		Name: sp("Svc"),
+		Method: []*descriptorpb.MethodDescriptorProto{{
+			Name: sp("Stream"), InputType: sp(".x.Custom"),
+			OutputType: sp(".x.Env"), ServerStreaming: bp(true),
+		}},
+	}
+	_ = envelope // descriptor not consulted here — model already provides envMt
+	_, err := buildBroadcastService(svc, &optionspb.BroadcastOptions{Route: "/x"},
+		"x", "example.com/x",
+		map[string]*MessageType{".x.Env": envMt},
+		map[string]*Event{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "google.protobuf.Empty") {
+		t.Errorf("expected Empty-required error, got %v", err)
+	}
+}
+
+func TestBuildBroadcastService_RouteValidation(t *testing.T) {
+	envMt := &MessageType{
+		Name: "Env", FullName: ".x.Env",
+		Fields:     []*Field{{Name: "thing", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".x.Thing", OneofIndex: oneofIdx(0)}},
+		OneofDecls: []*OneofDecl{{Name: "event", Variants: []*OneofVariant{{FieldName: "thing", IsMessage: true, MessageName: "Thing"}}}},
+	}
+	mkSvc := func() *descriptorpb.ServiceDescriptorProto {
+		return &descriptorpb.ServiceDescriptorProto{
+			Name: sp("Svc"),
+			Method: []*descriptorpb.MethodDescriptorProto{{
+				Name: sp("Stream"), InputType: sp(".google.protobuf.Empty"),
+				OutputType: sp(".x.Env"), ServerStreaming: bp(true),
+			}},
+		}
+	}
+	msgs := map[string]*MessageType{".x.Env": envMt, ".x.Thing": {Name: "Thing", FullName: ".x.Thing"}}
+	events := map[string]*Event{".x.Thing": {Message: msgs[".x.Thing"], Subject: "thing", Visibility: EventVisibilityPublic, GoPackage: "example.com/x"}}
+
+	if _, err := buildBroadcastService(mkSvc(), &optionspb.BroadcastOptions{Route: "no-slash"},
+		"x", "example.com/x", msgs, events); err == nil || !strings.Contains(err.Error(), "must start with") {
+		t.Errorf("expected leading-slash error, got %v", err)
+	}
+}
+
+func TestBuildBroadcastService_RejectsExtraScalarField(t *testing.T) {
+	envMt := &MessageType{
+		Name: "Env", FullName: ".x.Env",
+		Fields: []*Field{
+			{Name: "rogue", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+			{Name: "thing", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".x.Thing", OneofIndex: oneofIdx(0)},
+		},
+		OneofDecls: []*OneofDecl{{Name: "event", Variants: []*OneofVariant{{FieldName: "thing", IsMessage: true, MessageName: "Thing"}}}},
+	}
+	svc := &descriptorpb.ServiceDescriptorProto{
+		Name: sp("Svc"),
+		Method: []*descriptorpb.MethodDescriptorProto{{
+			Name: sp("Stream"), InputType: sp(".google.protobuf.Empty"),
+			OutputType: sp(".x.Env"), ServerStreaming: bp(true),
+		}},
+	}
+	msgs := map[string]*MessageType{".x.Env": envMt, ".x.Thing": {Name: "Thing", FullName: ".x.Thing"}}
+	events := map[string]*Event{".x.Thing": {Message: msgs[".x.Thing"], Subject: "thing", Visibility: EventVisibilityPublic, GoPackage: "example.com/x"}}
+	if _, err := buildBroadcastService(svc, &optionspb.BroadcastOptions{Route: "/x"},
+		"x", "example.com/x", msgs, events); err == nil || !strings.Contains(err.Error(), "extra fields are not supported") {
+		t.Errorf("expected extra-field error, got %v", err)
 	}
 }

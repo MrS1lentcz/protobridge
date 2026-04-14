@@ -11,6 +11,7 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -569,6 +570,123 @@ var TaskService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "ActivityFeed",
 			Handler:       _TaskService_ActivityFeed_Handler,
+			ServerStreams: true,
+		},
+	},
+	Metadata: "taskboard/v1/taskboard.proto",
+}
+
+const (
+	TaskBroadcast_Stream_FullMethodName = "/taskboard.v1.TaskBroadcast/Stream"
+)
+
+// TaskBroadcastClient is the client API for TaskBroadcast service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// TaskBroadcast is the system fan-out stream: every PUBLIC TaskCreatedEvent
+// and TaskCompletedEvent published on the bus is forwarded to every connected
+// browser tab. Backend serves this RPC via the generated bus→stream adapter
+// (NewTaskBroadcastServer); gateway opens one stream per pod and fans out to
+// WS clients.
+type TaskBroadcastClient interface {
+	Stream(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskBroadcastEnvelope], error)
+}
+
+type taskBroadcastClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewTaskBroadcastClient(cc grpc.ClientConnInterface) TaskBroadcastClient {
+	return &taskBroadcastClient{cc}
+}
+
+func (c *taskBroadcastClient) Stream(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskBroadcastEnvelope], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &TaskBroadcast_ServiceDesc.Streams[0], TaskBroadcast_Stream_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[emptypb.Empty, TaskBroadcastEnvelope]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskBroadcast_StreamClient = grpc.ServerStreamingClient[TaskBroadcastEnvelope]
+
+// TaskBroadcastServer is the server API for TaskBroadcast service.
+// All implementations must embed UnimplementedTaskBroadcastServer
+// for forward compatibility.
+//
+// TaskBroadcast is the system fan-out stream: every PUBLIC TaskCreatedEvent
+// and TaskCompletedEvent published on the bus is forwarded to every connected
+// browser tab. Backend serves this RPC via the generated bus→stream adapter
+// (NewTaskBroadcastServer); gateway opens one stream per pod and fans out to
+// WS clients.
+type TaskBroadcastServer interface {
+	Stream(*emptypb.Empty, grpc.ServerStreamingServer[TaskBroadcastEnvelope]) error
+	mustEmbedUnimplementedTaskBroadcastServer()
+}
+
+// UnimplementedTaskBroadcastServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedTaskBroadcastServer struct{}
+
+func (UnimplementedTaskBroadcastServer) Stream(*emptypb.Empty, grpc.ServerStreamingServer[TaskBroadcastEnvelope]) error {
+	return status.Errorf(codes.Unimplemented, "method Stream not implemented")
+}
+func (UnimplementedTaskBroadcastServer) mustEmbedUnimplementedTaskBroadcastServer() {}
+func (UnimplementedTaskBroadcastServer) testEmbeddedByValue()                       {}
+
+// UnsafeTaskBroadcastServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to TaskBroadcastServer will
+// result in compilation errors.
+type UnsafeTaskBroadcastServer interface {
+	mustEmbedUnimplementedTaskBroadcastServer()
+}
+
+func RegisterTaskBroadcastServer(s grpc.ServiceRegistrar, srv TaskBroadcastServer) {
+	// If the following call pancis, it indicates UnimplementedTaskBroadcastServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&TaskBroadcast_ServiceDesc, srv)
+}
+
+func _TaskBroadcast_Stream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(emptypb.Empty)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(TaskBroadcastServer).Stream(m, &grpc.GenericServerStream[emptypb.Empty, TaskBroadcastEnvelope]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskBroadcast_StreamServer = grpc.ServerStreamingServer[TaskBroadcastEnvelope]
+
+// TaskBroadcast_ServiceDesc is the grpc.ServiceDesc for TaskBroadcast service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var TaskBroadcast_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "taskboard.v1.TaskBroadcast",
+	HandlerType: (*TaskBroadcastServer)(nil),
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Stream",
+			Handler:       _TaskBroadcast_Stream_Handler,
 			ServerStreams: true,
 		},
 	},

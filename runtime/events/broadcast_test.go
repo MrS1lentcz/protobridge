@@ -3,7 +3,9 @@ package events_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,41 +17,73 @@ import (
 	"github.com/mrs1lentcz/protobridge/runtime/events"
 )
 
-// passthroughMarshaler wraps the raw payload as-is in the JSONEnvelope
-// shape — enough for the runtime broadcast tests, which don't depend on
-// proto encoding.
-func passthroughMarshaler(subject string, payload []byte, _ map[string]string) ([]byte, error) {
-	return events.MarshalJSONEnvelope(subject, json.RawMessage(payload), nil)
+// fakeSource is a hand-driven BroadcastSource: tests push frames via Send and
+// the source forwards them to the hub channel. Closing Done aborts Run with
+// io.EOF (as a real source would on a clean stream end).
+type fakeSource struct {
+	frames chan events.BroadcastFrame
 }
 
-func TestBroadcast_DeliversBusEventsAsJSONEnvelopes(t *testing.T) {
-	bus := events.NewInMemoryBus()
-	t.Cleanup(func() { _ = bus.Close() })
+func newFakeSource() *fakeSource {
+	return &fakeSource{frames: make(chan events.BroadcastFrame, 16)}
+}
 
-	srv := httptest.NewServer(events.NewBroadcastHandler(events.BroadcastConfig{
-		Bus:      bus,
-		Subjects: []string{"orders.created"},
-		Marshal:  passthroughMarshaler,
-	}))
-	t.Cleanup(srv.Close)
+func (s *fakeSource) Run(ctx context.Context, out chan<- events.BroadcastFrame) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case f, ok := <-s.frames:
+			if !ok {
+				return io.EOF
+			}
+			select {
+			case out <- f:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+}
 
+// passthroughMarshaler wraps the raw payload as-is in the JSONEnvelope shape —
+// runtime broadcast tests don't care about proto encoding.
+func passthroughMarshaler(subject string, payload []byte, labels map[string]string) ([]byte, error) {
+	return events.MarshalJSONEnvelope(subject, json.RawMessage(payload), labels)
+}
+
+func dialWS(t *testing.T, srv *httptest.Server) (*websocket.Conn, context.Context, context.CancelFunc) {
+	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
+		cancel()
 		t.Fatalf("dial: %v", err)
 	}
+	return conn, ctx, cancel
+}
+
+func TestBroadcastHub_DeliversFramesAsJSONEnvelopes(t *testing.T) {
+	src := newFakeSource()
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+
+	hub := events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:  src,
+		Marshal: passthroughMarshaler,
+	})
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+
+	conn, ctx, cancel := dialWS(t, srv)
+	defer cancel()
 	defer conn.CloseNow() //nolint:errcheck
 
-	// Give the handler a tick to wire the subscription before publishing.
-	time.Sleep(50 * time.Millisecond)
-
-	if err := bus.Publish(ctx, "orders.created", json.RawMessage(`{"order_id":"o-1"}`),
-		events.KindBroadcast, nil); err != nil {
-		t.Fatalf("publish: %v", err)
+	time.Sleep(20 * time.Millisecond) // let the hub register the client
+	src.frames <- events.BroadcastFrame{
+		Subject: "orders.created",
+		Payload: []byte(`{"order_id":"o-1"}`),
 	}
 
 	_, data, err := conn.Read(ctx)
@@ -68,11 +102,12 @@ func TestBroadcast_DeliversBusEventsAsJSONEnvelopes(t *testing.T) {
 	}
 }
 
-func TestBroadcast_RefusesUnconfiguredHandler(t *testing.T) {
-	srv := httptest.NewServer(events.NewBroadcastHandler(events.BroadcastConfig{
-		// Bus + Marshal omitted on purpose.
-		Subjects: []string{"x"},
-	}))
+func TestBroadcastHub_RefusesUnconfiguredHandler(t *testing.T) {
+	hub := events.NewBroadcastHub(context.Background(), events.BroadcastConfig{
+		Source: newFakeSource(),
+		// Marshal omitted on purpose.
+	})
+	srv := httptest.NewServer(hub)
 	t.Cleanup(srv.Close)
 
 	resp, err := http.Get(srv.URL) //nolint:noctx
@@ -81,66 +116,40 @@ func TestBroadcast_RefusesUnconfiguredHandler(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("expected 500 for misconfigured handler, got %d", resp.StatusCode)
+		t.Errorf("expected 500 for misconfigured hub, got %d", resp.StatusCode)
 	}
 }
 
-// failingBus implements events.Bus where SubscribeBroadcast always errors —
-// drives the subscribe-error branch of NewBroadcastHandler.
-type failingBus struct{}
+type marshalErr struct{}
 
-func (b *failingBus) Publish(_ context.Context, _ string, _ []byte, _ events.Kind, _ map[string]string) error {
-	return nil
-}
-func (b *failingBus) SubscribeBroadcast(_ string, _ events.Handler) (events.Subscription, error) {
-	return nil, &subErr{}
-}
-func (b *failingBus) SubscribeDurable(_, _ string, _ events.Handler) (events.Subscription, error) {
-	return nil, &subErr{}
-}
-func (b *failingBus) Close() error { return nil }
+func (e *marshalErr) Error() string { return "marshal down" }
 
-type subErr struct{}
-
-func (e *subErr) Error() string { return "subscribe down" }
-
-func TestBroadcast_MarshalErrorDropsMessage(t *testing.T) {
-	// Marshal returning an error must not break the WS stream — the bad
-	// message is dropped and subsequent good messages still flow through.
-	bus := events.NewInMemoryBus()
-	t.Cleanup(func() { _ = bus.Close() })
-
+func TestBroadcastHub_MarshalErrorDropsFrameButKeepsStream(t *testing.T) {
+	src := newFakeSource()
 	first := true
-	marshaler := func(subject string, payload []byte, _ map[string]string) ([]byte, error) {
+	marshaler := func(subject string, payload []byte, labels map[string]string) ([]byte, error) {
 		if first {
 			first = false
-			return nil, &subErr{} // simulate one-time decode failure
+			return nil, &marshalErr{}
 		}
-		return events.MarshalJSONEnvelope(subject, json.RawMessage(payload), nil)
+		return passthroughMarshaler(subject, payload, labels)
 	}
-
-	srv := httptest.NewServer(events.NewBroadcastHandler(events.BroadcastConfig{
-		Bus:      bus,
-		Subjects: []string{"x"},
-		Marshal:  marshaler,
-	}))
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	hub := events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:  src,
+		Marshal: marshaler,
+	})
+	srv := httptest.NewServer(hub)
 	t.Cleanup(srv.Close)
 
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	conn, ctx, cancel := dialWS(t, srv)
 	defer cancel()
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
 	defer conn.CloseNow() //nolint:errcheck
 
-	time.Sleep(50 * time.Millisecond)
-	// First publish triggers a marshal error → dropped.
-	_ = bus.Publish(ctx, "x", []byte(`{"a":1}`), events.KindBroadcast, nil)
-	time.Sleep(50 * time.Millisecond)
-	// Second publish marshals OK → arrives at the client.
-	_ = bus.Publish(ctx, "x", []byte(`{"b":2}`), events.KindBroadcast, nil)
+	time.Sleep(20 * time.Millisecond)
+	src.frames <- events.BroadcastFrame{Subject: "x", Payload: []byte(`{"a":1}`)}
+	src.frames <- events.BroadcastFrame{Subject: "x", Payload: []byte(`{"b":2}`)}
 
 	_, data, err := conn.Read(ctx)
 	if err != nil {
@@ -151,103 +160,66 @@ func TestBroadcast_MarshalErrorDropsMessage(t *testing.T) {
 	}
 }
 
-func TestBroadcast_SubscribeErrorClosesConnection(t *testing.T) {
-	srv := httptest.NewServer(events.NewBroadcastHandler(events.BroadcastConfig{
-		Bus:      &failingBus{},
-		Subjects: []string{"x"},
-		Marshal:  passthroughMarshaler,
-	}))
-	t.Cleanup(srv.Close)
+type authErr struct{}
 
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+func (e *authErr) Error() string { return "subscribe down" }
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
-	if err != nil {
-		// Acceptable — handler may close before handshake completes.
-		return
-	}
-	defer conn.CloseNow() //nolint:errcheck
-	// Server closed; Read returns with an error promptly.
-	if _, _, err := conn.Read(ctx); err == nil {
-		t.Error("expected read error after subscribe failure")
-	}
-}
-
-func TestBroadcast_LabelFilteringOnlyDeliversMatchingEvents(t *testing.T) {
-	bus := events.NewInMemoryBus()
-	t.Cleanup(func() { _ = bus.Close() })
-
-	ready := make(chan struct{})
-	srv := httptest.NewServer(events.NewBroadcastHandler(events.WithOnSubscribed(events.BroadcastConfig{
-		Bus:      bus,
-		Subjects: []string{"orders.created"},
-		Marshal: func(subject string, payload []byte, headers map[string]string) ([]byte, error) {
-			return events.MarshalJSONEnvelope(subject, json.RawMessage(payload), events.HeadersToLabels(headers))
-		},
+func TestBroadcastHub_PrincipalLabelsFiltering(t *testing.T) {
+	src := newFakeSource()
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	hub := events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:  src,
+		Marshal: passthroughMarshaler,
 		// This connection is "logged in" as tenant abc — must never see
-		// events tagged tenant_id=xyz.
+		// frames tagged tenant_id=xyz.
 		PrincipalLabels: func(_ *http.Request) (map[string]string, error) {
 			return map[string]string{"tenant_id": "abc"}, nil
 		},
-	}, func() { close(ready) })))
+	})
+	srv := httptest.NewServer(hub)
 	t.Cleanup(srv.Close)
 
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	conn, ctx, cancel := dialWS(t, srv)
 	defer cancel()
-
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
 	defer conn.CloseNow() //nolint:errcheck
 
-	<-ready // deterministic: wait until the handler has subscribed.
-
-	// Foreign-tenant event — must be filtered out by the server-side matcher.
-	pubCtx := events.WithLabels(ctx, "tenant_id", "xyz")
-	_ = bus.Publish(pubCtx, "orders.created",
-		json.RawMessage(`{"order_id":"foreign"}`),
-		events.KindBroadcast,
-		events.LabelsToHeaders(events.LabelsFromContext(pubCtx), nil),
-	)
-	// Matching-tenant event — must arrive.
-	pubCtx = events.WithLabels(ctx, "tenant_id", "abc")
-	_ = bus.Publish(pubCtx, "orders.created",
-		json.RawMessage(`{"order_id":"mine"}`),
-		events.KindBroadcast,
-		events.LabelsToHeaders(events.LabelsFromContext(pubCtx), nil),
-	)
+	time.Sleep(20 * time.Millisecond)
+	// Foreign-tenant frame — must be filtered out.
+	src.frames <- events.BroadcastFrame{
+		Subject: "orders.created", Payload: []byte(`{"order_id":"foreign"}`),
+		Labels: map[string]string{"tenant_id": "xyz"},
+	}
+	// Matching-tenant frame — must arrive.
+	src.frames <- events.BroadcastFrame{
+		Subject: "orders.created", Payload: []byte(`{"order_id":"mine"}`),
+		Labels: map[string]string{"tenant_id": "abc"},
+	}
 
 	_, data, err := conn.Read(ctx)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
 	if !strings.Contains(string(data), `"order_id":"mine"`) {
-		t.Errorf("expected the tenant=abc event, got %s", data)
+		t.Errorf("expected tenant=abc frame, got %s", data)
 	}
 	if strings.Contains(string(data), `"foreign"`) {
-		t.Error("foreign-tenant event must be filtered out by the server-side label matcher")
+		t.Error("foreign-tenant frame must be filtered out by the hub's label matcher")
 	}
 	if !strings.Contains(string(data), `"tenant_id":"abc"`) {
 		t.Errorf("envelope must carry labels for client-side filtering: %s", data)
 	}
 }
 
-func TestBroadcast_PrincipalLabelsAuthFailureRejectsBeforeUpgrade(t *testing.T) {
-	bus := events.NewInMemoryBus()
-	t.Cleanup(func() { _ = bus.Close() })
-
-	srv := httptest.NewServer(events.NewBroadcastHandler(events.BroadcastConfig{
-		Bus:      bus,
-		Subjects: []string{"x"},
-		Marshal:  passthroughMarshaler,
+func TestBroadcastHub_PrincipalLabelsAuthFailureRejectsBeforeUpgrade(t *testing.T) {
+	hub := events.NewBroadcastHub(context.Background(), events.BroadcastConfig{
+		Source:  newFakeSource(),
+		Marshal: passthroughMarshaler,
 		PrincipalLabels: func(_ *http.Request) (map[string]string, error) {
-			return nil, &subErr{}
+			return nil, &authErr{}
 		},
-	}))
+	})
+	srv := httptest.NewServer(hub)
 	t.Cleanup(srv.Close)
 
 	resp, err := http.Get(srv.URL) //nolint:noctx
@@ -266,6 +238,31 @@ func TestBroadcast_PrincipalLabelsAuthFailureRejectsBeforeUpgrade(t *testing.T) 
 	}
 }
 
+type sourceErr struct{}
+
+func (e *sourceErr) Error() string { return "source crashed" }
+
+// errorSource immediately fails — covers the hub.run() error-log branch.
+type errorSource struct{}
+
+func (e errorSource) Run(_ context.Context, _ chan<- events.BroadcastFrame) error {
+	return errors.New("source crashed")
+}
+
+func TestBroadcastHub_SourceErrorDoesntCrashHandler(t *testing.T) {
+	hub := events.NewBroadcastHub(context.Background(), events.BroadcastConfig{
+		Source:  errorSource{},
+		Marshal: passthroughMarshaler,
+	})
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+
+	// Hub still serves WS; clients just won't receive any frames.
+	conn, _, cancel := dialWS(t, srv)
+	defer cancel()
+	defer conn.CloseNow() //nolint:errcheck
+}
+
 func TestMarshalJSONEnvelope_Shape(t *testing.T) {
 	out, err := events.MarshalJSONEnvelope("x", json.RawMessage(`{"a":1}`), nil)
 	if err != nil {
@@ -274,5 +271,142 @@ func TestMarshalJSONEnvelope_Shape(t *testing.T) {
 	want := `{"subject":"x","event":{"a":1}}`
 	if string(out) != want {
 		t.Errorf("got %s, want %s", out, want)
+	}
+}
+
+// newSilentLogger returns a slog.Logger writing to io.Discard so test logs
+// stay clean while the hub's internal Warn/Error branches still execute.
+func newSilentLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestBroadcastHub_NilSourceLogsAndNoCrash(t *testing.T) {
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+
+	hub := events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		// Source intentionally nil.
+		Marshal: passthroughMarshaler,
+		Logger:  newSilentLogger(),
+	})
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+
+	// HTTP layer still works — clients may attach but won't see frames.
+	conn, _, cancel := dialWS(t, srv)
+	defer cancel()
+	defer conn.CloseNow() //nolint:errcheck
+}
+
+func TestBroadcastHub_DropOldestOnSlowClient(t *testing.T) {
+	src := newFakeSource()
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	hub := events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:       src,
+		Marshal:      passthroughMarshaler,
+		ClientBuffer: 1, // tiny buffer makes drops deterministic
+		Logger:       newSilentLogger(),
+	})
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+
+	conn, ctx, cancel := dialWS(t, srv)
+	defer cancel()
+	defer conn.CloseNow() //nolint:errcheck
+
+	time.Sleep(20 * time.Millisecond)
+
+	// Burst frames faster than the writer goroutine can drain the WS — a
+	// single-slot buffer plus rapid producer guarantees the dispatch
+	// drop-oldest branch is exercised. We don't assert which frame survives
+	// (writer-vs-producer interleaving is non-deterministic) — only that the
+	// connection survives the bursts and at least one frame arrives.
+	for i := 0; i < 200; i++ {
+		src.frames <- events.BroadcastFrame{Subject: "x", Payload: []byte(`{"i":1}`)}
+	}
+	if _, _, err := conn.Read(ctx); err != nil {
+		t.Fatalf("read after burst: %v", err)
+	}
+}
+
+func TestBroadcastHub_CustomLoggerUsed(t *testing.T) {
+	// Cover the cfg.Logger != nil branch of logger().
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	hub := events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:  errorSource{},
+		Marshal: passthroughMarshaler,
+		Logger:  newSilentLogger(),
+	})
+	_ = hub
+	time.Sleep(20 * time.Millisecond) // give source goroutine time to log
+}
+
+func TestBroadcastHub_OnSubscribedHookFires(t *testing.T) {
+	src := newFakeSource()
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+
+	ready := make(chan struct{})
+	cfg := events.WithOnSubscribed(events.BroadcastConfig{
+		Source:  src,
+		Marshal: passthroughMarshaler,
+	}, func() { close(ready) })
+	hub := events.NewBroadcastHub(hubCtx, cfg)
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+
+	conn, _, cancel := dialWS(t, srv)
+	defer cancel()
+	defer conn.CloseNow() //nolint:errcheck
+
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("onSubscribed never fired")
+	}
+}
+
+func TestBroadcastHub_MultipleClientsEachReceiveFrame(t *testing.T) {
+	src := newFakeSource()
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	hub := events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:  src,
+		Marshal: passthroughMarshaler,
+	})
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+
+	conn1, ctx1, cancel1 := dialWS(t, srv)
+	defer cancel1()
+	defer conn1.CloseNow() //nolint:errcheck
+	conn2, ctx2, cancel2 := dialWS(t, srv)
+	defer cancel2()
+	defer conn2.CloseNow() //nolint:errcheck
+
+	time.Sleep(30 * time.Millisecond)
+	src.frames <- events.BroadcastFrame{Subject: "x", Payload: []byte(`{"a":1}`)}
+
+	for i, conn := range []*websocket.Conn{conn1, conn2} {
+		ctx := ctx1
+		if i == 1 {
+			ctx = ctx2
+		}
+		if _, data, err := conn.Read(ctx); err != nil {
+			t.Fatalf("client %d read: %v", i, err)
+		} else if !strings.Contains(string(data), `"a":1`) {
+			t.Errorf("client %d got %s", i, data)
+		}
+	}
+}
+
+func TestHeadersToLabels_NilOrEmpty(t *testing.T) {
+	if events.HeadersToLabels(nil) != nil {
+		t.Error("nil headers should return nil")
+	}
+	if events.HeadersToLabels(map[string]string{}) != nil {
+		t.Error("empty headers should return nil")
 	}
 }

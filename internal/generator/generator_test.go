@@ -2328,9 +2328,10 @@ func TestGenerateMain_WithBroadcasts(t *testing.T) {
 	for _, want := range []string{
 		`"github.com/mrs1lentcz/protobridge/runtime/events"`,
 		`eventspb "example.com/gen/events"`,
-		"events.NewBusFromEnv()",
+		`"PROTOBRIDGE_ORDER_BROADCAST_ADDR"`,
+		"orderBroadcastConn, err := grpc.NewClient(orderBroadcastAddr",
 		`"/api/v1/events/orders"`,
-		"eventspb.NewOrderBroadcastHandler(bus,",
+		"eventspb.RegisterOrderBroadcastBroadcast(broadcastCtx, r, orderBroadcastConn",
 		"PrincipalLabels: principalLabelsFn",
 	} {
 		if !strings.Contains(content, want) {
@@ -2350,8 +2351,8 @@ func TestGenerateMain_NoBroadcastsOmitsEventsImport(t *testing.T) {
 	// No broadcast services → no events-runtime import, no bus init.
 	for _, forbidden := range []string{
 		"runtime/events",
-		"events.NewBusFromEnv",
 		"eventspb",
+		"BroadcastConfig",
 	} {
 		if strings.Contains(content, forbidden) {
 			t.Errorf("non-broadcast main.go must not contain %q", forbidden)
