@@ -206,3 +206,11 @@ func TestJoinImportPath(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestFindGoModule_NoGoModUpToRoot(t *testing.T) {
+	// Starting from filesystem root walks once and immediately exhausts —
+	// no go.mod can exist above /. Covers the loop terminal branch.
+	if _, _, err := findGoModule("/"); err == nil || !strings.Contains(err.Error(), "no go.mod") {
+		t.Errorf("expected no-go.mod error from /, got %v", err)
+	}
+}

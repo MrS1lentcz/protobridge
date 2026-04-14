@@ -238,10 +238,6 @@ func TestBroadcastHub_PrincipalLabelsAuthFailureRejectsBeforeUpgrade(t *testing.
 	}
 }
 
-type sourceErr struct{}
-
-func (e *sourceErr) Error() string { return "source crashed" }
-
 // errorSource immediately fails — covers the hub.run() error-log branch.
 type errorSource struct{}
 
@@ -399,6 +395,29 @@ func TestBroadcastHub_MultipleClientsEachReceiveFrame(t *testing.T) {
 		} else if !strings.Contains(string(data), `"a":1`) {
 			t.Errorf("client %d got %s", i, data)
 		}
+	}
+}
+
+func TestBroadcastHub_NonWSGETReturnsCleanly(t *testing.T) {
+	// Plain HTTP GET (no Upgrade header) — websocket.Accept writes a 426
+	// and ServeHTTP returns without panicking. Covers the post-Accept
+	// error-return branch.
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	hub := events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:  newFakeSource(),
+		Marshal: passthroughMarshaler,
+	})
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL) //nolint:noctx
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusOK {
+		t.Errorf("expected non-200 for non-WS GET, got %d", resp.StatusCode)
 	}
 }
 
