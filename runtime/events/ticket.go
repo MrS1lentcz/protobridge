@@ -84,10 +84,14 @@ func (s *MemoryTicketStore) Issue(_ context.Context, labels map[string]string, t
 	ticket := base64.RawURLEncoding.EncodeToString(buf[:])
 
 	// Copy labels so later mutations by the caller don't affect the
-	// stored ticket.
-	copied := make(map[string]string, len(labels))
-	for k, v := range labels {
-		copied[k] = v
+	// stored ticket. Nil maps stay nil — no point allocating an empty
+	// one just to hand it back on Redeem.
+	var copied map[string]string
+	if labels != nil {
+		copied = make(map[string]string, len(labels))
+		for k, v := range labels {
+			copied[k] = v
+		}
 	}
 
 	s.mu.Lock()
@@ -214,6 +218,9 @@ func NewTicketIssuer(cfg TicketIssuerConfig) http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
+		// Vary on the credentials we actually key responses on — defence
+		// in depth if an upstream ever overrides Cache-Control.
+		w.Header().Set("Vary", "Authorization, Cookie")
 		_ = json.NewEncoder(w).Encode(struct {
 			Ticket    string `json:"ticket"`
 			ExpiresIn int    `json:"expires_in"`

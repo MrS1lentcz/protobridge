@@ -96,7 +96,7 @@ func TestTicketIssuer_POSTReturnsTicket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}
@@ -140,7 +140,7 @@ func TestTicketIssuer_UnauthorizedWhenPrincipalFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}
@@ -161,7 +161,7 @@ func TestTicketIssuer_MethodNotAllowedOnGET(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}
@@ -198,7 +198,7 @@ func TestBroadcastHub_SSEStreamsEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
 		t.Fatalf("content-type: %q", ct)
 	}
@@ -279,7 +279,7 @@ func TestBroadcastHub_TicketAuthBindsLabels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}
@@ -341,7 +341,7 @@ func TestBroadcastHub_TicketInvalidReturns401(t *testing.T) {
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}
@@ -513,7 +513,7 @@ func TestBroadcastHub_SSEExitsOnClientDisconnect(t *testing.T) {
 	// Hard-close the client side; the server's next write (message or
 	// heartbeat) will fail and serveSSE should return.
 	cancel()
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	// Nothing else to assert — just ensure we don't leak the handler.
 	time.Sleep(50 * time.Millisecond)
 }
@@ -601,7 +601,7 @@ func TestTicketIssuer_StoreErrorReturns500(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}
@@ -621,7 +621,7 @@ func TestTicketIssuer_DefaultsApplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var body struct {
 		Ticket    string `json:"ticket"`
 		ExpiresIn int    `json:"expires_in"`
@@ -658,7 +658,7 @@ func TestBroadcastHub_SSEHeartbeatFires(t *testing.T) {
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// First block should be a heartbeat since we pushed no frames.
 	block, err := readSSEBlock(resp.Body)
@@ -697,7 +697,7 @@ func TestBroadcastHub_SSEClosesWhenHubContextCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	<-subscribed
 	hubCancel() // should propagate into the per-request ctx and close the stream.

@@ -289,6 +289,8 @@ The ticket endpoint is auto-registered by `protoc-gen-protobridge` at `/api/even
 
 The path can be overridden with the `PROTOBRIDGE_EVENTS_TICKET_PATH` env var. Tickets default to 30s TTL and are stored in an in-memory `MemoryTicketStore` per gateway pod; a sticky-session LB is enough for most deployments, and swapping in a shared backend (Redis, DB) via the `events.TicketStore` interface solves the multi-pod issuer/redeemer split.
 
+**CSRF**: the issuer endpoint trusts whatever `PrincipalLabels` returns for the request — including ambient session cookies. That is the right default (it's how the matching REST endpoints behave), but it means the issuer must sit behind the same origin policy as the rest of your API. The generated `runtime.CORSMiddleware` handles this: set `PROTOBRIDGE_CORS_ALLOWED_ORIGINS` to the trusted browser origin(s) (never `*` when credentials are involved). If you rely solely on bearer tokens and never on cookies, CSRF does not apply and any origin policy is fine.
+
 Redemption is one-shot: a successful `Redeem` invalidates the ticket for any future use, so leaked tickets have at most a single-connection blast radius.
 
 The same endpoint also supports cookie-based auth transparently — the ticket issuer reuses whatever function you provide as `PrincipalLabels` (which the generator wires to your `AuthService.Authenticate` RPC). If your deployment is same-origin and session-cookie-based, clients can skip the ticket flow entirely and open `EventSource('/api/events/orders', { withCredentials: true })` directly.
