@@ -13,28 +13,33 @@ import (
 	"github.com/mrs1lentcz/protobridge/internal/parser"
 )
 
-// generateServiceBroadcastFile renders the broadcast WS handler for one
-// (protobridge.broadcast) service. The output is a single .go file under the
-// events output package containing:
+// generateServiceBroadcastFile renders the broadcast wireup for one
+// (protobridge.broadcast) service. Each output file contains:
 //
-//   - <Svc>BroadcastSubjects — every subject listed in the envelope oneof.
-//   - <Svc>BroadcastEnvelope — per-subject proto → protojson marshaler that
-//     produces the runtime JSON envelope wire shape.
-//   - New<Svc>BroadcastHandler — one-call wireup returning an http.Handler
-//     that the REST plugin mounts at the service's declared route.
+//   - <Svc>Route, <Svc>Subjects — wire-format constants exported for callers
+//     that mount the handler manually or compose with other broadcast groups.
+//   - <Svc>Envelope — per-subject proto → protojson marshaler producing the
+//     runtime JSON envelope shape (subject + labels + event).
+//   - <Svc>Source — events.BroadcastSource implementation that opens the
+//     server-streaming gRPC RPC and emits BroadcastFrame to the hub.
+//   - New<Svc>Server(bus) — backend-side bus → stream adapter implementing
+//     pb.<Svc>Server. Subscribes to every Subject and packs each event into
+//     the typed envelope (oneof + labels) before sending.
+//   - Register<Svc>Broadcast — one-call wireup mounting NewBroadcastHub at
+//     the service's declared route.
 //
 // When the envelope references event messages from multiple Go packages the
-// imports are aliased pb0, pb1, … (deterministic, collision-free). For the
-// common single-package case the alias is the plain `pb`.
+// imports are aliased pb0, pb1, … (deterministic, collision-free). The
+// service's own package is always imported under alias `svcpb` so generated
+// references to gRPC stub types (Client/Server) stay readable.
 func generateServiceBroadcastFile(svc *parser.BroadcastService, outputPkg string) string {
-	// Collect unique event GoPackages in declaration order so aliases stay
-	// stable across runs (events are already sorted by declaration in parser).
+	// Collect unique event GoPackages in declaration order.
 	seen := map[string]int{}
 	var pkgs []string
 	for _, ev := range svc.Events {
 		pkg := ev.GoPackage
 		if pkg == "" {
-			pkg = svc.GoPackage // fallback: assume same pkg as the service
+			pkg = svc.GoPackage
 		}
 		if _, ok := seen[pkg]; !ok {
 			seen[pkg] = len(pkgs)
@@ -49,6 +54,16 @@ func generateServiceBroadcastFile(svc *parser.BroadcastService, outputPkg string
 		}
 		imports[i] = broadcastImport{Alias: alias, Path: p}
 	}
+	// svcAlias is the import alias under which the streaming service's gRPC
+	// stubs live. If the service's own package is already in `imports` (any
+	// event lives in it), reuse that alias — adding a second import for the
+	// same path would not compile. Otherwise add a fresh import.
+	svcAlias := "svcpb"
+	if idx, ok := seen[svc.GoPackage]; ok {
+		svcAlias = imports[idx].Alias
+	} else {
+		imports = append(imports, broadcastImport{Alias: svcAlias, Path: svc.GoPackage})
+	}
 
 	tmplEvents := make([]tmplBroadcastServiceEvent, 0, len(svc.Events))
 	for _, ev := range svc.Events {
@@ -57,21 +72,68 @@ func generateServiceBroadcastFile(svc *parser.BroadcastService, outputPkg string
 			pkg = svc.GoPackage
 		}
 		tmplEvents = append(tmplEvents, tmplBroadcastServiceEvent{
-			MessageName: ev.Message.Name,
-			Subject:     ev.Subject,
-			Alias:       imports[seen[pkg]].Alias,
+			MessageName:    ev.Message.Name,
+			Subject:        ev.Subject,
+			Alias:          imports[seen[pkg]].Alias,
+			OneofFieldName: goCamelCase(ev.OneofFieldName),
 		})
 	}
 
 	data := broadcastServiceFileData{
-		PkgName:     outputPkg,
-		ServiceName: svc.Name,
-		Route:       svc.Route,
-		Imports:     imports,
-		Events:      tmplEvents,
+		PkgName:      outputPkg,
+		ServiceName:  svc.Name,
+		MethodName:   svc.MethodName,
+		Route:        svc.Route,
+		EnvelopeName: svc.Envelope.Name,
+		HasLabels:    svc.LabelsField != nil,
+		Imports:      imports,
+		ServiceAlias: svcAlias,
+		Events:       tmplEvents,
 	}
 	return generator.RenderTemplate(broadcastServiceTmpl, data)
 }
+
+// goCamelCase mirrors protoc-gen-go's camel-casing for proto identifiers used
+// as Go names — verbatim port of google.golang.org/protobuf/internal/strs
+// .GoCamelCase (which is internal and can't be imported). Used to derive
+// oneof wrapper struct names (e.g. `Envelope_<FieldName>`) and accessors so
+// generated code matches what protoc-gen-go emits next to it.
+//
+// Notable rules: leading underscore becomes 'X' (Go can't start with _),
+// internal `_<lower>` drops the underscore and capitalises, dots become '_',
+// digits stay where they are. Initialisms like HTTP/URL are NOT normalised —
+// protoc-gen-go doesn't normalise them either, so the output stays in lock-step.
+func goCamelCase(s string) string {
+	var b []byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '.' && i+1 < len(s) && isASCIILower(s[i+1]):
+			// Skip '.' when followed by lowercase — historic behaviour.
+		case c == '.':
+			b = append(b, '_')
+		case c == '_' && (i == 0 || s[i-1] == '.'):
+			b = append(b, 'X')
+		case c == '_' && i+1 < len(s) && isASCIILower(s[i+1]):
+			// Drop '_' before a lowercase letter; the loop's default branch
+			// will uppercase that letter on the next iteration.
+		case isASCIIDigit(c):
+			b = append(b, c)
+		default:
+			if isASCIILower(c) {
+				c -= 'a' - 'A'
+			}
+			b = append(b, c)
+			for ; i+1 < len(s) && isASCIILower(s[i+1]); i++ {
+				b = append(b, s[i+1])
+			}
+		}
+	}
+	return string(b)
+}
+
+func isASCIILower(c byte) bool { return 'a' <= c && c <= 'z' }
+func isASCIIDigit(c byte) bool { return '0' <= c && c <= '9' }
 
 type broadcastImport struct {
 	Alias string
@@ -79,17 +141,22 @@ type broadcastImport struct {
 }
 
 type broadcastServiceFileData struct {
-	PkgName     string
-	ServiceName string
-	Route       string
-	Imports     []broadcastImport
-	Events      []tmplBroadcastServiceEvent
+	PkgName      string
+	ServiceName  string
+	MethodName   string
+	Route        string
+	EnvelopeName string
+	HasLabels    bool
+	Imports      []broadcastImport
+	ServiceAlias string
+	Events       []tmplBroadcastServiceEvent
 }
 
 type tmplBroadcastServiceEvent struct {
-	MessageName string
-	Subject     string
-	Alias       string // which imported package the message lives in
+	MessageName    string
+	Subject        string
+	Alias          string // which imported package the message lives in
+	OneofFieldName string // PascalCase of the oneof field — Go struct member + wrapper-type suffix
 }
 
 var broadcastServiceTmpl = template.Must(template.New("broadcast_service").Parse(`// Code generated by protoc-gen-events-go. DO NOT EDIT.
@@ -97,33 +164,39 @@ var broadcastServiceTmpl = template.Must(template.New("broadcast_service").Parse
 package {{ .PkgName }}
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/mrs1lentcz/protobridge/runtime/events"
 {{ range .Imports }}	{{ .Alias }} {{ printf "%q" .Path }}
 {{ end }})
 
 // {{ .ServiceName }}Route is the HTTP path declared on the
-// (protobridge.broadcast) service. Exported so custom routers can mount
-// the handler without duplicating the literal.
+// (protobridge.broadcast) service. Exported so custom routers can mount the
+// hub without duplicating the literal.
 const {{ .ServiceName }}Route = {{ printf "%q" .Route }}
 
-// {{ .ServiceName }}Subjects lists every subject that appears in
-// the envelope oneof, in proto declaration order.
+// {{ .ServiceName }}Subjects lists every subject that appears in the envelope
+// oneof, in proto declaration order.
 var {{ .ServiceName }}Subjects = []string{
 {{- range .Events }}
 	{{ printf "%q" .Subject }},
 {{- end }}
 }
 
-// {{ .ServiceName }}Envelope decodes a bus message for any of the
-// subjects above and returns the JSON envelope emitted to WS clients.
-func {{ .ServiceName }}Envelope(subject string, payload []byte, headers map[string]string) ([]byte, error) {
+// {{ .ServiceName }}Envelope decodes a frame's payload for any of the subjects
+// above and returns the JSON envelope emitted to WS clients.
+func {{ .ServiceName }}Envelope(subject string, payload []byte, labels map[string]string) ([]byte, error) {
 	jsonOpts := protojson.MarshalOptions{UseProtoNames: true}
 	var msg proto.Message
 	switch subject {
@@ -141,18 +214,156 @@ func {{ .ServiceName }}Envelope(subject string, payload []byte, headers map[stri
 	if err != nil {
 		return nil, fmt.Errorf("encode %s: %w", subject, err)
 	}
-	return events.MarshalJSONEnvelope(subject, json.RawMessage(encoded), events.HeadersToLabels(headers))
+	return events.MarshalJSONEnvelope(subject, json.RawMessage(encoded), labels)
 }
 
-// New{{ .ServiceName }}Handler returns the WebSocket handler for
-// the (protobridge.broadcast) service. Bus, Subjects and Marshal are
-// injected automatically; cfg carries PrincipalLabels, Matcher,
-// OriginPatterns and Logger from the caller.
-func New{{ .ServiceName }}Handler(bus events.Bus, cfg events.BroadcastConfig) http.Handler {
-	cfg.Bus = bus
-	cfg.Subjects = {{ .ServiceName }}Subjects
+// {{ .ServiceName }}Source opens the server-streaming gRPC RPC against the
+// backend and emits one BroadcastFrame per envelope received. It implements
+// events.BroadcastSource and is intended to back a single BroadcastHub per
+// gateway pod.
+type {{ .ServiceName }}Source struct {
+	conn grpc.ClientConnInterface
+}
+
+// New{{ .ServiceName }}Source wraps an existing gRPC client connection. The
+// connection is dialed by the caller (typically the generated main.go) so
+// auth/TLS/keepalive policy stays under user control.
+func New{{ .ServiceName }}Source(conn grpc.ClientConnInterface) *{{ .ServiceName }}Source {
+	return &{{ .ServiceName }}Source{conn: conn}
+}
+
+// Run opens the stream and forwards every received envelope into out as a
+// BroadcastFrame. Returns when ctx is cancelled, the stream ends, or any
+// non-recoverable transport error occurs. The hub logs and stops on return —
+// callers wanting reconnect should wrap this in a retry loop.
+func (s *{{ .ServiceName }}Source) Run(ctx context.Context, out chan<- events.BroadcastFrame) error {
+	client := {{ .ServiceAlias }}.New{{ .ServiceName }}Client(s.conn)
+	stream, err := client.{{ .MethodName }}(ctx, &emptypb.Empty{})
+	if err != nil {
+		return fmt.Errorf("{{ .ServiceName }}Source: open stream: %w", err)
+	}
+	for {
+		env, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("{{ .ServiceName }}Source: recv: %w", err)
+		}
+		frame, ok := frameFrom{{ .EnvelopeName }}(env)
+		if !ok {
+			continue // unknown oneof variant — drop, don't kill the stream
+		}
+		select {
+		case out <- frame:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// frameFrom{{ .EnvelopeName }} unpacks the typed envelope into the runtime's
+// transport-agnostic BroadcastFrame. Returns ok=false for envelopes whose
+// oneof wasn't set (defensive — backend should never send these).
+func frameFrom{{ .EnvelopeName }}(env *{{ .ServiceAlias }}.{{ .EnvelopeName }}) (events.BroadcastFrame, bool) {
+	if env == nil {
+		return events.BroadcastFrame{}, false
+	}
+	{{ if .HasLabels -}}
+	labels := env.GetLabels()
+	{{ else -}}
+	var labels map[string]string
+	{{ end -}}
+	switch v := env.GetEvent().(type) {
+{{- range .Events }}
+	case *{{ $.ServiceAlias }}.{{ $.EnvelopeName }}_{{ .OneofFieldName }}:
+		payload, err := proto.Marshal(v.{{ .OneofFieldName }})
+		if err != nil {
+			return events.BroadcastFrame{}, false
+		}
+		return events.BroadcastFrame{Subject: {{ printf "%q" .Subject }}, Payload: payload, Labels: labels}, true
+{{- end }}
+	}
+	return events.BroadcastFrame{}, false
+}
+
+// {{ .ServiceName }}Server is the backend-side bus → stream adapter. Embed it
+// (or assign it directly) when registering the gRPC server, and the streaming
+// RPC will be served by subscribing to every subject in {{ .ServiceName }}Subjects
+// on the supplied bus and forwarding each event into the gRPC stream as a
+// typed envelope.
+type {{ .ServiceName }}Server struct {
+	{{ .ServiceAlias }}.Unimplemented{{ .ServiceName }}Server
+	bus events.Bus
+}
+
+// New{{ .ServiceName }}Server returns the backend-side adapter. Register it
+// with your gRPC server: pb.Register{{ .ServiceName }}Server(srv, eventspkg.New{{ .ServiceName }}Server(bus)).
+func New{{ .ServiceName }}Server(bus events.Bus) *{{ .ServiceName }}Server {
+	return &{{ .ServiceName }}Server{bus: bus}
+}
+
+// {{ .MethodName }} implements the streaming RPC. One subscription per subject is
+// registered on the bus for the lifetime of the call; on each delivered
+// message the typed envelope is built and sent. The call exits when the
+// stream context is cancelled (client/gateway disconnect).
+func (s *{{ .ServiceName }}Server) {{ .MethodName }}(_ *emptypb.Empty, stream grpc.ServerStreamingServer[{{ .ServiceAlias }}.{{ .EnvelopeName }}]) error {
+	ctx := stream.Context()
+	send := func(env *{{ .ServiceAlias }}.{{ .EnvelopeName }}) error {
+		return stream.Send(env)
+	}
+	var subs []events.Subscription
+	defer func() {
+		for _, sub := range subs {
+			_ = sub.Unsubscribe()
+		}
+	}()
+{{- range .Events }}
+	{
+		sub, err := s.bus.SubscribeBroadcast({{ printf "%q" .Subject }}, func(_ context.Context, m events.Message) error {
+			ev := &{{ .Alias }}.{{ .MessageName }}{}
+			if err := proto.Unmarshal(m.Payload, ev); err != nil {
+				return fmt.Errorf("{{ $.ServiceName }}Server: decode %s: %w", {{ printf "%q" .Subject }}, err)
+			}
+			env := &{{ $.ServiceAlias }}.{{ $.EnvelopeName }}{
+				{{ if $.HasLabels -}}
+				Labels: events.HeadersToLabels(m.Headers),
+				{{ end -}}
+				Event: &{{ $.ServiceAlias }}.{{ $.EnvelopeName }}_{{ .OneofFieldName }}{ {{ .OneofFieldName }}: ev },
+			}
+			return send(env)
+		})
+		if err != nil {
+			return fmt.Errorf("{{ $.ServiceName }}Server: subscribe %s: %w", {{ printf "%q" .Subject }}, err)
+		}
+		subs = append(subs, sub)
+	}
+{{- end }}
+	<-ctx.Done()
+	return nil
+}
+
+// Register{{ .ServiceName }}Broadcast mounts the WebSocket broadcast endpoint at
+// "<prefix>" using a long-lived gRPC stream against conn as the event source.
+// The hub runs until ctx is cancelled — pass a context that lives as long as
+// the gateway process.
+//
+// extra is merged into the BroadcastConfig — pass it to wire auth-derived
+// principal labels (PrincipalLabels), a custom Matcher, OriginPatterns, a
+// per-client buffer, or a Logger. Source and Marshal are filled in
+// automatically and take precedence over equivalents in extra.
+func Register{{ .ServiceName }}Broadcast(ctx context.Context, r chi.Router, conn grpc.ClientConnInterface, prefix string, extra ...events.BroadcastConfig) {
+	cfg := events.BroadcastConfig{}
+	if len(extra) > 0 {
+		cfg = extra[0]
+	}
+	cfg.Source = New{{ .ServiceName }}Source(conn)
 	cfg.Marshal = {{ .ServiceName }}Envelope
-	return events.NewBroadcastHandler(cfg)
+	hub := events.NewBroadcastHub(ctx, cfg)
+	r.Method(http.MethodGet, prefix, hub)
 }
 `))
 
@@ -180,10 +391,10 @@ func generateEventsFile(pkgPath, outputPkg string, events []*parser.Event) strin
 	}
 	for _, ev := range events {
 		td := tmplEvent{
-			MessageName:  ev.Message.Name,
-			Subject:      ev.Subject,
-			DurableGroup: ev.DurableGroup,
-			Description:  ev.Description,
+			MessageName:   ev.Message.Name,
+			Subject:       ev.Subject,
+			DurableGroup:  ev.DurableGroup,
+			Description:   ev.Description,
 			KindBroadcast: ev.Kind == parser.EventKindBroadcast,
 			KindDurable:   ev.Kind == parser.EventKindDurable,
 			KindBoth:      ev.Kind == parser.EventKindBoth,
@@ -295,4 +506,3 @@ func SubscribeBroadcast{{ .MessageName }}(bus events.Bus, h {{ .MessageName }}Ha
 
 {{ end }}
 `))
-

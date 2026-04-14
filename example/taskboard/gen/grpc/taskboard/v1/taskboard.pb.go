@@ -11,6 +11,7 @@ import (
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -1365,11 +1366,105 @@ func (x *ChatMessage) GetSender() string {
 	return ""
 }
 
+// TaskBroadcastEnvelope is the wire shape of one broadcast frame. Labels
+// carry per-event metadata (e.g. assignee_id) the gateway uses to filter
+// per-principal; clients also receive them in the JSON envelope for
+// per-screen UX filtering.
+type TaskBroadcastEnvelope struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Labels map[string]string      `protobuf:"bytes,1,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Types that are valid to be assigned to Event:
+	//
+	//	*TaskBroadcastEnvelope_TaskCreatedEvent
+	//	*TaskBroadcastEnvelope_TaskCompletedEvent
+	Event         isTaskBroadcastEnvelope_Event `protobuf_oneof:"event"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskBroadcastEnvelope) Reset() {
+	*x = TaskBroadcastEnvelope{}
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskBroadcastEnvelope) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskBroadcastEnvelope) ProtoMessage() {}
+
+func (x *TaskBroadcastEnvelope) ProtoReflect() protoreflect.Message {
+	mi := &file_taskboard_v1_taskboard_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskBroadcastEnvelope.ProtoReflect.Descriptor instead.
+func (*TaskBroadcastEnvelope) Descriptor() ([]byte, []int) {
+	return file_taskboard_v1_taskboard_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *TaskBroadcastEnvelope) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+func (x *TaskBroadcastEnvelope) GetEvent() isTaskBroadcastEnvelope_Event {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+func (x *TaskBroadcastEnvelope) GetTaskCreatedEvent() *TaskCreatedEvent {
+	if x != nil {
+		if x, ok := x.Event.(*TaskBroadcastEnvelope_TaskCreatedEvent); ok {
+			return x.TaskCreatedEvent
+		}
+	}
+	return nil
+}
+
+func (x *TaskBroadcastEnvelope) GetTaskCompletedEvent() *TaskCompletedEvent {
+	if x != nil {
+		if x, ok := x.Event.(*TaskBroadcastEnvelope_TaskCompletedEvent); ok {
+			return x.TaskCompletedEvent
+		}
+	}
+	return nil
+}
+
+type isTaskBroadcastEnvelope_Event interface {
+	isTaskBroadcastEnvelope_Event()
+}
+
+type TaskBroadcastEnvelope_TaskCreatedEvent struct {
+	TaskCreatedEvent *TaskCreatedEvent `protobuf:"bytes,2,opt,name=task_created_event,json=taskCreatedEvent,proto3,oneof"`
+}
+
+type TaskBroadcastEnvelope_TaskCompletedEvent struct {
+	TaskCompletedEvent *TaskCompletedEvent `protobuf:"bytes,3,opt,name=task_completed_event,json=taskCompletedEvent,proto3,oneof"`
+}
+
+func (*TaskBroadcastEnvelope_TaskCreatedEvent) isTaskBroadcastEnvelope_Event() {}
+
+func (*TaskBroadcastEnvelope_TaskCompletedEvent) isTaskBroadcastEnvelope_Event() {}
+
 var File_taskboard_v1_taskboard_proto protoreflect.FileDescriptor
 
 const file_taskboard_v1_taskboard_proto_rawDesc = "" +
 	"\n" +
-	"\x1ctaskboard/v1/taskboard.proto\x12\ftaskboard.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x19protobridge/options.proto\x1a\x18protobridge/events.proto\"\xa1\x03\n" +
+	"\x1ctaskboard/v1/taskboard.proto\x12\ftaskboard.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x19protobridge/options.proto\x1a\x18protobridge/events.proto\"\xa1\x03\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
@@ -1460,7 +1555,15 @@ const file_taskboard_v1_taskboard_proto_rawDesc = "" +
 	"\x03ids\x18\x02 \x03(\tR\x03ids\"?\n" +
 	"\vChatMessage\x12\x18\n" +
 	"\acontent\x18\x01 \x01(\tR\acontent\x12\x16\n" +
-	"\x06sender\x18\x02 \x01(\tR\x06sender*\xbf\x01\n" +
+	"\x06sender\x18\x02 \x01(\tR\x06sender\"\xca\x02\n" +
+	"\x15TaskBroadcastEnvelope\x12G\n" +
+	"\x06labels\x18\x01 \x03(\v2/.taskboard.v1.TaskBroadcastEnvelope.LabelsEntryR\x06labels\x12N\n" +
+	"\x12task_created_event\x18\x02 \x01(\v2\x1e.taskboard.v1.TaskCreatedEventH\x00R\x10taskCreatedEvent\x12T\n" +
+	"\x14task_completed_event\x18\x03 \x01(\v2 .taskboard.v1.TaskCompletedEventH\x00R\x12taskCompletedEvent\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\a\n" +
+	"\x05event*\xbf\x01\n" +
 	"\fTaskPriority\x12\x1d\n" +
 	"\x19TASK_PRIORITY_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x11TASK_PRIORITY_LOW\x10\x01\x1a\a\xf2\xb6\x18\x03low\x12$\n" +
@@ -1490,7 +1593,10 @@ const file_taskboard_v1_taskboard_proto_rawDesc = "" +
 	"\x11TaskNotifications\x12\x1f.taskboard.v1.WatchTasksRequest\x1a\x17.taskboard.v1.TaskEvent\"6ҵ\x18\auser_id\xa8\xb6\x18\x01\xb2\xb6\x18\aprivate\x82\xd3\xe4\x93\x02\x16\x12\x14/tasks/notifications0\x01\x12\x89\x01\n" +
 	"\x0fBulkCreateTasks\x12#.taskboard.v1.BulkCreateTaskRequest\x1a$.taskboard.v1.BulkCreateTaskResponse\")ҵ\x18\auser_id\xb2\xb6\x18\aprivate\x82\xd3\xe4\x93\x02\r\"\v/tasks/bulk(\x01\x12y\n" +
 	"\bTaskChat\x12\x19.taskboard.v1.ChatMessage\x1a\x19.taskboard.v1.ChatMessage\"3ҵ\x18\auser_id\xb2\xb6\x18\aprivate\x82\xd3\xe4\x93\x02\x17\x12\x15/tasks/{task_id}/chat(\x010\x01\x12l\n" +
-	"\fActivityFeed\x12\x1f.taskboard.v1.WatchTasksRequest\x1a\x17.taskboard.v1.TaskEvent\" \xb2\xb6\x18\tbroadcast\x82\xd3\xe4\x93\x02\r\x12\v/tasks/feed0\x01\x1a\x14·\x18\x05Tasksʷ\x18\a/api/v1BKZIgithub.com/mrs1lentcz/protobridge/example/taskboard/gen/grpc/taskboard/v1b\x06proto3"
+	"\fActivityFeed\x12\x1f.taskboard.v1.WatchTasksRequest\x1a\x17.taskboard.v1.TaskEvent\" \xb2\xb6\x18\tbroadcast\x82\xd3\xe4\x93\x02\r\x12\v/tasks/feed0\x01\x1a\x14·\x18\x05Tasksʷ\x18\a/api/v12q\n" +
+	"\rTaskBroadcast\x12G\n" +
+	"\x06Stream\x12\x16.google.protobuf.Empty\x1a#.taskboard.v1.TaskBroadcastEnvelope0\x01\x1a\x17\x9a\x82\x19\x13\n" +
+	"\x11/api/events/tasksBKZIgithub.com/mrs1lentcz/protobridge/example/taskboard/gen/grpc/taskboard/v1b\x06proto3"
 
 var (
 	file_taskboard_v1_taskboard_proto_rawDescOnce sync.Once
@@ -1505,7 +1611,7 @@ func file_taskboard_v1_taskboard_proto_rawDescGZIP() []byte {
 }
 
 var file_taskboard_v1_taskboard_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_taskboard_v1_taskboard_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_taskboard_v1_taskboard_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_taskboard_v1_taskboard_proto_goTypes = []any{
 	(TaskPriority)(0),              // 0: taskboard.v1.TaskPriority
 	(TaskStatus)(0),                // 1: taskboard.v1.TaskStatus
@@ -1530,14 +1636,17 @@ var file_taskboard_v1_taskboard_proto_goTypes = []any{
 	(*BulkCreateTaskRequest)(nil),  // 20: taskboard.v1.BulkCreateTaskRequest
 	(*BulkCreateTaskResponse)(nil), // 21: taskboard.v1.BulkCreateTaskResponse
 	(*ChatMessage)(nil),            // 22: taskboard.v1.ChatMessage
-	nil,                            // 23: taskboard.v1.AuthRequest.HeadersEntry
+	(*TaskBroadcastEnvelope)(nil),  // 23: taskboard.v1.TaskBroadcastEnvelope
+	nil,                            // 24: taskboard.v1.AuthRequest.HeadersEntry
+	nil,                            // 25: taskboard.v1.TaskBroadcastEnvelope.LabelsEntry
+	(*emptypb.Empty)(nil),          // 26: google.protobuf.Empty
 }
 var file_taskboard_v1_taskboard_proto_depIdxs = []int32{
 	0,  // 0: taskboard.v1.Task.priority:type_name -> taskboard.v1.TaskPriority
 	1,  // 1: taskboard.v1.Task.status:type_name -> taskboard.v1.TaskStatus
 	3,  // 2: taskboard.v1.Task.file:type_name -> taskboard.v1.FileAttachment
 	4,  // 3: taskboard.v1.Task.link:type_name -> taskboard.v1.LinkAttachment
-	23, // 4: taskboard.v1.AuthRequest.headers:type_name -> taskboard.v1.AuthRequest.HeadersEntry
+	24, // 4: taskboard.v1.AuthRequest.headers:type_name -> taskboard.v1.AuthRequest.HeadersEntry
 	0,  // 5: taskboard.v1.CreateTaskRequest.priority:type_name -> taskboard.v1.TaskPriority
 	0,  // 6: taskboard.v1.UpdateTaskRequest.priority:type_name -> taskboard.v1.TaskPriority
 	1,  // 7: taskboard.v1.UpdateTaskRequest.status:type_name -> taskboard.v1.TaskStatus
@@ -1548,33 +1657,38 @@ var file_taskboard_v1_taskboard_proto_depIdxs = []int32{
 	2,  // 12: taskboard.v1.TaskEvent.task:type_name -> taskboard.v1.Task
 	0,  // 13: taskboard.v1.TaskCreatedEvent.priority:type_name -> taskboard.v1.TaskPriority
 	0,  // 14: taskboard.v1.BulkCreateTaskRequest.priority:type_name -> taskboard.v1.TaskPriority
-	5,  // 15: taskboard.v1.AuthService.Authenticate:input_type -> taskboard.v1.AuthRequest
-	7,  // 16: taskboard.v1.TaskService.CreateTask:input_type -> taskboard.v1.CreateTaskRequest
-	8,  // 17: taskboard.v1.TaskService.GetTask:input_type -> taskboard.v1.GetTaskRequest
-	9,  // 18: taskboard.v1.TaskService.UpdateTask:input_type -> taskboard.v1.UpdateTaskRequest
-	10, // 19: taskboard.v1.TaskService.DeleteTask:input_type -> taskboard.v1.DeleteTaskRequest
-	12, // 20: taskboard.v1.TaskService.ListTasks:input_type -> taskboard.v1.ListTasksRequest
-	19, // 21: taskboard.v1.TaskService.WatchTasks:input_type -> taskboard.v1.WatchTasksRequest
-	19, // 22: taskboard.v1.TaskService.TaskNotifications:input_type -> taskboard.v1.WatchTasksRequest
-	20, // 23: taskboard.v1.TaskService.BulkCreateTasks:input_type -> taskboard.v1.BulkCreateTaskRequest
-	22, // 24: taskboard.v1.TaskService.TaskChat:input_type -> taskboard.v1.ChatMessage
-	19, // 25: taskboard.v1.TaskService.ActivityFeed:input_type -> taskboard.v1.WatchTasksRequest
-	6,  // 26: taskboard.v1.AuthService.Authenticate:output_type -> taskboard.v1.AuthResponse
-	2,  // 27: taskboard.v1.TaskService.CreateTask:output_type -> taskboard.v1.Task
-	2,  // 28: taskboard.v1.TaskService.GetTask:output_type -> taskboard.v1.Task
-	2,  // 29: taskboard.v1.TaskService.UpdateTask:output_type -> taskboard.v1.Task
-	11, // 30: taskboard.v1.TaskService.DeleteTask:output_type -> taskboard.v1.DeleteTaskResponse
-	14, // 31: taskboard.v1.TaskService.ListTasks:output_type -> taskboard.v1.ListTasksResponse
-	15, // 32: taskboard.v1.TaskService.WatchTasks:output_type -> taskboard.v1.TaskEvent
-	15, // 33: taskboard.v1.TaskService.TaskNotifications:output_type -> taskboard.v1.TaskEvent
-	21, // 34: taskboard.v1.TaskService.BulkCreateTasks:output_type -> taskboard.v1.BulkCreateTaskResponse
-	22, // 35: taskboard.v1.TaskService.TaskChat:output_type -> taskboard.v1.ChatMessage
-	15, // 36: taskboard.v1.TaskService.ActivityFeed:output_type -> taskboard.v1.TaskEvent
-	26, // [26:37] is the sub-list for method output_type
-	15, // [15:26] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	25, // 15: taskboard.v1.TaskBroadcastEnvelope.labels:type_name -> taskboard.v1.TaskBroadcastEnvelope.LabelsEntry
+	16, // 16: taskboard.v1.TaskBroadcastEnvelope.task_created_event:type_name -> taskboard.v1.TaskCreatedEvent
+	17, // 17: taskboard.v1.TaskBroadcastEnvelope.task_completed_event:type_name -> taskboard.v1.TaskCompletedEvent
+	5,  // 18: taskboard.v1.AuthService.Authenticate:input_type -> taskboard.v1.AuthRequest
+	7,  // 19: taskboard.v1.TaskService.CreateTask:input_type -> taskboard.v1.CreateTaskRequest
+	8,  // 20: taskboard.v1.TaskService.GetTask:input_type -> taskboard.v1.GetTaskRequest
+	9,  // 21: taskboard.v1.TaskService.UpdateTask:input_type -> taskboard.v1.UpdateTaskRequest
+	10, // 22: taskboard.v1.TaskService.DeleteTask:input_type -> taskboard.v1.DeleteTaskRequest
+	12, // 23: taskboard.v1.TaskService.ListTasks:input_type -> taskboard.v1.ListTasksRequest
+	19, // 24: taskboard.v1.TaskService.WatchTasks:input_type -> taskboard.v1.WatchTasksRequest
+	19, // 25: taskboard.v1.TaskService.TaskNotifications:input_type -> taskboard.v1.WatchTasksRequest
+	20, // 26: taskboard.v1.TaskService.BulkCreateTasks:input_type -> taskboard.v1.BulkCreateTaskRequest
+	22, // 27: taskboard.v1.TaskService.TaskChat:input_type -> taskboard.v1.ChatMessage
+	19, // 28: taskboard.v1.TaskService.ActivityFeed:input_type -> taskboard.v1.WatchTasksRequest
+	26, // 29: taskboard.v1.TaskBroadcast.Stream:input_type -> google.protobuf.Empty
+	6,  // 30: taskboard.v1.AuthService.Authenticate:output_type -> taskboard.v1.AuthResponse
+	2,  // 31: taskboard.v1.TaskService.CreateTask:output_type -> taskboard.v1.Task
+	2,  // 32: taskboard.v1.TaskService.GetTask:output_type -> taskboard.v1.Task
+	2,  // 33: taskboard.v1.TaskService.UpdateTask:output_type -> taskboard.v1.Task
+	11, // 34: taskboard.v1.TaskService.DeleteTask:output_type -> taskboard.v1.DeleteTaskResponse
+	14, // 35: taskboard.v1.TaskService.ListTasks:output_type -> taskboard.v1.ListTasksResponse
+	15, // 36: taskboard.v1.TaskService.WatchTasks:output_type -> taskboard.v1.TaskEvent
+	15, // 37: taskboard.v1.TaskService.TaskNotifications:output_type -> taskboard.v1.TaskEvent
+	21, // 38: taskboard.v1.TaskService.BulkCreateTasks:output_type -> taskboard.v1.BulkCreateTaskResponse
+	22, // 39: taskboard.v1.TaskService.TaskChat:output_type -> taskboard.v1.ChatMessage
+	15, // 40: taskboard.v1.TaskService.ActivityFeed:output_type -> taskboard.v1.TaskEvent
+	23, // 41: taskboard.v1.TaskBroadcast.Stream:output_type -> taskboard.v1.TaskBroadcastEnvelope
+	30, // [30:42] is the sub-list for method output_type
+	18, // [18:30] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_taskboard_v1_taskboard_proto_init() }
@@ -1586,15 +1700,19 @@ func file_taskboard_v1_taskboard_proto_init() {
 		(*Task_File)(nil),
 		(*Task_Link)(nil),
 	}
+	file_taskboard_v1_taskboard_proto_msgTypes[21].OneofWrappers = []any{
+		(*TaskBroadcastEnvelope_TaskCreatedEvent)(nil),
+		(*TaskBroadcastEnvelope_TaskCompletedEvent)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_taskboard_v1_taskboard_proto_rawDesc), len(file_taskboard_v1_taskboard_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   22,
+			NumMessages:   24,
 			NumExtensions: 0,
-			NumServices:   2,
+			NumServices:   3,
 		},
 		GoTypes:           file_taskboard_v1_taskboard_proto_goTypes,
 		DependencyIndexes: file_taskboard_v1_taskboard_proto_depIdxs,

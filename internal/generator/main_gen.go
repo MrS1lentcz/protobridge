@@ -74,6 +74,9 @@ func main() {
 	{{ range .Services -}}
 	{{ .EnvAddr }} := requireEnv("{{ .EnvAddrKey }}")
 	{{ end }}
+	{{ range .BroadcastServices -}}
+	{{ .EnvAddr }} := requireEnv("{{ .EnvAddrKey }}")
+	{{ end }}
 
 	// gRPC connection pool with adaptive scaling and health monitoring.
 	// Each service scales from 1 to MaxConns connections based on load.
@@ -139,18 +142,17 @@ func main() {
 	{{ end }}
 
 	{{ if .HasBroadcasts -}}
-	// Events bus — mounted once, shared across every (protobridge.broadcast)
-	// service. PROTOBRIDGE_BUS_URL selects the backend (defaults to in-memory).
-	bus, err := events.NewBusFromEnv()
-	if err != nil {
-		log.Fatalf("events bus init: %v", err)
-	}
-	defer func() { _ = bus.Close() }()
+	// Broadcast services: open one long-lived gRPC stream per service and
+	// fan it out across every connected WS client. The connection lives for
+	// the gateway process's lifetime — separate from the per-request pool
+	// (which assumes short-lived borrows).
+	broadcastCtx, broadcastCancel := context.WithCancel(context.Background())
+	defer broadcastCancel()
 
 	{{ if and .HasAuth .AuthHasLabels -}}
 	// Auth response declares a labels map — extract per request and feed
-	// into BroadcastConfig.PrincipalLabels so the WS handler filters events
-	// to the authenticated user's label set.
+	// into BroadcastConfig.PrincipalLabels so the hub filters events to the
+	// authenticated user's label set.
 	principalLabelsFn := func(r *http.Request) (map[string]string, error) {
 		conn, err := pool.ConnectScaled({{ .AuthAddrVar }}, scalingCfg)
 		if err != nil {
@@ -174,9 +176,14 @@ func main() {
 	var principalLabelsFn func(*http.Request) (map[string]string, error)
 	{{ end }}
 	{{ range .BroadcastServices }}
-	r.Method(http.MethodGet, {{ printf "%q" .Route }}, eventspb.New{{ .ServiceName }}Handler(bus, events.BroadcastConfig{
+	{{ .ConnVar }}, err := grpc.NewClient({{ .EnvAddr }}, dialOpts({{ printf "%q" .EnvTLSKey }}, {{ printf "%q" .EnvGRPCOptsKey }})...)
+	if err != nil {
+		log.Fatalf("dial broadcast %s: %v", {{ printf "%q" .EnvAddrKey }}, err)
+	}
+	defer func() { _ = {{ .ConnVar }}.Close() }()
+	eventspb.Register{{ .ServiceName }}Broadcast(broadcastCtx, r, {{ .ConnVar }}, {{ printf "%q" .Route }}, events.BroadcastConfig{
 		PrincipalLabels: principalLabelsFn,
-	}))
+	})
 	{{ end }}
 	{{ end }}
 
@@ -341,8 +348,13 @@ type mainData struct {
 }
 
 type mainBroadcastData struct {
-	ServiceName string // source service name, e.g. "OrderBroadcast" — generated symbol is New<ServiceName>Handler
-	Route       string // HTTP path
+	ServiceName    string // source service name, e.g. "OrderBroadcast" — generated symbol is Register<ServiceName>Broadcast
+	Route          string // HTTP path
+	ConnVar        string // long-lived dial conn variable, e.g. "v1BroadcastConn"
+	EnvAddr        string // address env-var name, e.g. "v1BroadcastAddr"
+	EnvAddrKey     string // env key, e.g. "PROTOBRIDGE_V1_BROADCAST_ADDR"
+	EnvTLSKey      string // env key, e.g. "PROTOBRIDGE_V1_BROADCAST_TLS"
+	EnvGRPCOptsKey string // env key, e.g. "PROTOBRIDGE_V1_BROADCAST_GRPC_OPTIONS"
 }
 
 // hasLabelsMapField returns true when the AuthResponse declares
@@ -388,9 +400,15 @@ func generateMain(api *parser.ParsedAPI, handlerPkg, eventsPkg string) string {
 	data := mainData{HandlerPkg: handlerPkg, EventsPkg: eventsPkg}
 
 	for _, bs := range api.BroadcastServices {
+		screaming := toScreamingSnake(bs.Name)
 		data.BroadcastServices = append(data.BroadcastServices, mainBroadcastData{
-			ServiceName: bs.Name,
-			Route:       bs.Route,
+			ServiceName:    bs.Name,
+			Route:          bs.Route,
+			ConnVar:        toLowerCamel(bs.Name) + "Conn",
+			EnvAddr:        toLowerCamel(bs.Name) + "Addr",
+			EnvAddrKey:     "PROTOBRIDGE_" + screaming + "_ADDR",
+			EnvTLSKey:      "PROTOBRIDGE_" + screaming + "_TLS",
+			EnvGRPCOptsKey: "PROTOBRIDGE_" + screaming + "_GRPC_OPTIONS",
 		})
 	}
 	data.HasBroadcasts = len(data.BroadcastServices) > 0

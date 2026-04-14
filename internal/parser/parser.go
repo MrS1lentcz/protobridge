@@ -49,6 +49,7 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 		// earlier reference stays pointer-stable.
 		api.Messages[fqn].Fields = full.Fields
 		api.Messages[fqn].OneofDecls = full.OneofDecls
+		api.Messages[fqn].MapEntry = full.MapEntry
 	}
 
 	// Walk every proto file's messages in declaration order and collect
@@ -225,6 +226,7 @@ func resolveMessageType(msgMap map[string]*descriptorpb.DescriptorProto, enumMap
 	mt := &MessageType{
 		Name:     desc.GetName(),
 		FullName: typeName,
+		MapEntry: desc.GetOptions().GetMapEntry(),
 	}
 
 	for _, f := range desc.Field {

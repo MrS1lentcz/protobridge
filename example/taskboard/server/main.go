@@ -19,14 +19,21 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/mrs1lentcz/protobridge/example/taskboard/gen/grpc/taskboard/v1"
+	eventspb "github.com/mrs1lentcz/protobridge/example/taskboard/gen/events"
+	"github.com/mrs1lentcz/protobridge/runtime/events"
 )
 
 func main() {
+	bus := events.NewInMemoryBus()
+	defer func() { _ = bus.Close() }()
+
 	svc := &taskService{
 		tasks:    make(map[string]*pb.Task),
 		watchers: make(map[string]chan *pb.TaskEvent),
+		bus:      bus,
 	}
 	authSvc := &authService{}
+	broadcastSvc := eventspb.NewTaskBroadcastServer(bus)
 
 	log.Println("starting gRPC server on :50051")
 	if err := server.Run(context.Background(), server.Config{
@@ -35,6 +42,7 @@ func main() {
 		RegisterServices: func(s *grpc.Server) error {
 			pb.RegisterTaskServiceServer(s, svc)
 			pb.RegisterAuthServiceServer(s, authSvc)
+			pb.RegisterTaskBroadcastServer(s, broadcastSvc)
 			return nil
 		},
 	}); err != nil {
@@ -73,6 +81,7 @@ type taskService struct {
 	mu       sync.RWMutex
 	tasks    map[string]*pb.Task
 	watchers map[string]chan *pb.TaskEvent
+	bus      events.Bus
 }
 
 func (s *taskService) Count() int {

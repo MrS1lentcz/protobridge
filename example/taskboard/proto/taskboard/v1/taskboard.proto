@@ -5,6 +5,7 @@ package taskboard.v1;
 option go_package = "github.com/mrs1lentcz/protobridge/example/taskboard/gen/grpc/taskboard/v1";
 
 import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
 import "protobridge/options.proto";
 import "protobridge/events.proto";
 
@@ -288,3 +289,24 @@ service TaskService {
   }
 }
 
+// TaskBroadcast is the system fan-out stream: every PUBLIC TaskCreatedEvent
+// and TaskCompletedEvent published on the bus is forwarded to every connected
+// browser tab. Backend serves this RPC via the generated bus→stream adapter
+// (NewTaskBroadcastServer); gateway opens one stream per pod and fans out to
+// WS clients.
+service TaskBroadcast {
+  option (protobridge.broadcast) = {route: "/api/events/tasks"};
+  rpc Stream(google.protobuf.Empty) returns (stream TaskBroadcastEnvelope);
+}
+
+// TaskBroadcastEnvelope is the wire shape of one broadcast frame. Labels
+// carry per-event metadata (e.g. assignee_id) the gateway uses to filter
+// per-principal; clients also receive them in the JSON envelope for
+// per-screen UX filtering.
+message TaskBroadcastEnvelope {
+  map<string, string> labels = 1;
+  oneof event {
+    TaskCreatedEvent task_created_event = 2;
+    TaskCompletedEvent task_completed_event = 3;
+  }
+}

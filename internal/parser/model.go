@@ -30,16 +30,19 @@ type ParsedAPI struct {
 	BroadcastServices []*BroadcastService
 }
 
-// BroadcastService is one (protobridge.broadcast) service declaration —
-// metadata only, no backend code is expected to implement the underlying
-// gRPC method.
+// BroadcastService is one (protobridge.broadcast) service declaration. The
+// gRPC streaming method is implemented by a generated bus→stream adapter on
+// the backend (NewXxxServer); the gateway opens that stream once per pod and
+// fans events out to WS clients.
 type BroadcastService struct {
-	Name        string             // service name, e.g. "OrderBroadcast"
-	Route       string             // HTTP path the WS endpoint is mounted at
-	GoPackage   string             // Go import path of the service's proto package
+	Name         string            // service name, e.g. "OrderBroadcast"
+	MethodName   string            // streaming RPC method name, e.g. "Stream"
+	Route        string            // HTTP path the WS endpoint is mounted at
+	GoPackage    string            // Go import path of the service's proto package
 	ProtoPackage string            // proto package, e.g. "myapp.events"
-	Envelope    *MessageType       // return type of the streaming RPC; the oneof envelope
-	Events      []*BroadcastEvent  // one entry per oneof variant in Envelope
+	Envelope     *MessageType      // return type of the streaming RPC; the oneof envelope
+	LabelsField  *Field            // optional map<string,string> labels field on the envelope; nil if absent
+	Events       []*BroadcastEvent // one entry per oneof variant in Envelope
 }
 
 // BroadcastEvent links a oneof variant in the envelope to its underlying
@@ -148,6 +151,10 @@ type MessageType struct {
 	FullName   string // fully qualified, e.g. ".assistant_api.AddVoiceChatMessageRequest"
 	Fields     []*Field
 	OneofDecls []*OneofDecl
+	// MapEntry is true for synthetic entry messages backing proto map<K,V>
+	// fields. Lets consumers detect "this MESSAGE-typed field is actually a
+	// map" without re-walking the raw descriptor.
+	MapEntry bool
 }
 
 type Field struct {
