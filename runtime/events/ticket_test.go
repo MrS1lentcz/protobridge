@@ -61,7 +61,10 @@ func TestMemoryTicketStore_LabelsAreCopied(t *testing.T) {
 	t.Cleanup(s.Close)
 
 	labels := map[string]string{"k": "v"}
-	ticket, _ := s.Issue(context.Background(), labels, time.Second)
+	ticket, err := s.Issue(context.Background(), labels, time.Second)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
 	labels["k"] = "mutated" // should not leak into stored entry
 
 	got, err := s.Redeem(context.Background(), ticket)
@@ -203,7 +206,7 @@ func TestBroadcastHub_SSEStreamsEvents(t *testing.T) {
 		t.Fatalf("content-type: %q", ct)
 	}
 
-	<-subscribed
+	awaitSubscribed(t, subscribed)
 	src.frames <- events.BroadcastFrame{
 		Subject: "task_created",
 		Payload: []byte(`{"id":"t-1"}`),
@@ -284,7 +287,7 @@ func TestBroadcastHub_TicketAuthBindsLabels(t *testing.T) {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}
 
-	<-subscribed
+	awaitSubscribed(t, subscribed)
 
 	// Only the matching-label frame should arrive; the second is filtered.
 	src.frames <- events.BroadcastFrame{Subject: "a", Payload: []byte(`{}`), Labels: map[string]string{"tenant_id": "acme"}}
@@ -447,7 +450,7 @@ func TestBroadcastHub_SSEReturnsOnWriteError(t *testing.T) {
 		close(done)
 	}()
 
-	<-subscribed
+	awaitSubscribed(t, subscribed)
 	src.frames <- events.BroadcastFrame{Subject: "a", Payload: []byte(`{}`)}
 	src.frames <- events.BroadcastFrame{Subject: "b", Payload: []byte(`{}`)}
 
@@ -505,7 +508,7 @@ func TestBroadcastHub_SSEExitsOnClientDisconnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
-	<-subscribed
+	awaitSubscribed(t, subscribed)
 	// Push a message so the message-write path runs at least once.
 	src.frames <- events.BroadcastFrame{Subject: "x", Payload: []byte(`{}`)}
 	_, _ = readSSEBlock(resp.Body)
@@ -699,7 +702,7 @@ func TestBroadcastHub_SSEClosesWhenHubContextCancelled(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	<-subscribed
+	awaitSubscribed(t, subscribed)
 	hubCancel() // should propagate into the per-request ctx and close the stream.
 
 	// Read until EOF — should happen well under the request deadline.
@@ -712,6 +715,18 @@ func TestBroadcastHub_SSEClosesWhenHubContextCancelled(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("stream did not close after hub context cancellation")
+	}
+}
+
+// awaitSubscribed blocks until the hub's onSubscribed hook fires or the
+// deadline elapses. A timeout here indicates a real bug (no client ever
+// registered) — failing fast beats waiting for the global test deadline.
+func awaitSubscribed(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for subscription hook")
 	}
 }
 

@@ -158,6 +158,14 @@ type hubClient struct {
 // that should survive transient backend failures must implement reconnect
 // internally before returning.
 func NewBroadcastHub(ctx context.Context, cfg BroadcastConfig) *BroadcastHub {
+	if ctx == nil {
+		// A nil ctx would panic the first time linkHubLifetime selects on
+		// h.ctx.Done(). Downgrading to Background keeps the hub usable —
+		// the caller loses the ability to tear it down cooperatively, but
+		// that's a misuse, not a crash worth propagating into every
+		// request goroutine.
+		ctx = context.Background()
+	}
 	if cfg.ClientBuffer <= 0 {
 		cfg.ClientBuffer = 64
 	}
@@ -443,16 +451,25 @@ func (h *BroadcastHub) serveSSE(w http.ResponseWriter, r *http.Request, principa
 	ticker := time.NewTicker(heartbeat)
 	defer ticker.Stop()
 
+	// Per-write deadline so a stalled client (peer stopped reading) can't
+	// pin this goroutine on a TCP send buffer. ctx cancellation alone
+	// does not unblock net/http writes. Mirrors the 10s bound on the
+	// WebSocket path.
+	rc := http.NewResponseController(w)
+	const writeTimeout = 10 * time.Second
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case payload := <-c.out:
+			_ = rc.SetWriteDeadline(time.Now().Add(writeTimeout))
 			if _, err := fmt.Fprintf(w, "event: message\ndata: %s\n\n", payload); err != nil {
 				return
 			}
 			flusher.Flush()
 		case <-ticker.C:
+			_ = rc.SetWriteDeadline(time.Now().Add(writeTimeout))
 			if _, err := w.Write([]byte(":ping\n\n")); err != nil {
 				return
 			}
