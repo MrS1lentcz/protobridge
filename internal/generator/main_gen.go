@@ -172,8 +172,26 @@ func main() {
 		}
 		return resp.GetLabels(), nil
 	}
+
+	// Ticket store: browsers' EventSource can't send Authorization headers,
+	// so a short-lived one-shot ticket bridges the gap. FE POSTs to the
+	// issuer endpoint with its normal auth credentials, then opens the
+	// SSE stream with ?ticket=<t>. In-memory store is fine for single-
+	// replica gateways; swap for a shared backend (Redis, DB) when scaling
+	// issuer and hub across pods.
+	ticketStore := events.NewMemoryTicketStore()
+	defer ticketStore.Close()
+	ticketPath := os.Getenv("PROTOBRIDGE_EVENTS_TICKET_PATH")
+	if ticketPath == "" {
+		ticketPath = "/api/events/ticket"
+	}
+	r.Method(http.MethodPost, ticketPath, events.NewTicketIssuer(events.TicketIssuerConfig{
+		Principal: principalLabelsFn,
+		Store:     ticketStore,
+	}))
 	{{ else -}}
 	var principalLabelsFn func(*http.Request) (map[string]string, error)
+	var ticketStore events.TicketStore
 	{{ end }}
 	{{ range .BroadcastServices }}
 	{{ .ConnVar }}, err := grpc.NewClient({{ .EnvAddr }}, dialOpts({{ printf "%q" .EnvTLSKey }}, {{ printf "%q" .EnvGRPCOptsKey }})...)
@@ -183,6 +201,7 @@ func main() {
 	defer func() { _ = {{ .ConnVar }}.Close() }()
 	eventspb.Register{{ .ServiceName }}Broadcast(broadcastCtx, r, {{ .ConnVar }}, {{ printf "%q" .Route }}, events.BroadcastConfig{
 		PrincipalLabels: principalLabelsFn,
+		TicketStore:     ticketStore,
 	})
 	{{ end }}
 	{{ end }}

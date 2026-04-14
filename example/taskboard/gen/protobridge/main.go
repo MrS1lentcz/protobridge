@@ -132,7 +132,45 @@ func main() {
 	broadcastCtx, broadcastCancel := context.WithCancel(context.Background())
 	defer broadcastCancel()
 
-	var principalLabelsFn func(*http.Request) (map[string]string, error)
+	// Auth response declares a labels map — extract per request and feed
+	// into BroadcastConfig.PrincipalLabels so the hub filters events to the
+	// authenticated user's label set.
+	principalLabelsFn := func(r *http.Request) (map[string]string, error) {
+		conn, err := pool.ConnectScaled(authServiceAddr, scalingCfg)
+		if err != nil {
+			return nil, err
+		}
+		defer pool.Release(authServiceAddr, conn)
+		client := authServicepb.NewAuthServiceClient(conn)
+		headers := make(map[string]string)
+		for k, v := range r.Header {
+			if len(v) > 0 {
+				headers[k] = v[0]
+			}
+		}
+		resp, err := client.Authenticate(r.Context(), &authServicepb.AuthRequest{Headers: headers})
+		if err != nil {
+			return nil, err
+		}
+		return resp.GetLabels(), nil
+	}
+
+	// Ticket store: browsers' EventSource can't send Authorization headers,
+	// so a short-lived one-shot ticket bridges the gap. FE POSTs to the
+	// issuer endpoint with its normal auth credentials, then opens the
+	// SSE stream with ?ticket=<t>. In-memory store is fine for single-
+	// replica gateways; swap for a shared backend (Redis, DB) when scaling
+	// issuer and hub across pods.
+	ticketStore := events.NewMemoryTicketStore()
+	defer ticketStore.Close()
+	ticketPath := os.Getenv("PROTOBRIDGE_EVENTS_TICKET_PATH")
+	if ticketPath == "" {
+		ticketPath = "/api/events/ticket"
+	}
+	r.Method(http.MethodPost, ticketPath, events.NewTicketIssuer(events.TicketIssuerConfig{
+		Principal: principalLabelsFn,
+		Store:     ticketStore,
+	}))
 
 	taskBroadcastConn, err := grpc.NewClient(taskBroadcastAddr, dialOpts("PROTOBRIDGE_TASK_BROADCAST_TLS", "PROTOBRIDGE_TASK_BROADCAST_GRPC_OPTIONS")...)
 	if err != nil {
@@ -141,6 +179,7 @@ func main() {
 	defer func() { _ = taskBroadcastConn.Close() }()
 	eventspb.RegisterTaskBroadcastBroadcast(broadcastCtx, r, taskBroadcastConn, "/api/events/tasks", events.BroadcastConfig{
 		PrincipalLabels: principalLabelsFn,
+		TicketStore:     ticketStore,
 	})
 
 	// Prometheus metrics endpoint

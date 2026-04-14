@@ -248,6 +248,71 @@ hub := events.NewBroadcastHub(ctx, events.BroadcastConfig{
 r.Method(http.MethodGet, "/api/events/orders", hub)
 ```
 
+### Transports: WebSocket and SSE
+
+The hub content-negotiates on the `Accept` header:
+
+- `Accept: text/event-stream` → Server-Sent Events (SSE). Fits the browser's native `EventSource`, auto-reconnects, passes through every HTTP proxy/CDN, and carries no protocol overhead beyond a `data:` line per message.
+- anything else → WebSocket upgrade (the original transport). Full-duplex, binary-capable, unchanged from earlier releases.
+
+Both transports share the same JSON envelope, the same principal resolution, and the same label filter — pick per client, not per server.
+
+```js
+new EventSource("/api/events/orders")        // SSE — Accept set automatically
+new WebSocket("ws://host/api/events/orders") // WS upgrade — default branch
+```
+
+SSE writes a comment-line keepalive (`:ping\n\n`) on the interval configured by `BroadcastConfig.HeartbeatInterval` (default 15s). This keeps idle connections alive through load balancers that close silent TCP sockets early (nginx: 60s, AWS ALB: 60s). WebSocket uses the client library's own ping handling and ignores the setting.
+
+### Ticket-based auth for browsers
+
+Browsers' `EventSource` cannot set custom request headers, so the usual `Authorization: Bearer …` pattern doesn't apply to SSE. Putting the bearer token in a query string leaks it into access logs, browser history, and the `Referer` header. The idiomatic fix is a short-lived, one-shot **ticket**:
+
+```
+  FE                  Gateway                             FE
+   │  POST /api/events/ticket  (Authorization: Bearer …)  │
+   │  ───────────────────────────────────────────────────►│
+   │  { "ticket": "eR7…", "expires_in": 30 }              │
+   │  ◄───────────────────────────────────────────────────│
+   │  GET /api/events/orders?ticket=eR7…                  │
+   │  (EventSource — no auth header needed)               │
+   │  ───────────────────────────────────────────────────►│
+   │  event: message                                      │
+   │  data: {"subject":"order_created", …}                │
+```
+
+The ticket endpoint is auto-registered by `protoc-gen-protobridge` at `/api/events/ticket` whenever:
+
+1. A `(protobridge.auth_method)` RPC exists in the proto, **and**
+2. The auth response declares a `map<string,string> labels` field (see *Multi-tenant routing with labels* below), **and**
+3. At least one `(protobridge.broadcast)` service is declared.
+
+The path can be overridden with the `PROTOBRIDGE_EVENTS_TICKET_PATH` env var. Tickets default to 30s TTL and are stored in an in-memory `MemoryTicketStore` per gateway pod; a sticky-session LB is enough for most deployments, and swapping in a shared backend (Redis, DB) via the `events.TicketStore` interface solves the multi-pod issuer/redeemer split.
+
+Redemption is one-shot: a successful `Redeem` invalidates the ticket for any future use, so leaked tickets have at most a single-connection blast radius.
+
+The same endpoint also supports cookie-based auth transparently — the ticket issuer reuses whatever function you provide as `PrincipalLabels` (which the generator wires to your `AuthService.Authenticate` RPC). If your deployment is same-origin and session-cookie-based, clients can skip the ticket flow entirely and open `EventSource('/api/events/orders', { withCredentials: true })` directly.
+
+### Frontend usage
+
+A minimal browser helper ships in `example/taskboard/client/ts/events.ts`:
+
+```ts
+import { openEventStream } from "./events";
+
+const stream = openEventStream({
+  url: "/api/events/tasks",
+  ticketUrl: "/api/events/ticket",
+  getAuthHeaders: () => ({ Authorization: `Bearer ${loadToken()}` }),
+  onMessage: (env) => dispatch(env.subject, env.event),
+  onError: (err) => console.warn("events:", err),
+});
+
+// Later: stream.close();
+```
+
+The helper handles reconnect with fresh tickets (each connect burns its issue-time ticket; the helper fetches a new one on reconnect) and exponential backoff. See `client/ts/example.ts` for the full end-to-end setup including per-screen UX filtering via `env.labels`.
+
 A browser opens `ws://api/events/orders` and receives every PUBLIC fan-out event in the service as it happens:
 
 ```json
@@ -302,7 +367,7 @@ events.BroadcastConfig{
 }
 ```
 
-When `protoc-gen-protobridge` detects a `labels` field on the auth method's response, it wires `PrincipalLabels` automatically; you usually don't write this by hand.
+When `protoc-gen-protobridge` detects a `labels` field on the auth method's response, it wires `PrincipalLabels` automatically **and** mounts the ticket issuer endpoint (see *Ticket-based auth for browsers* above); you usually don't write either by hand.
 
 ### Two filtering layers, one wire format
 

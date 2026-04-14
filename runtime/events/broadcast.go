@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -80,6 +82,28 @@ type BroadcastConfig struct {
 	// already enforces origin policy.
 	OriginPatterns   []string
 	SkipOriginVerify bool
+
+	// TicketStore, when non-nil, enables ticket-based auth for SSE
+	// clients that can't send headers (browsers' EventSource). A request
+	// arriving with ?ticket=<t> bypasses PrincipalLabels and uses the
+	// labels bound to the ticket at issuance time. The ticket is redeemed
+	// (consumed) on use. When the param is absent, PrincipalLabels runs
+	// as normal — both paths coexist.
+	//
+	// Pair with NewTicketIssuer mounted on a path covered by your normal
+	// auth middleware. Usually the generator wires both sides for you.
+	TicketStore TicketStore
+
+	// TicketParam is the query-parameter name carrying the ticket.
+	// Defaults to "ticket".
+	TicketParam string
+
+	// HeartbeatInterval controls how often the SSE handler emits a
+	// comment-line keepalive (":ping\n\n"). Keeps idle connections alive
+	// through proxies/load-balancers with short idle timeouts. Defaults
+	// to 15s. WebSocket connections rely on the library's own ping
+	// handling and ignore this setting.
+	HeartbeatInterval time.Duration
 
 	// ClientBuffer is the per-WS-client outbound queue depth. When a slow
 	// client fills the queue, the oldest pending frame is dropped (drop-
@@ -231,27 +255,112 @@ func (h *BroadcastHub) dispatch(f BroadcastFrame) {
 	}
 }
 
-// ServeHTTP upgrades the request to WebSocket and registers it as a hub
-// client. Per-principal labels are resolved before the upgrade so auth
-// failures land on a plain HTTP response code.
+// ServeHTTP content-negotiates between SSE and WebSocket, resolves the
+// caller's principal labels (via ticket redemption or PrincipalLabels),
+// and hands the connection off to the matching transport handler. Auth
+// failures land on a plain HTTP response code before any upgrade.
 func (h *BroadcastHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.cfg.Marshal == nil {
 		http.Error(w, "broadcast handler not configured", http.StatusInternalServerError)
 		return
 	}
 
-	var principalLabels map[string]string
+	principalLabels, ok := h.resolvePrincipal(w, r)
+	if !ok {
+		return
+	}
+
+	if isSSERequest(r) {
+		h.serveSSE(w, r, principalLabels)
+		return
+	}
+	h.serveWebSocket(w, r, principalLabels)
+}
+
+// resolvePrincipal runs the ticket redemption first (if configured and the
+// query param is present), then falls back to PrincipalLabels. Returns
+// false after writing an HTTP error response — caller should return.
+func (h *BroadcastHub) resolvePrincipal(w http.ResponseWriter, r *http.Request) (map[string]string, bool) {
+	if h.cfg.TicketStore != nil {
+		param := h.cfg.TicketParam
+		if param == "" {
+			param = "ticket"
+		}
+		if ticket := r.URL.Query().Get(param); ticket != "" {
+			labels, err := h.cfg.TicketStore.Redeem(r.Context(), ticket)
+			if err != nil {
+				h.logger().Warn("events: broadcast ticket redemption failed",
+					"remote", r.RemoteAddr, "err", err)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return nil, false
+			}
+			return labels, true
+		}
+	}
 	if h.cfg.PrincipalLabels != nil {
 		pl, err := h.cfg.PrincipalLabels(r)
 		if err != nil {
 			h.logger().Warn("events: broadcast principal labels resolution failed",
 				"remote", r.RemoteAddr, "err", err)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
+			return nil, false
 		}
-		principalLabels = pl
+		return pl, true
 	}
+	return nil, true
+}
 
+// isSSERequest returns true if the Accept header advertises text/event-
+// stream. EventSource sends exactly this; tooling like curl -NH
+// "Accept: text/event-stream" also works.
+func isSSERequest(r *http.Request) bool {
+	for _, v := range r.Header.Values("Accept") {
+		if strings.Contains(v, "text/event-stream") {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *BroadcastHub) register(principalLabels map[string]string) *hubClient {
+	c := &hubClient{
+		out:             make(chan []byte, h.cfg.ClientBuffer),
+		principalLabels: principalLabels,
+	}
+	h.mu.Lock()
+	h.clients[c] = struct{}{}
+	h.mu.Unlock()
+	if h.cfg.onSubscribed != nil {
+		h.cfg.onSubscribed()
+	}
+	return c
+}
+
+func (h *BroadcastHub) unregister(c *hubClient, remote string) {
+	h.mu.Lock()
+	delete(h.clients, c)
+	h.mu.Unlock()
+	if dropped := c.dropped.Load(); dropped > 0 {
+		h.logger().Info("events: broadcast client disconnected with dropped frames",
+			"remote", remote, "dropped", dropped)
+	}
+}
+
+// linkHubLifetime wires the hub's ctx into the per-request cancel so
+// shutting down the hub (cancelling the ctx passed to NewBroadcastHub)
+// terminates every active connection instead of leaving them hanging
+// until r.Context() expires on its own.
+func (h *BroadcastHub) linkHubLifetime(ctx context.Context, cancel context.CancelFunc) {
+	go func() {
+		select {
+		case <-h.ctx.Done():
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+}
+
+func (h *BroadcastHub) serveWebSocket(w http.ResponseWriter, r *http.Request, principalLabels map[string]string) {
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns:     h.cfg.OriginPatterns,
 		InsecureSkipVerify: h.cfg.SkipOriginVerify,
@@ -263,41 +372,10 @@ func (h *BroadcastHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
+	h.linkHubLifetime(ctx, cancel)
 
-	// Hub-lifetime cancellation: when the ctx passed to NewBroadcastHub is
-	// cancelled, every active WS connection must terminate too. Without
-	// this link only the source goroutine would stop; existing clients
-	// would sit waiting for r.Context() to die on its own.
-	if h.ctx != nil {
-		go func() {
-			select {
-			case <-h.ctx.Done():
-				cancel()
-			case <-ctx.Done():
-			}
-		}()
-	}
-
-	c := &hubClient{
-		out:             make(chan []byte, h.cfg.ClientBuffer),
-		principalLabels: principalLabels,
-	}
-	h.mu.Lock()
-	h.clients[c] = struct{}{}
-	h.mu.Unlock()
-	defer func() {
-		h.mu.Lock()
-		delete(h.clients, c)
-		h.mu.Unlock()
-		if dropped := c.dropped.Load(); dropped > 0 {
-			h.logger().Info("events: broadcast client disconnected with dropped frames",
-				"remote", r.RemoteAddr, "dropped", dropped)
-		}
-	}()
-
-	if h.cfg.onSubscribed != nil {
-		h.cfg.onSubscribed()
-	}
+	c := h.register(principalLabels)
+	defer h.unregister(c, r.RemoteAddr)
 
 	// Reader goroutine: detect client disconnect / ping.
 	go func() {
@@ -323,6 +401,62 @@ func (h *BroadcastHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return
 			}
+		}
+	}
+}
+
+// serveSSE implements the text/event-stream branch. Each enqueued
+// envelope becomes one `event: message\ndata: <json>\n\n` block; a
+// heartbeat comment is emitted on idle to keep proxies from closing the
+// connection.
+//
+// Origin enforcement on SSE is delegated to upstream CORS middleware —
+// EventSource obeys CORS, unlike raw WebSocket handshakes (which is why
+// OriginPatterns exists for the WS path).
+func (h *BroadcastHub) serveSSE(w http.ResponseWriter, r *http.Request, principalLabels map[string]string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	header := w.Header()
+	header.Set("Content-Type", "text/event-stream")
+	header.Set("Cache-Control", "no-cache, no-transform")
+	header.Set("Connection", "keep-alive")
+	// Disable proxy buffering (nginx respects this; harmless elsewhere).
+	header.Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	h.linkHubLifetime(ctx, cancel)
+
+	c := h.register(principalLabels)
+	defer h.unregister(c, r.RemoteAddr)
+
+	heartbeat := h.cfg.HeartbeatInterval
+	if heartbeat <= 0 {
+		heartbeat = 15 * time.Second
+	}
+	ticker := time.NewTicker(heartbeat)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case payload := <-c.out:
+			if _, err := fmt.Fprintf(w, "event: message\ndata: %s\n\n", payload); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-ticker.C:
+			if _, err := w.Write([]byte(":ping\n\n")); err != nil {
+				return
+			}
+			flusher.Flush()
 		}
 	}
 }

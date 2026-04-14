@@ -442,10 +442,14 @@ func (x *AuthRequest) GetHeaders() map[string]string {
 }
 
 type AuthResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
-	Role          string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	UserId   string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Username string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	Role     string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`
+	// labels flow into broadcast hub filtering + ticket issuance; every
+	// key/value here is a per-principal filter the hub applies when
+	// routing events over WS / SSE.
+	Labels        map[string]string `protobuf:"bytes,4,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -499,6 +503,13 @@ func (x *AuthResponse) GetRole() string {
 		return x.Role
 	}
 	return ""
+}
+
+func (x *AuthResponse) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
 }
 
 type CreateTaskRequest struct {
@@ -1495,11 +1506,15 @@ const file_taskboard_v1_taskboard_proto_rawDesc = "" +
 	"\aheaders\x18\x01 \x03(\v2&.taskboard.v1.AuthRequest.HeadersEntryR\aheaders\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"W\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd2\x01\n" +
 	"\fAuthResponse\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x12\n" +
-	"\x04role\x18\x03 \x01(\tR\x04role\"\xc4\x01\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\x12>\n" +
+	"\x06labels\x18\x04 \x03(\v2&.taskboard.v1.AuthResponse.LabelsEntryR\x06labels\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc4\x01\n" +
 	"\x11CreateTaskRequest\x12\x1a\n" +
 	"\x05title\x18\x01 \x01(\tB\x04\x88\xb5\x18\x01R\x05title\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12<\n" +
@@ -1611,7 +1626,7 @@ func file_taskboard_v1_taskboard_proto_rawDescGZIP() []byte {
 }
 
 var file_taskboard_v1_taskboard_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_taskboard_v1_taskboard_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_taskboard_v1_taskboard_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_taskboard_v1_taskboard_proto_goTypes = []any{
 	(TaskPriority)(0),              // 0: taskboard.v1.TaskPriority
 	(TaskStatus)(0),                // 1: taskboard.v1.TaskStatus
@@ -1638,8 +1653,9 @@ var file_taskboard_v1_taskboard_proto_goTypes = []any{
 	(*ChatMessage)(nil),            // 22: taskboard.v1.ChatMessage
 	(*TaskBroadcastEnvelope)(nil),  // 23: taskboard.v1.TaskBroadcastEnvelope
 	nil,                            // 24: taskboard.v1.AuthRequest.HeadersEntry
-	nil,                            // 25: taskboard.v1.TaskBroadcastEnvelope.LabelsEntry
-	(*emptypb.Empty)(nil),          // 26: google.protobuf.Empty
+	nil,                            // 25: taskboard.v1.AuthResponse.LabelsEntry
+	nil,                            // 26: taskboard.v1.TaskBroadcastEnvelope.LabelsEntry
+	(*emptypb.Empty)(nil),          // 27: google.protobuf.Empty
 }
 var file_taskboard_v1_taskboard_proto_depIdxs = []int32{
 	0,  // 0: taskboard.v1.Task.priority:type_name -> taskboard.v1.TaskPriority
@@ -1647,48 +1663,49 @@ var file_taskboard_v1_taskboard_proto_depIdxs = []int32{
 	3,  // 2: taskboard.v1.Task.file:type_name -> taskboard.v1.FileAttachment
 	4,  // 3: taskboard.v1.Task.link:type_name -> taskboard.v1.LinkAttachment
 	24, // 4: taskboard.v1.AuthRequest.headers:type_name -> taskboard.v1.AuthRequest.HeadersEntry
-	0,  // 5: taskboard.v1.CreateTaskRequest.priority:type_name -> taskboard.v1.TaskPriority
-	0,  // 6: taskboard.v1.UpdateTaskRequest.priority:type_name -> taskboard.v1.TaskPriority
-	1,  // 7: taskboard.v1.UpdateTaskRequest.status:type_name -> taskboard.v1.TaskStatus
-	13, // 8: taskboard.v1.ListTasksRequest.paging:type_name -> taskboard.v1.Paging
-	1,  // 9: taskboard.v1.ListTasksRequest.status_filter:type_name -> taskboard.v1.TaskStatus
-	0,  // 10: taskboard.v1.ListTasksRequest.priority_filter:type_name -> taskboard.v1.TaskPriority
-	2,  // 11: taskboard.v1.ListTasksResponse.tasks:type_name -> taskboard.v1.Task
-	2,  // 12: taskboard.v1.TaskEvent.task:type_name -> taskboard.v1.Task
-	0,  // 13: taskboard.v1.TaskCreatedEvent.priority:type_name -> taskboard.v1.TaskPriority
-	0,  // 14: taskboard.v1.BulkCreateTaskRequest.priority:type_name -> taskboard.v1.TaskPriority
-	25, // 15: taskboard.v1.TaskBroadcastEnvelope.labels:type_name -> taskboard.v1.TaskBroadcastEnvelope.LabelsEntry
-	16, // 16: taskboard.v1.TaskBroadcastEnvelope.task_created_event:type_name -> taskboard.v1.TaskCreatedEvent
-	17, // 17: taskboard.v1.TaskBroadcastEnvelope.task_completed_event:type_name -> taskboard.v1.TaskCompletedEvent
-	5,  // 18: taskboard.v1.AuthService.Authenticate:input_type -> taskboard.v1.AuthRequest
-	7,  // 19: taskboard.v1.TaskService.CreateTask:input_type -> taskboard.v1.CreateTaskRequest
-	8,  // 20: taskboard.v1.TaskService.GetTask:input_type -> taskboard.v1.GetTaskRequest
-	9,  // 21: taskboard.v1.TaskService.UpdateTask:input_type -> taskboard.v1.UpdateTaskRequest
-	10, // 22: taskboard.v1.TaskService.DeleteTask:input_type -> taskboard.v1.DeleteTaskRequest
-	12, // 23: taskboard.v1.TaskService.ListTasks:input_type -> taskboard.v1.ListTasksRequest
-	19, // 24: taskboard.v1.TaskService.WatchTasks:input_type -> taskboard.v1.WatchTasksRequest
-	19, // 25: taskboard.v1.TaskService.TaskNotifications:input_type -> taskboard.v1.WatchTasksRequest
-	20, // 26: taskboard.v1.TaskService.BulkCreateTasks:input_type -> taskboard.v1.BulkCreateTaskRequest
-	22, // 27: taskboard.v1.TaskService.TaskChat:input_type -> taskboard.v1.ChatMessage
-	19, // 28: taskboard.v1.TaskService.ActivityFeed:input_type -> taskboard.v1.WatchTasksRequest
-	26, // 29: taskboard.v1.TaskBroadcast.Stream:input_type -> google.protobuf.Empty
-	6,  // 30: taskboard.v1.AuthService.Authenticate:output_type -> taskboard.v1.AuthResponse
-	2,  // 31: taskboard.v1.TaskService.CreateTask:output_type -> taskboard.v1.Task
-	2,  // 32: taskboard.v1.TaskService.GetTask:output_type -> taskboard.v1.Task
-	2,  // 33: taskboard.v1.TaskService.UpdateTask:output_type -> taskboard.v1.Task
-	11, // 34: taskboard.v1.TaskService.DeleteTask:output_type -> taskboard.v1.DeleteTaskResponse
-	14, // 35: taskboard.v1.TaskService.ListTasks:output_type -> taskboard.v1.ListTasksResponse
-	15, // 36: taskboard.v1.TaskService.WatchTasks:output_type -> taskboard.v1.TaskEvent
-	15, // 37: taskboard.v1.TaskService.TaskNotifications:output_type -> taskboard.v1.TaskEvent
-	21, // 38: taskboard.v1.TaskService.BulkCreateTasks:output_type -> taskboard.v1.BulkCreateTaskResponse
-	22, // 39: taskboard.v1.TaskService.TaskChat:output_type -> taskboard.v1.ChatMessage
-	15, // 40: taskboard.v1.TaskService.ActivityFeed:output_type -> taskboard.v1.TaskEvent
-	23, // 41: taskboard.v1.TaskBroadcast.Stream:output_type -> taskboard.v1.TaskBroadcastEnvelope
-	30, // [30:42] is the sub-list for method output_type
-	18, // [18:30] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	25, // 5: taskboard.v1.AuthResponse.labels:type_name -> taskboard.v1.AuthResponse.LabelsEntry
+	0,  // 6: taskboard.v1.CreateTaskRequest.priority:type_name -> taskboard.v1.TaskPriority
+	0,  // 7: taskboard.v1.UpdateTaskRequest.priority:type_name -> taskboard.v1.TaskPriority
+	1,  // 8: taskboard.v1.UpdateTaskRequest.status:type_name -> taskboard.v1.TaskStatus
+	13, // 9: taskboard.v1.ListTasksRequest.paging:type_name -> taskboard.v1.Paging
+	1,  // 10: taskboard.v1.ListTasksRequest.status_filter:type_name -> taskboard.v1.TaskStatus
+	0,  // 11: taskboard.v1.ListTasksRequest.priority_filter:type_name -> taskboard.v1.TaskPriority
+	2,  // 12: taskboard.v1.ListTasksResponse.tasks:type_name -> taskboard.v1.Task
+	2,  // 13: taskboard.v1.TaskEvent.task:type_name -> taskboard.v1.Task
+	0,  // 14: taskboard.v1.TaskCreatedEvent.priority:type_name -> taskboard.v1.TaskPriority
+	0,  // 15: taskboard.v1.BulkCreateTaskRequest.priority:type_name -> taskboard.v1.TaskPriority
+	26, // 16: taskboard.v1.TaskBroadcastEnvelope.labels:type_name -> taskboard.v1.TaskBroadcastEnvelope.LabelsEntry
+	16, // 17: taskboard.v1.TaskBroadcastEnvelope.task_created_event:type_name -> taskboard.v1.TaskCreatedEvent
+	17, // 18: taskboard.v1.TaskBroadcastEnvelope.task_completed_event:type_name -> taskboard.v1.TaskCompletedEvent
+	5,  // 19: taskboard.v1.AuthService.Authenticate:input_type -> taskboard.v1.AuthRequest
+	7,  // 20: taskboard.v1.TaskService.CreateTask:input_type -> taskboard.v1.CreateTaskRequest
+	8,  // 21: taskboard.v1.TaskService.GetTask:input_type -> taskboard.v1.GetTaskRequest
+	9,  // 22: taskboard.v1.TaskService.UpdateTask:input_type -> taskboard.v1.UpdateTaskRequest
+	10, // 23: taskboard.v1.TaskService.DeleteTask:input_type -> taskboard.v1.DeleteTaskRequest
+	12, // 24: taskboard.v1.TaskService.ListTasks:input_type -> taskboard.v1.ListTasksRequest
+	19, // 25: taskboard.v1.TaskService.WatchTasks:input_type -> taskboard.v1.WatchTasksRequest
+	19, // 26: taskboard.v1.TaskService.TaskNotifications:input_type -> taskboard.v1.WatchTasksRequest
+	20, // 27: taskboard.v1.TaskService.BulkCreateTasks:input_type -> taskboard.v1.BulkCreateTaskRequest
+	22, // 28: taskboard.v1.TaskService.TaskChat:input_type -> taskboard.v1.ChatMessage
+	19, // 29: taskboard.v1.TaskService.ActivityFeed:input_type -> taskboard.v1.WatchTasksRequest
+	27, // 30: taskboard.v1.TaskBroadcast.Stream:input_type -> google.protobuf.Empty
+	6,  // 31: taskboard.v1.AuthService.Authenticate:output_type -> taskboard.v1.AuthResponse
+	2,  // 32: taskboard.v1.TaskService.CreateTask:output_type -> taskboard.v1.Task
+	2,  // 33: taskboard.v1.TaskService.GetTask:output_type -> taskboard.v1.Task
+	2,  // 34: taskboard.v1.TaskService.UpdateTask:output_type -> taskboard.v1.Task
+	11, // 35: taskboard.v1.TaskService.DeleteTask:output_type -> taskboard.v1.DeleteTaskResponse
+	14, // 36: taskboard.v1.TaskService.ListTasks:output_type -> taskboard.v1.ListTasksResponse
+	15, // 37: taskboard.v1.TaskService.WatchTasks:output_type -> taskboard.v1.TaskEvent
+	15, // 38: taskboard.v1.TaskService.TaskNotifications:output_type -> taskboard.v1.TaskEvent
+	21, // 39: taskboard.v1.TaskService.BulkCreateTasks:output_type -> taskboard.v1.BulkCreateTaskResponse
+	22, // 40: taskboard.v1.TaskService.TaskChat:output_type -> taskboard.v1.ChatMessage
+	15, // 41: taskboard.v1.TaskService.ActivityFeed:output_type -> taskboard.v1.TaskEvent
+	23, // 42: taskboard.v1.TaskBroadcast.Stream:output_type -> taskboard.v1.TaskBroadcastEnvelope
+	31, // [31:43] is the sub-list for method output_type
+	19, // [19:31] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_taskboard_v1_taskboard_proto_init() }
@@ -1710,7 +1727,7 @@ func file_taskboard_v1_taskboard_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_taskboard_v1_taskboard_proto_rawDesc), len(file_taskboard_v1_taskboard_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   24,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   3,
 		},
