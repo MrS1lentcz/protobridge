@@ -71,6 +71,10 @@ message AuthResponse {
   string user_id = 1;
   string username = 2;
   string role = 3;
+  // labels flow into broadcast hub filtering + ticket issuance; every
+  // key/value here is a per-principal filter the hub applies when
+  // routing events over WS / SSE.
+  map<string, string> labels = 4;
 }
 
 // =============================================================================

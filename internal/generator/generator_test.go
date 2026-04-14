@@ -2345,6 +2345,74 @@ func TestGenerateMain_WithBroadcasts(t *testing.T) {
 	}
 }
 
+// TestGenerateMain_WithBroadcastsAndLabeledAuth verifies that when the
+// configured auth method returns a labels map, the generator wires the
+// ticket-auth surface (MemoryTicketStore + NewTicketIssuer mount) and
+// feeds the store into every BroadcastConfig. This is the production
+// happy path: one auth call issues tickets, SSE clients redeem them.
+func TestGenerateMain_WithBroadcastsAndLabeledAuth(t *testing.T) {
+	api := &parser.ParsedAPI{
+		AuthMethod: &parser.AuthMethod{
+			ServiceName: "AuthService",
+			MethodName:  "Authenticate",
+			GoPackage:   "example.com/auth",
+			InputType:   &parser.MessageType{Name: "AuthRequest"},
+			OutputType: &parser.MessageType{
+				Name: "AuthResponse",
+				Fields: []*parser.Field{{
+					Name:     "labels",
+					Repeated: true,
+					TypeName: ".auth.AuthResponse.LabelsEntry",
+				}},
+			},
+		},
+		Services: []*parser.Service{{
+			Name:      "AuthService",
+			GoPackage: "example.com/auth",
+			Methods: []*parser.Method{{
+				Name:       "Authenticate",
+				HTTPMethod: "POST",
+				HTTPPath:   "/auth",
+				StreamType: parser.StreamUnary,
+				InputType:  &parser.MessageType{Name: "AuthRequest"},
+				OutputType: &parser.MessageType{Name: "AuthResponse"},
+			}},
+		}},
+		BroadcastServices: []*parser.BroadcastService{{
+			Name:         "OrderBroadcast",
+			Route:        "/api/v1/events/orders",
+			GoPackage:    "example.com/myapp/events",
+			ProtoPackage: "myapp.events",
+			Events: []*parser.BroadcastEvent{{
+				OneofFieldName: "order_created",
+				Message:        &parser.MessageType{Name: "OrderCreated", FullName: ".myapp.events.OrderCreated"},
+				Subject:        "order_created",
+				GoPackage:      "example.com/myapp/events",
+			}},
+		}},
+	}
+
+	content := generateMain(api, "example.com/test/handler", "example.com/gen/events")
+	for _, want := range []string{
+		"ticketStore := events.NewMemoryTicketStore()",
+		"defer ticketStore.Close()",
+		`os.Getenv("PROTOBRIDGE_EVENTS_TICKET_PATH")`,
+		`ticketPath = "/api/events/ticket"`,
+		"events.NewTicketIssuer(events.TicketIssuerConfig{",
+		"Principal: principalLabelsFn,",
+		"Store:     ticketStore,",
+		"PrincipalLabels: principalLabelsFn,",
+		"TicketStore:     ticketStore,",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("labeled-auth broadcast main.go missing %q\n---\n%s", want, content)
+		}
+	}
+	if _, err := parser2.ParseFile(token.NewFileSet(), "main.go", content, parser2.AllErrors); err != nil {
+		t.Errorf("generated labeled-auth main.go is not parseable Go: %v\n%s", err, content)
+	}
+}
+
 func TestGenerateMain_NoBroadcastsOmitsEventsImport(t *testing.T) {
 	api := testAPI()
 	content := generateMain(api, "example.com/test/handler", "")
