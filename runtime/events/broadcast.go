@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -112,7 +113,9 @@ type BroadcastHub struct {
 type hubClient struct {
 	out             chan []byte
 	principalLabels map[string]string
-	dropped         uint64
+	// dropped is incremented by the hub's dispatch goroutine and read by
+	// ServeHTTP on disconnect — atomic to keep the race detector happy.
+	dropped atomic.Uint64
 }
 
 // NewBroadcastHub starts the source goroutine in the background. The hub is
@@ -198,13 +201,13 @@ func (h *BroadcastHub) dispatch(f BroadcastFrame) {
 		default:
 			select {
 			case <-c.out:
-				c.dropped++
+				c.dropped.Add(1)
 			default:
 			}
 			select {
 			case c.out <- envelope:
 			default:
-				c.dropped++
+				c.dropped.Add(1)
 			}
 		}
 	}
@@ -254,9 +257,9 @@ func (h *BroadcastHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.mu.Lock()
 		delete(h.clients, c)
 		h.mu.Unlock()
-		if c.dropped > 0 {
+		if dropped := c.dropped.Load(); dropped > 0 {
 			h.logger().Info("events: broadcast client disconnected with dropped frames",
-				"remote", r.RemoteAddr, "dropped", c.dropped)
+				"remote", r.RemoteAddr, "dropped", dropped)
 		}
 	}()
 
