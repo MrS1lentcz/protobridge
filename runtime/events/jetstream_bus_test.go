@@ -17,8 +17,8 @@ import (
 )
 
 // startEmbeddedJetStream boots an in-process NATS server with JetStream
-// enabled and a temp storage dir. Returns the client URL and a shutdown
-// func; registers t.Cleanup to stop the server.
+// enabled and a temp storage dir. It returns the client URL and registers
+// t.Cleanup to stop the server.
 func startEmbeddedJetStream(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

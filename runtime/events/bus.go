@@ -127,8 +127,9 @@ type DurableConfig struct {
 	// treating the delivery as failed and redelivering. Default 30s.
 	AckWait time.Duration
 	// MaxDeliver caps redelivery attempts. After this many attempts the
-	// message is routed to DeadLetterSubject. Default 5. Non-positive
-	// values disable the DLQ hop (unbounded redelivery).
+	// message is routed to DeadLetterSubject. Default 5. WithMaxDeliver
+	// rejects non-positive values (defaults stay), so to truly disable
+	// the DLQ hop set DeadLetterSubject = "-" via WithDeadLetterSubject.
 	MaxDeliver int
 	// MaxInFlight bounds how many messages the consumer may have unacked
 	// at once. Default 1 — serial per subscriber instance, which is the

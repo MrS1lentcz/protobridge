@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/nats-io/nats.go"
 
 	"github.com/mrs1lentcz/protobridge/runtime/events"
 )
@@ -296,6 +299,144 @@ func TestJetStreamBus_SubscribeBroadcastEmptySubjectFails(t *testing.T) {
 		return nil
 	}); err == nil {
 		t.Fatal("expected error on empty broadcast subject")
+	}
+}
+
+// Handler that explicitly Nacks but returns nil must still trigger DLQ
+// after MaxDeliver. The previous DLQ guard checked only `err != nil`,
+// missing this case.
+func TestJetStreamBus_DLQRoutesOnNackWithoutError(t *testing.T) {
+	bus := newTestJetStreamBus(t)
+
+	dlqCh := make(chan events.Message, 1)
+	_, err := bus.SubscribeBroadcast("tasks.nack_nil.dlq", func(_ context.Context, m events.Message) error {
+		dlqCh <- m
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = bus.SubscribeDurable("tasks.nack_nil", "g", func(_ context.Context, m events.Message) error {
+		m.Nack()
+		return nil // <-- explicit Nack but nil return
+	},
+		events.WithAckWait(80*time.Millisecond),
+		events.WithMaxDeliver(2),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := bus.Publish(context.Background(), "tasks.nack_nil", []byte("p"), events.KindDurable, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case m := <-dlqCh:
+		if m.Headers["X-Dlq-Reason"] != "max_deliver_exceeded" {
+			t.Errorf("DLQ headers wrong: %+v", m.Headers)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Nack-without-error did not DLQ")
+	}
+}
+
+// Panicking handler at the MaxDeliver boundary must DLQ — moving the
+// DLQ check into the panic-recovery defer is what makes this work.
+func TestJetStreamBus_DLQRoutesOnPanicAtMaxDeliver(t *testing.T) {
+	bus := newTestJetStreamBus(t)
+
+	dlqCh := make(chan events.Message, 1)
+	_, err := bus.SubscribeBroadcast("tasks.always_panic.dlq", func(_ context.Context, m events.Message) error {
+		dlqCh <- m
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = bus.SubscribeDurable("tasks.always_panic", "g", func(_ context.Context, _ events.Message) error {
+		panic("boom every time")
+	},
+		events.WithAckWait(80*time.Millisecond),
+		events.WithMaxDeliver(2),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := bus.Publish(context.Background(), "tasks.always_panic", []byte("p"), events.KindDurable, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case m := <-dlqCh:
+		if got := m.Headers["X-Dlq-Error"]; got == "" || !strings.Contains(got, "panic") {
+			t.Errorf("DLQ X-Dlq-Error should mention panic, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("panic-only handler did not DLQ at MaxDeliver")
+	}
+}
+
+// Close must stop subscription dispatch even when the bus uses a
+// caller-owned nats.Conn (ownConn=false). Previous Close only cancelled
+// the dispatch context — it didn't tear down the JetStream Consume loop
+// or the core-NATS subscription, so handlers kept firing post-Close.
+func TestJetStreamBus_CloseStopsCallerOwnedSubscriptions(t *testing.T) {
+	url := startEmbeddedJetStream(t)
+	nc, err := nats.Connect(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+
+	bus, err := events.NewJetStreamBus(context.Background(), events.JetStreamConfig{
+		Conn:           nc,
+		StreamName:     "owned_close",
+		StreamSubjects: []string{"x.>"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var hits atomic.Int32
+	_, err = bus.SubscribeBroadcast("x.tick", func(_ context.Context, _ events.Message) error {
+		hits.Add(1)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// Pre-close baseline: at least one delivery proves the wiring works.
+	if err := bus.Publish(context.Background(), "x.tick", []byte("a"), events.KindBroadcast, nil); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(2 * time.Second)
+	for hits.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("baseline delivery never arrived")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	if err := bus.Close(); err != nil {
+		t.Fatal(err)
+	}
+	preClose := hits.Load()
+
+	// Post-close publish (using the still-open caller-owned conn) must
+	// not reach the handler. We use the same conn directly — the bus is
+	// closed but nc is still alive.
+	_ = nc.Publish("x.tick", []byte("b"))
+	time.Sleep(150 * time.Millisecond)
+	if got := hits.Load(); got != preClose {
+		t.Errorf("handler invoked %d times after Close (was %d)", got, preClose)
 	}
 }
 

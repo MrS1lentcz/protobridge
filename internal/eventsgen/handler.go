@@ -519,7 +519,15 @@ func Subscribe{{ .MessageName }}(bus events.Bus, group string, h {{ .MessageName
 		heartbeatDone := make(chan struct{})
 		go func() {
 			defer close(heartbeatDone)
-			ticker := time.NewTicker(cfg.AckWait / 2)
+			// Half the AckWait gives a missed heartbeat one full cycle to
+			// recover before the deadline expires. Clamp to AckWait when
+			// the configured value is so small that /2 rounds to zero —
+			// time.NewTicker(0) panics.
+			heartbeatInterval := cfg.AckWait / 2
+			if heartbeatInterval <= 0 {
+				heartbeatInterval = cfg.AckWait
+			}
+			ticker := time.NewTicker(heartbeatInterval)
 			defer ticker.Stop()
 			for {
 				select {

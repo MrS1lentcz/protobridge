@@ -34,9 +34,9 @@ type JetStreamBus struct {
 	// lifecycle independently).
 	ownConn bool
 
-	mu         sync.Mutex
-	closed     bool
-	subCancels []context.CancelFunc
+	mu       sync.Mutex
+	closed   bool
+	subStops []func() // per-subscription teardown (cancel ctx + stop consume loop / unsubscribe)
 }
 
 // JetStreamConfig wires a JetStreamBus at construction time. All fields
@@ -222,10 +222,6 @@ func (b *JetStreamBus) SubscribeDurable(subject, group string, h Handler, opts .
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	b.mu.Lock()
-	b.subCancels = append(b.subCancels, cancel)
-	b.mu.Unlock()
-
 	cctx, err := consumer.Consume(func(jm jetstream.Msg) {
 		b.dispatch(ctx, jm, subject, group, cfg, h)
 	})
@@ -234,11 +230,15 @@ func (b *JetStreamBus) SubscribeDurable(subject, group string, h Handler, opts .
 		return nil, fmt.Errorf("events: consume %q: %w", consumerName, err)
 	}
 
-	sub := &jsSubscription{stop: func() {
+	stop := func() {
 		cctx.Stop()
 		cancel()
-	}}
-	return sub, nil
+	}
+	b.mu.Lock()
+	b.subStops = append(b.subStops, stop)
+	b.mu.Unlock()
+
+	return &jsSubscription{stop: stop}, nil
 }
 
 // SubscribeBroadcast is a plain core-NATS subscriber — ephemeral, no ack.
@@ -251,9 +251,6 @@ func (b *JetStreamBus) SubscribeBroadcast(subject string, h Handler) (Subscripti
 	b.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	b.mu.Lock()
-	b.subCancels = append(b.subCancels, cancel)
-	b.mu.Unlock()
 
 	sub, err := b.nc.Subscribe(subject, func(m *nats.Msg) {
 		headers := map[string]string{}
@@ -286,10 +283,15 @@ func (b *JetStreamBus) SubscribeBroadcast(subject string, h Handler) (Subscripti
 		return nil, fmt.Errorf("events: subscribe %q: %w", subject, err)
 	}
 
-	return &jsSubscription{stop: func() {
+	stop := func() {
 		_ = sub.Unsubscribe()
 		cancel()
-	}}, nil
+	}
+	b.mu.Lock()
+	b.subStops = append(b.subStops, stop)
+	b.mu.Unlock()
+
+	return &jsSubscription{stop: stop}, nil
 }
 
 // dispatch owns the lifecycle of a single delivered message. It converts
@@ -300,16 +302,23 @@ func (b *JetStreamBus) dispatch(ctx context.Context, jm jetstream.Msg, subject, 
 	meta, metaErr := jm.Metadata()
 
 	finish := recordDurableStart(subject, group)
-	// result is updated by Ack/Nack/panic paths; defaulted to "nack" so a
-	// handler that returns without explicitly calling either still tags
+
+	// result drives both metrics and DLQ routing. Defaulted to "nack" so
+	// a handler that returns without calling either Ack/Nack still tags
 	// the delivery as a failure (which it effectively is — no Ack = the
 	// backend will redeliver).
 	result := "nack"
-	defer func() { finish(result) }()
+	// handlerErr captures the handler's return value (or a synthetic
+	// error from a recovered panic) so the DLQ message carries an
+	// X-Dlq-Error header even when the handler nack'd via m.Nack() and
+	// returned nil.
+	var handlerErr error
 
-	// The Ack/Nack/InProgress closures are idempotent via terminalOnce so
-	// handlers that call them more than once (or call both) don't trigger
-	// "message already acknowledged" errors from the JetStream client.
+	// terminal guards the user-facing Ack/Nack closures so a handler can
+	// safely call them more than once. The defer below performs an
+	// authoritative Ack on the DLQ branch directly on jm — bypassing
+	// terminal because the user's nack already fired and we now need to
+	// stop redelivery.
 	var terminal sync.Once
 	ack := func() {
 		terminal.Do(func() {
@@ -323,7 +332,6 @@ func (b *JetStreamBus) dispatch(ctx context.Context, jm jetstream.Msg, subject, 
 			result = "nack"
 		})
 	}
-	inProgress := func() error { return jm.InProgress() }
 
 	headers := map[string]string{}
 	for k, vs := range jm.Headers() {
@@ -338,33 +346,35 @@ func (b *JetStreamBus) dispatch(ctx context.Context, jm jetstream.Msg, subject, 
 		Headers:    headers,
 		Ack:        ack,
 		Nack:       nack,
-		InProgress: inProgress,
+		InProgress: func() error { return jm.InProgress() },
 	}
 
+	// Single defer handles panic recovery, DLQ routing, and metrics
+	// finalization. Co-locating these means a panicking handler still
+	// triggers DLQ on the Nth attempt, and a handler that nack'd but
+	// returned nil also DLQs (the previous err-only check missed both
+	// cases).
 	defer func() {
 		if rec := recover(); rec != nil {
 			b.logger.Error("events: durable handler panic",
 				"subject", subject, "panic", rec)
 			nack()
 			result = "panic"
+			handlerErr = fmt.Errorf("handler panic: %v", rec)
 		}
+		if result != "ack" && metaErr == nil &&
+			cfg.MaxDeliver > 0 && int(meta.NumDelivered) >= cfg.MaxDeliver {
+			if cfg.DeadLetterSubject != "-" {
+				b.routeToDLQ(jm, subject, meta, cfg.DeadLetterSubject, handlerErr)
+			}
+			_ = jm.Ack()
+			recordDLQ(subject, group, "max_deliver_exceeded")
+			result = "dlq"
+		}
+		finish(result)
 	}()
 
-	err := h(ctx, msg)
-
-	// Route to DLQ once MaxDeliver is exhausted (handler has nack'd or
-	// errored and JetStream has already retried the allowed number of
-	// times). We detect this by the delivery count matching MaxDeliver —
-	// the next redelivery would exceed the cap, so publish to DLQ now and
-	// Ack so JetStream stops retrying.
-	if metaErr == nil && cfg.MaxDeliver > 0 && int(meta.NumDelivered) >= cfg.MaxDeliver && err != nil {
-		if cfg.DeadLetterSubject != "-" {
-			b.routeToDLQ(jm, subject, meta, cfg.DeadLetterSubject, err)
-		}
-		ack()
-		recordDLQ(subject, group, "max_deliver_exceeded")
-		result = "dlq"
-	}
+	handlerErr = h(ctx, msg)
 }
 
 // routeToDLQ publishes the poison message to the configured DLQ subject
@@ -401,12 +411,16 @@ func (b *JetStreamBus) Close() error {
 		return nil
 	}
 	b.closed = true
-	cancels := b.subCancels
-	b.subCancels = nil
+	stops := b.subStops
+	b.subStops = nil
 	b.mu.Unlock()
 
-	for _, c := range cancels {
-		c()
+	// Each stop tears down the underlying JetStream consume loop /
+	// core-NATS subscription and cancels the dispatch context. Without
+	// this an in-flight handler on a caller-owned connection would keep
+	// being invoked after Close, breaking the Bus.Close contract.
+	for _, s := range stops {
+		s()
 	}
 	if b.ownConn {
 		b.nc.Close()
