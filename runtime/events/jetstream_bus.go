@@ -230,7 +230,7 @@ func (b *JetStreamBus) SubscribeDurable(subject, group string, h Handler, opts .
 	b.mu.Unlock()
 
 	cctx, err := consumer.Consume(func(jm jetstream.Msg) {
-		b.dispatch(ctx, jm, subject, cfg, h)
+		b.dispatch(ctx, jm, subject, group, cfg, h)
 	})
 	if err != nil {
 		cancel()
@@ -299,15 +299,33 @@ func (b *JetStreamBus) SubscribeBroadcast(subject string, h Handler) (Subscripti
 // the JetStream message into an events.Message with ack/nack/heartbeat
 // closures, runs the handler under a panic recovery, and routes exhausted
 // deliveries to the DLQ when configured.
-func (b *JetStreamBus) dispatch(ctx context.Context, jm jetstream.Msg, subject string, cfg DurableConfig, h Handler) {
+func (b *JetStreamBus) dispatch(ctx context.Context, jm jetstream.Msg, subject, group string, cfg DurableConfig, h Handler) {
 	meta, metaErr := jm.Metadata()
+
+	finish := recordDurableStart(subject, group)
+	// result is updated by Ack/Nack/panic paths; defaulted to "nack" so a
+	// handler that returns without explicitly calling either still tags
+	// the delivery as a failure (which it effectively is — no Ack = the
+	// backend will redeliver).
+	result := "nack"
+	defer func() { finish(result) }()
 
 	// The Ack/Nack/InProgress closures are idempotent via terminalOnce so
 	// handlers that call them more than once (or call both) don't trigger
 	// "message already acknowledged" errors from the JetStream client.
 	var terminal sync.Once
-	ack := func() { terminal.Do(func() { _ = jm.Ack() }) }
-	nack := func() { terminal.Do(func() { _ = jm.Nak() }) }
+	ack := func() {
+		terminal.Do(func() {
+			_ = jm.Ack()
+			result = "ack"
+		})
+	}
+	nack := func() {
+		terminal.Do(func() {
+			_ = jm.Nak()
+			result = "nack"
+		})
+	}
 	inProgress := func() error { return jm.InProgress() }
 
 	headers := map[string]string{}
@@ -331,6 +349,7 @@ func (b *JetStreamBus) dispatch(ctx context.Context, jm jetstream.Msg, subject s
 			b.logger.Error("events: durable handler panic",
 				"subject", subject, "panic", rec)
 			nack()
+			result = "panic"
 		}
 	}()
 
@@ -346,6 +365,8 @@ func (b *JetStreamBus) dispatch(ctx context.Context, jm jetstream.Msg, subject s
 			b.routeToDLQ(jm, subject, meta, cfg.DeadLetterSubject, err)
 		}
 		ack()
+		recordDLQ(subject, group, "max_deliver_exceeded")
+		result = "dlq"
 	}
 }
 
