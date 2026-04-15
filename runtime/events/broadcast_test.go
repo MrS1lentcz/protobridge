@@ -499,8 +499,9 @@ func TestBroadcastHub_RetryMaxNegativeDisablesRetry(t *testing.T) {
 		Logger:         newSilentLogger(),
 	})
 
-	// No WS client needed — we're asserting the source goroutine doesn't
-	// spin. Give the goroutine time to (not) retry.
+	// Wait for the first attempt to register, then verify it stays at 1.
+	// Polling beats a bare sleep on slow CI.
+	waitForAttempts(t, &attempts, 1, time.Second)
 	time.Sleep(50 * time.Millisecond)
 	if got := attempts.Load(); got != 1 {
 		t.Errorf("expected exactly 1 attempt with retry disabled, got %d", got)
@@ -577,10 +578,25 @@ func TestBroadcastHub_SourceCleanStopDoesNotRetry(t *testing.T) {
 		Logger:             newSilentLogger(),
 	})
 
+	waitForAttempts(t, &attempts, 1, time.Second)
 	time.Sleep(50 * time.Millisecond)
 	if got := attempts.Load(); got != 1 {
 		t.Errorf("expected exactly 1 attempt on nil-err stop, got %d", got)
 	}
+}
+
+// waitForAttempts polls counter until it reaches want, failing the test on
+// timeout. Keeps tests resilient against slow CI without a hardcoded sleep.
+func waitForAttempts(t *testing.T, counter *atomic.Int32, want int32, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if counter.Load() >= want {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d attempts, got %d", want, counter.Load())
 }
 
 func TestBroadcastHub_ShutdownDuringBackoff(t *testing.T) {

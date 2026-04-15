@@ -199,6 +199,12 @@ func NewBroadcastHub(ctx context.Context, cfg BroadcastConfig) *BroadcastHub {
 	if cfg.SourceRetryMax == 0 {
 		cfg.SourceRetryMax = 30 * time.Second
 	}
+	// A Max smaller than Initial would make the backoff shrink after the
+	// first retry (cap clamp below), contradicting "doubling up to Max".
+	// Clamp silently — misconfig, not worth failing loudly.
+	if cfg.SourceRetryMax > 0 && cfg.SourceRetryMax < cfg.SourceRetryInitial {
+		cfg.SourceRetryMax = cfg.SourceRetryInitial
+	}
 	h := &BroadcastHub{
 		cfg:     cfg,
 		ctx:     ctx,
@@ -287,9 +293,16 @@ func (h *BroadcastHub) runSource(ctx context.Context, in chan<- BroadcastFrame) 
 		h.logger().Error("events: broadcast source terminated, will retry",
 			"err", err, "backoff", backoff)
 
+		// NewTimer + Stop (instead of time.After) so a ctx cancel during
+		// a long backoff doesn't leave a lingering timer allocated until
+		// it fires naturally.
+		timer := time.NewTimer(backoff)
 		select {
-		case <-time.After(backoff):
+		case <-timer.C:
 		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
 			return
 		}
 		backoff *= 2
