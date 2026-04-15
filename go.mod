@@ -9,6 +9,8 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.47.1
 	github.com/mrs1lentcz/gox v0.6.0
+	github.com/nats-io/nats-server/v2 v2.12.7
+	github.com/nats-io/nats.go v1.51.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/valyala/fasthttp v1.70.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0
@@ -42,8 +44,6 @@ require (
 	github.com/minio/highwayhash v1.0.4-0.20251030100505-070ab1a87a76 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nats-io/jwt/v2 v2.8.1 // indirect
-	github.com/nats-io/nats-server/v2 v2.12.7 // indirect
-	github.com/nats-io/nats.go v1.51.0 // indirect
 	github.com/nats-io/nkeys v0.4.15 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
