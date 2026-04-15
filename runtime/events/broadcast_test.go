@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -483,9 +484,9 @@ func TestBroadcastHub_RetriesSourceAfterError(t *testing.T) {
 }
 
 func TestBroadcastHub_RetryMaxNegativeDisablesRetry(t *testing.T) {
-	var attempts int
+	var attempts atomic.Int32
 	src := funcSource(func(_ context.Context, _ chan<- events.BroadcastFrame) error {
-		attempts++
+		attempts.Add(1)
 		return errors.New("boom")
 	})
 
@@ -501,8 +502,8 @@ func TestBroadcastHub_RetryMaxNegativeDisablesRetry(t *testing.T) {
 	// No WS client needed — we're asserting the source goroutine doesn't
 	// spin. Give the goroutine time to (not) retry.
 	time.Sleep(50 * time.Millisecond)
-	if attempts != 1 {
-		t.Errorf("expected exactly 1 attempt with retry disabled, got %d", attempts)
+	if got := attempts.Load(); got != 1 {
+		t.Errorf("expected exactly 1 attempt with retry disabled, got %d", got)
 	}
 }
 
@@ -561,9 +562,9 @@ func TestBroadcastHub_BackoffResetsAfterDelivery(t *testing.T) {
 }
 
 func TestBroadcastHub_SourceCleanStopDoesNotRetry(t *testing.T) {
-	var attempts int
+	var attempts atomic.Int32
 	src := funcSource(func(_ context.Context, _ chan<- events.BroadcastFrame) error {
-		attempts++
+		attempts.Add(1)
 		return nil // clean source-driven stop
 	})
 
@@ -577,8 +578,8 @@ func TestBroadcastHub_SourceCleanStopDoesNotRetry(t *testing.T) {
 	})
 
 	time.Sleep(50 * time.Millisecond)
-	if attempts != 1 {
-		t.Errorf("expected exactly 1 attempt on nil-err stop, got %d", attempts)
+	if got := attempts.Load(); got != 1 {
+		t.Errorf("expected exactly 1 attempt on nil-err stop, got %d", got)
 	}
 }
 
