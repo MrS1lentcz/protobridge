@@ -96,16 +96,16 @@ func noopMeter() noopInstrument {
 }
 
 func (n noopInstrument) Int64UpDownCounterNoop() metric.Int64UpDownCounter {
-	c, _ := n.Meter.Int64UpDownCounter("noop")
+	c, _ := n.Int64UpDownCounter("noop")
 	return c
 }
 
 func (n noopInstrument) Int64CounterNoop() metric.Int64Counter {
-	c, _ := n.Meter.Int64Counter("noop")
+	c, _ := n.Int64Counter("noop")
 	return c
 }
 
 func (n noopInstrument) Float64HistogramNoop() metric.Float64Histogram {
-	h, _ := n.Meter.Float64Histogram("noop")
+	h, _ := n.Float64Histogram("noop")
 	return h
 }
