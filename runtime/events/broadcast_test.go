@@ -506,6 +506,49 @@ func TestBroadcastHub_RetryMaxNegativeDisablesRetry(t *testing.T) {
 	}
 }
 
+func TestBroadcastHub_SourceCleanStopDoesNotRetry(t *testing.T) {
+	var attempts int
+	src := funcSource(func(_ context.Context, _ chan<- events.BroadcastFrame) error {
+		attempts++
+		return nil // clean source-driven stop
+	})
+
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:             src,
+		Marshal:            passthroughMarshaler,
+		SourceRetryInitial: 1 * time.Millisecond,
+		Logger:             newSilentLogger(),
+	})
+
+	time.Sleep(50 * time.Millisecond)
+	if attempts != 1 {
+		t.Errorf("expected exactly 1 attempt on nil-err stop, got %d", attempts)
+	}
+}
+
+func TestBroadcastHub_ShutdownDuringBackoff(t *testing.T) {
+	src := funcSource(func(_ context.Context, _ chan<- events.BroadcastFrame) error {
+		return errors.New("always fails")
+	})
+
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:             src,
+		Marshal:            passthroughMarshaler,
+		SourceRetryInitial: 1 * time.Second, // long enough that cancel wins
+		SourceRetryMax:     5 * time.Second,
+		Logger:             newSilentLogger(),
+	})
+
+	// Let one failed Run happen, then cancel while the hub is sleeping in
+	// the backoff select — exercises the ctx.Done branch of the timer wait.
+	time.Sleep(20 * time.Millisecond)
+	hubCancel()
+	time.Sleep(20 * time.Millisecond)
+}
+
 type funcSource func(ctx context.Context, out chan<- events.BroadcastFrame) error
 
 func (f funcSource) Run(ctx context.Context, out chan<- events.BroadcastFrame) error {
