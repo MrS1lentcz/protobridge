@@ -506,6 +506,60 @@ func TestBroadcastHub_RetryMaxNegativeDisablesRetry(t *testing.T) {
 	}
 }
 
+func TestBroadcastHub_BackoffResetsAfterDelivery(t *testing.T) {
+	// Source behavior:
+	//   attempt 1 → fail    (backoff 4ms → 8ms, capped 8ms)
+	//   attempt 2 → fail    (backoff 8ms → 8ms)
+	//   attempt 3 → deliver one frame, then fail (triggers reset on next)
+	//   attempt 4 → fail, must wait only initial (4ms), not capped
+	// Close done after attempt 4 to terminate.
+	attempts := make(chan int, 10)
+	done := make(chan struct{})
+	src := funcSource(func(ctx context.Context, out chan<- events.BroadcastFrame) error {
+		select {
+		case attempts <- 1:
+		default:
+		}
+		n := len(attempts)
+		if n == 3 {
+			select {
+			case out <- events.BroadcastFrame{Subject: "x", Payload: []byte(`{}`)}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		if n >= 4 {
+			<-done
+			return ctx.Err()
+		}
+		return errors.New("flake")
+	})
+
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { close(done); hubCancel() })
+
+	hub := events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:             src,
+		Marshal:            passthroughMarshaler,
+		SourceRetryInitial: 4 * time.Millisecond,
+		SourceRetryMax:     8 * time.Millisecond,
+		Logger:             newSilentLogger(),
+	})
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+
+	// Wait for the 4th attempt to register — that's past both the cap hit
+	// and the post-delivery reset.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(attempts) >= 4 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("expected 4 attempts, got %d", len(attempts))
+}
+
 func TestBroadcastHub_SourceCleanStopDoesNotRetry(t *testing.T) {
 	var attempts int
 	src := funcSource(func(_ context.Context, _ chan<- events.BroadcastFrame) error {
@@ -547,6 +601,42 @@ func TestBroadcastHub_ShutdownDuringBackoff(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	hubCancel()
 	time.Sleep(20 * time.Millisecond)
+}
+
+func TestBroadcastHub_NilCtxDowngradesToBackground(t *testing.T) {
+	// Must not panic — ctx=nil is misuse, but degrading to Background keeps
+	// the hub usable rather than crashing every request goroutine.
+	hub := events.NewBroadcastHub(nil, events.BroadcastConfig{ //nolint:staticcheck
+		Source:         errorSource{},
+		Marshal:        passthroughMarshaler,
+		SourceRetryMax: -1,
+		Logger:         newSilentLogger(),
+	})
+	if hub == nil {
+		t.Fatal("expected hub, got nil")
+	}
+}
+
+func TestBroadcastHub_SSEHeartbeatDefault(t *testing.T) {
+	// Smoke test for the HeartbeatInterval<=0 → 15s default branch.
+	src := newFakeSource()
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	hub := events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:  src,
+		Marshal: passthroughMarshaler,
+	})
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+	req.Header.Set("Accept", "text/event-stream")
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	resp, err := http.DefaultClient.Do(req.WithContext(ctx))
+	if err == nil {
+		_ = resp.Body.Close()
+	}
 }
 
 type funcSource func(ctx context.Context, out chan<- events.BroadcastFrame) error

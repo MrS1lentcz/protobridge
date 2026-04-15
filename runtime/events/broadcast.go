@@ -223,22 +223,15 @@ func (h *BroadcastHub) run(ctx context.Context) {
 	in := make(chan BroadcastFrame, 64)
 	dispatchDone := make(chan struct{})
 
-	// Reader goroutine: dispatch every frame to every connected client.
-	// Exits when ctx is cancelled OR `in` is closed (which happens after
-	// Source.Run returns) — without the close, a Source that exits while
-	// ctx is still live would leak this goroutine forever.
+	// Dispatcher exits when `in` is closed (after runSource returns, which
+	// in turn waits for Source.Run to honor ctx). We don't also select on
+	// ctx.Done here — that would require the forwarder in runSource to
+	// carry its own ctx.Done branch + drain loop to unblock a pending
+	// `in <- f`. One shutdown signal (close) is simpler than two.
 	go func() {
 		defer close(dispatchDone)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case f, ok := <-in:
-				if !ok {
-					return
-				}
-				h.dispatch(f)
-			}
+		for f := range in {
+			h.dispatch(f)
 		}
 	}()
 
@@ -264,15 +257,7 @@ func (h *BroadcastHub) runSource(ctx context.Context, in chan<- BroadcastFrame) 
 			defer close(forwardDone)
 			for f := range srcOut {
 				delivered.Store(true)
-				select {
-				case in <- f:
-				case <-ctx.Done():
-					// Drain remaining frames so Source.Run's send doesn't
-					// block forever waiting for srcOut to be read.
-					for range srcOut {
-					}
-					return
-				}
+				in <- f
 			}
 		}()
 
