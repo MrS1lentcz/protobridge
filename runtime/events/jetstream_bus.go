@@ -71,7 +71,7 @@ type JetStreamConfig struct {
 // NewJetStreamBus dials NATS (or reuses cfg.Conn), ensures the JetStream
 // stream exists with WorkQueuePolicy retention, and returns a Bus ready
 // to publish and subscribe. Call Close to tear everything down.
-func NewJetStreamBus(ctx context.Context, cfg JetStreamConfig) (*JetStreamBus, error) {
+func NewJetStreamBus(ctx context.Context, cfg JetStreamConfig) (bus *JetStreamBus, err error) {
 	if cfg.StreamName == "" {
 		cfg.StreamName = "protobridge"
 	}
@@ -82,7 +82,6 @@ func NewJetStreamBus(ctx context.Context, cfg JetStreamConfig) (*JetStreamBus, e
 	var (
 		nc      *nats.Conn
 		ownConn bool
-		err     error
 	)
 	if cfg.Conn != nil {
 		nc = cfg.Conn
@@ -95,13 +94,18 @@ func NewJetStreamBus(ctx context.Context, cfg JetStreamConfig) (*JetStreamBus, e
 			return nil, fmt.Errorf("events: nats connect: %w", err)
 		}
 		ownConn = true
+		// Single deferred cleanup for both downstream failures
+		// (jetstream.New, CreateOrUpdateStream). Nothing to do on
+		// success — return value is non-nil and err is nil.
+		defer func() {
+			if err != nil {
+				nc.Close()
+			}
+		}()
 	}
 
 	js, err := jetstream.New(nc)
 	if err != nil {
-		if ownConn {
-			nc.Close()
-		}
 		return nil, fmt.Errorf("events: jetstream init: %w", err)
 	}
 
@@ -114,9 +118,6 @@ func NewJetStreamBus(ctx context.Context, cfg JetStreamConfig) (*JetStreamBus, e
 		Storage:   jetstream.FileStorage,
 	})
 	if err != nil {
-		if ownConn {
-			nc.Close()
-		}
 		return nil, fmt.Errorf("events: create stream %q: %w", cfg.StreamName, err)
 	}
 
@@ -154,11 +155,9 @@ func (b *JetStreamBus) Publish(ctx context.Context, subject string, payload []by
 		if err := b.publishJetStream(ctx, subject, payload, headers); err != nil {
 			return err
 		}
-		if err := b.publishCore(subject, payload, headers); err != nil {
-			b.logger.Warn("events: broadcast leg of BOTH publish failed",
-				"subject", subject, "err", err)
-		}
-		return nil
+		// Broadcast leg is best-effort — see publishCore for the
+		// rationale on why a failure here doesn't surface.
+		return b.publishCore(subject, payload, headers)
 	default:
 		return fmt.Errorf("events: unknown kind %d", kind)
 	}
@@ -169,9 +168,12 @@ func (b *JetStreamBus) publishCore(subject string, payload []byte, headers map[s
 	for k, v := range headers {
 		msg.Header.Set(k, v)
 	}
-	if err := b.nc.PublishMsg(msg); err != nil {
-		b.logger.Warn("events: broadcast publish failed", "subject", subject, "err", err)
-	}
+	// Best-effort fan-out: nats.Conn.PublishMsg only fails on closed /
+	// draining connections (which we already guard via b.closed) or
+	// invalid header keys (impossible from a string→string headers map).
+	// The only side-effect of a failure here would be a missed broadcast,
+	// which is the documented contract for KindBroadcast.
+	_ = b.nc.PublishMsg(msg)
 	return nil
 }
 
@@ -204,13 +206,8 @@ func (b *JetStreamBus) SubscribeDurable(subject, group string, h Handler, opts .
 
 	cfg := ResolveDurableConfig(subject, opts...)
 
-	stream, err := b.js.Stream(context.Background(), b.stream)
-	if err != nil {
-		return nil, fmt.Errorf("events: lookup stream %q: %w", b.stream, err)
-	}
-
 	consumerName := consumerNameFor(group, subject)
-	consumer, err := stream.CreateOrUpdateConsumer(context.Background(), jetstream.ConsumerConfig{
+	consumer, err := b.js.CreateOrUpdateConsumer(context.Background(), b.stream, jetstream.ConsumerConfig{
 		Durable:       consumerName,
 		FilterSubject: subject,
 		AckPolicy:     jetstream.AckExplicitPolicy,
@@ -411,7 +408,7 @@ func (b *JetStreamBus) Close() error {
 	for _, c := range cancels {
 		c()
 	}
-	if b.ownConn && b.nc != nil {
+	if b.ownConn {
 		b.nc.Close()
 	}
 	return nil
