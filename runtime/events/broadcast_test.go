@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -247,8 +248,10 @@ func (e errorSource) Run(_ context.Context, _ chan<- events.BroadcastFrame) erro
 
 func TestBroadcastHub_SourceErrorDoesntCrashHandler(t *testing.T) {
 	hub := events.NewBroadcastHub(context.Background(), events.BroadcastConfig{
-		Source:  errorSource{},
-		Marshal: passthroughMarshaler,
+		Source:         errorSource{},
+		Marshal:        passthroughMarshaler,
+		SourceRetryMax: -1, // exercise the legacy "log and stop" branch
+		Logger:         newSilentLogger(),
 	})
 	srv := httptest.NewServer(hub)
 	t.Cleanup(srv.Close)
@@ -419,6 +422,244 @@ func TestBroadcastHub_NonWSGETReturnsCleanly(t *testing.T) {
 	if resp.StatusCode == http.StatusOK {
 		t.Errorf("expected non-200 for non-WS GET, got %d", resp.StatusCode)
 	}
+}
+
+// flakySource errors on the first N Run calls then behaves normally, pushing
+// one frame before blocking on ctx. Exercises hub retry + backoff-reset.
+type flakySource struct {
+	attempts   chan int
+	failsFirst int
+	frame      events.BroadcastFrame
+}
+
+func (s *flakySource) Run(ctx context.Context, out chan<- events.BroadcastFrame) error {
+	n := <-s.attempts
+	s.attempts <- n + 1
+	if n < s.failsFirst {
+		return errors.New("dial refused")
+	}
+	select {
+	case out <- s.frame:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestBroadcastHub_RetriesSourceAfterError(t *testing.T) {
+	src := &flakySource{
+		attempts:   make(chan int, 1),
+		failsFirst: 2,
+		frame:      events.BroadcastFrame{Subject: "x", Payload: []byte(`{}`)},
+	}
+	src.attempts <- 0
+
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	hub := events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:             src,
+		Marshal:            passthroughMarshaler,
+		SourceRetryInitial: 5 * time.Millisecond,
+		SourceRetryMax:     20 * time.Millisecond,
+		Logger:             newSilentLogger(),
+	})
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+
+	conn, ctx, cancel := dialWS(t, srv)
+	defer cancel()
+	defer conn.CloseNow() //nolint:errcheck
+
+	// Two failed Run attempts, then the third delivers — must arrive despite
+	// the earlier errors that would have permanently killed the pre-retry hub.
+	readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer readCancel()
+	if _, _, err := conn.Read(readCtx); err != nil {
+		t.Fatalf("expected frame after retries, got %v", err)
+	}
+	if n := <-src.attempts; n < 3 {
+		t.Errorf("expected at least 3 Run attempts, got %d", n)
+	}
+}
+
+func TestBroadcastHub_RetryMaxNegativeDisablesRetry(t *testing.T) {
+	var attempts atomic.Int32
+	src := funcSource(func(_ context.Context, _ chan<- events.BroadcastFrame) error {
+		attempts.Add(1)
+		return errors.New("boom")
+	})
+
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:         src,
+		Marshal:        passthroughMarshaler,
+		SourceRetryMax: -1,
+		Logger:         newSilentLogger(),
+	})
+
+	// Wait for the first attempt to register, then verify it stays at 1.
+	// Polling beats a bare sleep on slow CI.
+	waitForAttempts(t, &attempts, 1, time.Second)
+	time.Sleep(50 * time.Millisecond)
+	if got := attempts.Load(); got != 1 {
+		t.Errorf("expected exactly 1 attempt with retry disabled, got %d", got)
+	}
+}
+
+func TestBroadcastHub_BackoffResetsAfterDelivery(t *testing.T) {
+	// Source behavior:
+	//   attempt 1 → fail    (backoff 4ms → 8ms, capped 8ms)
+	//   attempt 2 → fail    (backoff 8ms → 8ms)
+	//   attempt 3 → deliver one frame, then fail (triggers reset on next)
+	//   attempt 4 → fail, must wait only initial (4ms), not capped
+	// Close done after attempt 4 to terminate.
+	attempts := make(chan int, 10)
+	done := make(chan struct{})
+	src := funcSource(func(ctx context.Context, out chan<- events.BroadcastFrame) error {
+		select {
+		case attempts <- 1:
+		default:
+		}
+		n := len(attempts)
+		if n == 3 {
+			select {
+			case out <- events.BroadcastFrame{Subject: "x", Payload: []byte(`{}`)}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		if n >= 4 {
+			<-done
+			return ctx.Err()
+		}
+		return errors.New("flake")
+	})
+
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { close(done); hubCancel() })
+
+	hub := events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:             src,
+		Marshal:            passthroughMarshaler,
+		SourceRetryInitial: 4 * time.Millisecond,
+		SourceRetryMax:     8 * time.Millisecond,
+		Logger:             newSilentLogger(),
+	})
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+
+	// Wait for the 4th attempt to register — that's past both the cap hit
+	// and the post-delivery reset.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(attempts) >= 4 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("expected 4 attempts, got %d", len(attempts))
+}
+
+func TestBroadcastHub_SourceCleanStopDoesNotRetry(t *testing.T) {
+	var attempts atomic.Int32
+	src := funcSource(func(_ context.Context, _ chan<- events.BroadcastFrame) error {
+		attempts.Add(1)
+		return nil // clean source-driven stop
+	})
+
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:             src,
+		Marshal:            passthroughMarshaler,
+		SourceRetryInitial: 1 * time.Millisecond,
+		Logger:             newSilentLogger(),
+	})
+
+	waitForAttempts(t, &attempts, 1, time.Second)
+	time.Sleep(50 * time.Millisecond)
+	if got := attempts.Load(); got != 1 {
+		t.Errorf("expected exactly 1 attempt on nil-err stop, got %d", got)
+	}
+}
+
+// waitForAttempts polls counter until it reaches want, failing the test on
+// timeout. Keeps tests resilient against slow CI without a hardcoded sleep.
+func waitForAttempts(t *testing.T, counter *atomic.Int32, want int32, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if counter.Load() >= want {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d attempts, got %d", want, counter.Load())
+}
+
+func TestBroadcastHub_ShutdownDuringBackoff(t *testing.T) {
+	src := funcSource(func(_ context.Context, _ chan<- events.BroadcastFrame) error {
+		return errors.New("always fails")
+	})
+
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:             src,
+		Marshal:            passthroughMarshaler,
+		SourceRetryInitial: 1 * time.Second, // long enough that cancel wins
+		SourceRetryMax:     5 * time.Second,
+		Logger:             newSilentLogger(),
+	})
+
+	// Let one failed Run happen, then cancel while the hub is sleeping in
+	// the backoff select — exercises the ctx.Done branch of the timer wait.
+	time.Sleep(20 * time.Millisecond)
+	hubCancel()
+	time.Sleep(20 * time.Millisecond)
+}
+
+func TestBroadcastHub_NilCtxDowngradesToBackground(t *testing.T) {
+	// Must not panic — ctx=nil is misuse, but degrading to Background keeps
+	// the hub usable rather than crashing every request goroutine.
+	hub := events.NewBroadcastHub(nil, events.BroadcastConfig{ //nolint:staticcheck
+		Source:         errorSource{},
+		Marshal:        passthroughMarshaler,
+		SourceRetryMax: -1,
+		Logger:         newSilentLogger(),
+	})
+	if hub == nil {
+		t.Fatal("expected hub, got nil")
+	}
+}
+
+func TestBroadcastHub_SSEHeartbeatDefault(t *testing.T) {
+	// Smoke test for the HeartbeatInterval<=0 → 15s default branch.
+	src := newFakeSource()
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	hub := events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:  src,
+		Marshal: passthroughMarshaler,
+	})
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+	req.Header.Set("Accept", "text/event-stream")
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	resp, err := http.DefaultClient.Do(req.WithContext(ctx))
+	if err == nil {
+		_ = resp.Body.Close()
+	}
+}
+
+type funcSource func(ctx context.Context, out chan<- events.BroadcastFrame) error
+
+func (f funcSource) Run(ctx context.Context, out chan<- events.BroadcastFrame) error {
+	return f(ctx, out)
 }
 
 func TestHeadersToLabels_NilOrEmpty(t *testing.T) {
