@@ -20,13 +20,15 @@ func collectEvents(api *ParsedAPI, c *eventCollectCtx, msg *descriptorpb.Descrip
 	fqn := c.prefix + "." + msg.GetName()
 	if opts, ok := getEventOptions(msg); ok {
 		ev := &Event{
-			Message:      api.Messages[fqn],
-			Subject:      resolveEventSubject(opts.GetSubject(), msg.GetName()),
-			Kind:         eventKindFromProto(opts.GetKind()),
-			DurableGroup: opts.GetDurableGroup(),
-			Visibility:   eventVisibilityFromProto(opts.GetVisibility()),
-			Description:  opts.GetDescription(),
-			GoPackage:    c.goPackage,
+			Message:        api.Messages[fqn],
+			Subject:        resolveEventSubject(opts.GetSubject(), msg.GetName()),
+			Kind:           eventKindFromProto(opts.GetKind()),
+			DurableGroup:   opts.GetDurableGroup(),
+			Visibility:     eventVisibilityFromProto(opts.GetVisibility()),
+			Description:    opts.GetDescription(),
+			AckWaitSeconds: opts.GetAckWaitSeconds(),
+			MaxDeliver:     opts.GetMaxDeliver(),
+			GoPackage:      c.goPackage,
 		}
 		api.Events = append(api.Events, ev)
 	}
