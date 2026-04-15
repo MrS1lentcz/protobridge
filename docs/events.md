@@ -61,6 +61,8 @@ message OrderShipped {
 | `durable_group` | `snake_case(message_name)` | Consumer group for `DURABLE` / `BOTH`. Subscribers in the same group split the stream. |
 | `visibility` | `PUBLIC` | `PUBLIC` reaches the WS broadcast endpoint; `INTERNAL` is excluded from it. |
 | `description` | — | Human-readable, surfaces in AsyncAPI. |
+| `ack_wait_seconds` | 30 | Durable only. JetStream ack deadline. The heartbeat fires at half this value, so handlers that take longer than AckWait still don't trigger redelivery. |
+| `max_deliver` | 5 | Durable only. Redelivery cap; after this many attempts the message is routed to `<subject>.dlq`. |
 
 ## Declaring a broadcast service
 
@@ -136,34 +138,85 @@ The generated files use the package name `events` by default. Override via `--ev
 
 ## Backend: choosing a bus
 
-The bus is **only used inside the backend process** — your gRPC service handlers publish, your generated `<Svc>Server` adapter subscribes. The gateway never sees it. So the bus configuration is a private implementation detail you can change without touching the gateway.
+The bus is **only used inside the backend process** — your gRPC service handlers publish, your generated `<Svc>Server` adapter subscribes. The gateway never sees it.
 
-Pass any [Watermill](https://watermill.io)-backed implementation. Watermill supports NATS (Core + JetStream), Redis (Pub/Sub + Streams), RabbitMQ, Kafka, GCP Pub/Sub, AWS SQS/SNS, in-memory Go channels, and more — protobridge wraps the `Publisher`/`Subscriber` pair via `runtime/events.WatermillBus`.
+protobridge ships two implementations:
+
+| Implementation | When to use | Durable semantics |
+|---|---|---|
+| `events.JetStreamBus` | **Production** — durable events, heartbeats, DLQ, redelivery caps | Enforced via NATS JetStream pull consumers |
+| `events.WatermillBus` / `events.NewInMemoryBus` | Tests, dev, broadcast-only apps | Ignores `DurableOption`s with a log warning |
+
+### Production: JetStreamBus
 
 ```go
 import (
-    "github.com/ThreeDotsLabs/watermill-nats/v2/pkg/nats"
+    "context"
     "github.com/mrs1lentcz/protobridge/runtime/events"
 )
 
-natsPub, _ := nats.NewPublisher(nats.PublisherConfig{ /* ... */ })
-natsSub, _ := nats.NewSubscriber(nats.SubscriberConfig{ /* ... */ })
-
-bus := &events.WatermillBus{
-    BroadcastPublisher:  natsPub,
-    BroadcastSubscriber: natsSub,
-    DurablePublisher:    natsPub, // or a separate JetStream-backed publisher
-    DurableSubscriber:   natsSub,
-}
+bus, err := events.NewJetStreamBus(ctx, events.JetStreamConfig{
+    NATSURL:        "nats://localhost:4222",
+    StreamName:     "myapp",
+    StreamSubjects: []string{"orders.>", "shipping.>"}, // must be non-empty
+})
+if err != nil { /* ... */ }
 defer bus.Close()
 ```
 
-For tests + dev:
+`StreamSubjects` is required — JetStream refuses the unrestricted `>` pattern because it would capture reserved `$JS.>` subjects. Use concrete prefixes aligned with your proto subject annotations. Reuse an existing `*nats.Conn` via `JetStreamConfig.Conn` if the process already holds one; the bus will not close a caller-owned connection.
+
+### Tests: in-memory
 
 ```go
 bus := events.NewInMemoryBus() // gochannel under the hood; no network
 defer bus.Close()
 ```
+
+The in-memory bus is good enough for unit tests and broadcast-only demos. It accepts `DurableOption`s for API consistency but doesn't enforce heartbeats or redelivery — write integration tests for the durable path against an embedded NATS server (see `runtime/events/jetstream_bus_test.go` for the pattern).
+
+### Tuning durable delivery
+
+`SubscribeDurable` (and every generated `Subscribe<MessageName>`) accepts `...DurableOption`. Options:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `WithAckWait(d)` | 30s | How long JetStream waits for ack/heartbeat before redelivering |
+| `WithMaxDeliver(n)` | 5 | Redelivery cap — next attempt after N routes to the DLQ |
+| `WithMaxInFlight(n)` | 1 | Unacked messages per subscriber instance. Default 1 = serial (safe for side-effectful handlers) |
+| `WithDeadLetterSubject(s)` | `<subject>.dlq` | Where poison messages go. Set to `"-"` to drop the DLQ hop entirely |
+
+Proto annotation shortcuts (`ack_wait_seconds`, `max_deliver` on `EventOptions`) are pre-baked into the generated call site; runtime option args still win when both are present.
+
+### Long-running handlers and heartbeats
+
+The generated `Subscribe<MessageName>` wrapper always spawns a heartbeat goroutine that calls `m.InProgress()` on an `AckWait/2` timer. A handler that runs for 25s under `AckWait=30s` still keeps the ack deadline alive — no per-event opt-in, no flag. The only cases that trigger redelivery:
+
+- The process crashes / the container is killed (heartbeat goroutine dies with it).
+- The handler panics (recovered → `Nack` → immediate redelivery).
+- The handler returns a non-nil error (`Nack` → redelivery after backoff the backend chooses).
+
+**Live-but-stuck handlers (deadlocks) keep heart-beating forever and will not redeliver.** That's intentional — the runtime can't distinguish a slow handler from a deadlocked one without a second signal. Application-level timeouts / watchdogs are the caller's responsibility.
+
+### Dead-letter handling
+
+After `MaxDeliver` attempts the message is republished on `<subject>.dlq` with these headers set:
+
+- `X-Dlq-Reason` — `max_deliver_exceeded` (others reserved for future use).
+- `X-Dlq-Original-Subject` — the subject the message was first published on.
+- `X-Dlq-Attempts` — how many times the handler saw it before the DLQ hop.
+- `X-Dlq-Error` — truncated `err.Error()` from the final handler return (512 chars max).
+
+Subscribe on the DLQ subject like any other durable or broadcast subject. `nats` CLI can also replay directly off the DLQ stream without a protobridge subscriber.
+
+### Metrics
+
+Exposed via `otel.Meter("protobridge/events")` — pipes through the same Prometheus exporter as the rest of the runtime (see `runtime/otel.go`).
+
+- `protobridge_durable_messages_inflight{subject, group}` — gauge.
+- `protobridge_durable_messages_processed_total{subject, group, result}` — counter; `result` is `ack | nack | panic | dlq`.
+- `protobridge_durable_handler_duration_seconds{subject, group}` — histogram of handler wall-clock.
+- `protobridge_durable_dlq_total{subject, group, reason}` — counter.
 
 ## Backend: emitting events + serving the broadcast stream
 
