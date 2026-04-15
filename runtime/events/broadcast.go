@@ -28,12 +28,13 @@ type BroadcastFrame struct {
 // BroadcastSource produces a stream of frames the hub fans out to WS clients.
 // One Source backs one BroadcastHub which backs one or more WS endpoints.
 //
-// Run blocks until ctx is cancelled or the source decides to give up
-// permanently. Implementations should handle transient errors internally
-// (reconnect, backoff). Returning a non-nil error stops the source — the
-// hub logs it but stays serving (existing WS clients remain connected,
-// new ones can attach but receive no frames). For UX broadcast semantics,
-// prefer logging and reconnecting internally over returning.
+// Run blocks until ctx is cancelled or the source decides to give up.
+// Returning a non-nil error causes the hub to re-invoke Run after an
+// exponential backoff (see BroadcastConfig.SourceRetry{Initial,Max}); the
+// backoff resets to Initial after Run delivers at least one frame, so a
+// long-lived source that occasionally drops survives transient failures
+// without compounding delay. Implementations may still handle reconnects
+// internally as an optimization, but are no longer required to.
 type BroadcastSource interface {
 	Run(ctx context.Context, out chan<- BroadcastFrame) error
 }
@@ -111,6 +112,22 @@ type BroadcastConfig struct {
 	// one) and a counter is incremented. Defaults to 64.
 	ClientBuffer int
 
+	// SourceRetryInitial / SourceRetryMax control the exponential backoff
+	// the hub applies when Source.Run returns a non-nil error. After each
+	// failure the hub waits backoff (starting at Initial, doubling up to
+	// Max) and re-invokes Run. The backoff resets to Initial as soon as
+	// Run delivers a frame, so a source that survives for a while before
+	// failing reconnects fast on the next blip instead of inheriting the
+	// previous outage's cap.
+	//
+	// Defaults: 1s initial, 30s max — safe for the typical container
+	// restart-ordering race ("gateway booted before backend"). Set
+	// SourceRetryMax to a negative value to disable retry entirely (the
+	// hub logs the error and stops the source — pre-retry behavior, useful
+	// for sources that implement their own reconnect or for tests).
+	SourceRetryInitial time.Duration
+	SourceRetryMax     time.Duration
+
 	// Logger receives source/marshal failures and per-client drop counts.
 	// Defaults to slog.Default() when nil.
 	Logger *slog.Logger
@@ -153,10 +170,13 @@ type hubClient struct {
 // returned ready to serve HTTP — mount it at the WS route. The source runs
 // until ctx is cancelled; on cancel all clients are disconnected.
 //
-// When source.Run returns an error the hub logs it and the source stops; new
-// clients can still attach but will receive no events. Source implementations
-// that should survive transient backend failures must implement reconnect
-// internally before returning.
+// When Source.Run returns a non-nil error the hub logs it and re-invokes
+// Run after an exponential backoff (BroadcastConfig.SourceRetry{Initial,Max},
+// defaulting to 1s/30s; reset to Initial after Run delivers a frame). This
+// keeps the hub alive across the typical container-startup race where the
+// gateway boots before the backend is ready to accept the broadcast stream.
+// Set SourceRetryMax negative to opt out of retry — the hub then logs and
+// stops, leaving connected clients live but quiet (pre-retry behavior).
 func NewBroadcastHub(ctx context.Context, cfg BroadcastConfig) *BroadcastHub {
 	if ctx == nil {
 		// A nil ctx would panic the first time linkHubLifetime selects on
@@ -171,6 +191,13 @@ func NewBroadcastHub(ctx context.Context, cfg BroadcastConfig) *BroadcastHub {
 	}
 	if cfg.Matcher == nil {
 		cfg.Matcher = DefaultLabelMatcher
+	}
+	if cfg.SourceRetryInitial <= 0 {
+		cfg.SourceRetryInitial = 1 * time.Second
+	}
+	// == 0 (not <= 0) so callers can opt out with a negative value.
+	if cfg.SourceRetryMax == 0 {
+		cfg.SourceRetryMax = 30 * time.Second
 	}
 	h := &BroadcastHub{
 		cfg:     cfg,
@@ -215,11 +242,76 @@ func (h *BroadcastHub) run(ctx context.Context) {
 		}
 	}()
 
-	if err := h.cfg.Source.Run(ctx, in); err != nil && !errors.Is(err, context.Canceled) {
-		h.logger().Error("events: broadcast source terminated", "err", err)
-	}
+	h.runSource(ctx, in)
 	close(in)
 	<-dispatchDone
+}
+
+// runSource drives Source.Run with exponential-backoff retry. Each iteration
+// gets a fresh per-attempt channel; a forwarder copies frames into the hub's
+// dispatch channel and tracks first delivery so a successful run resets the
+// backoff. Returns when ctx is cancelled, when retry is disabled and Run
+// errors, or when Run returns nil (clean source-driven stop).
+func (h *BroadcastHub) runSource(ctx context.Context, in chan<- BroadcastFrame) {
+	backoff := h.cfg.SourceRetryInitial
+	retryDisabled := h.cfg.SourceRetryMax < 0
+
+	for {
+		srcOut := make(chan BroadcastFrame, 64)
+		var delivered atomic.Bool
+		forwardDone := make(chan struct{})
+		go func() {
+			defer close(forwardDone)
+			for f := range srcOut {
+				delivered.Store(true)
+				select {
+				case in <- f:
+				case <-ctx.Done():
+					// Drain remaining frames so Source.Run's send doesn't
+					// block forever waiting for srcOut to be read.
+					for range srcOut {
+					}
+					return
+				}
+			}
+		}()
+
+		err := h.cfg.Source.Run(ctx, srcOut)
+		close(srcOut)
+		<-forwardDone
+
+		if ctx.Err() != nil {
+			return
+		}
+		// nil err without ctx cancel = source decided to stop cleanly.
+		// Honor that — don't restart it in a tight loop.
+		if err == nil {
+			return
+		}
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+		if retryDisabled {
+			h.logger().Error("events: broadcast source terminated", "err", err)
+			return
+		}
+
+		if delivered.Load() {
+			backoff = h.cfg.SourceRetryInitial
+		}
+		h.logger().Error("events: broadcast source terminated, will retry",
+			"err", err, "backoff", backoff)
+
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return
+		}
+		backoff *= 2
+		if backoff > h.cfg.SourceRetryMax {
+			backoff = h.cfg.SourceRetryMax
+		}
+	}
 }
 
 func (h *BroadcastHub) dispatch(f BroadcastFrame) {

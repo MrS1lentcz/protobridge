@@ -247,8 +247,10 @@ func (e errorSource) Run(_ context.Context, _ chan<- events.BroadcastFrame) erro
 
 func TestBroadcastHub_SourceErrorDoesntCrashHandler(t *testing.T) {
 	hub := events.NewBroadcastHub(context.Background(), events.BroadcastConfig{
-		Source:  errorSource{},
-		Marshal: passthroughMarshaler,
+		Source:         errorSource{},
+		Marshal:        passthroughMarshaler,
+		SourceRetryMax: -1, // exercise the legacy "log and stop" branch
+		Logger:         newSilentLogger(),
 	})
 	srv := httptest.NewServer(hub)
 	t.Cleanup(srv.Close)
@@ -419,6 +421,95 @@ func TestBroadcastHub_NonWSGETReturnsCleanly(t *testing.T) {
 	if resp.StatusCode == http.StatusOK {
 		t.Errorf("expected non-200 for non-WS GET, got %d", resp.StatusCode)
 	}
+}
+
+// flakySource errors on the first N Run calls then behaves normally, pushing
+// one frame before blocking on ctx. Exercises hub retry + backoff-reset.
+type flakySource struct {
+	attempts   chan int
+	failsFirst int
+	frame      events.BroadcastFrame
+}
+
+func (s *flakySource) Run(ctx context.Context, out chan<- events.BroadcastFrame) error {
+	n := <-s.attempts
+	s.attempts <- n + 1
+	if n < s.failsFirst {
+		return errors.New("dial refused")
+	}
+	select {
+	case out <- s.frame:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestBroadcastHub_RetriesSourceAfterError(t *testing.T) {
+	src := &flakySource{
+		attempts:   make(chan int, 1),
+		failsFirst: 2,
+		frame:      events.BroadcastFrame{Subject: "x", Payload: []byte(`{}`)},
+	}
+	src.attempts <- 0
+
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	hub := events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:             src,
+		Marshal:            passthroughMarshaler,
+		SourceRetryInitial: 5 * time.Millisecond,
+		SourceRetryMax:     20 * time.Millisecond,
+		Logger:             newSilentLogger(),
+	})
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+
+	conn, ctx, cancel := dialWS(t, srv)
+	defer cancel()
+	defer conn.CloseNow() //nolint:errcheck
+
+	// Two failed Run attempts, then the third delivers — must arrive despite
+	// the earlier errors that would have permanently killed the pre-retry hub.
+	readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer readCancel()
+	if _, _, err := conn.Read(readCtx); err != nil {
+		t.Fatalf("expected frame after retries, got %v", err)
+	}
+	if n := <-src.attempts; n < 3 {
+		t.Errorf("expected at least 3 Run attempts, got %d", n)
+	}
+}
+
+func TestBroadcastHub_RetryMaxNegativeDisablesRetry(t *testing.T) {
+	var attempts int
+	src := funcSource(func(_ context.Context, _ chan<- events.BroadcastFrame) error {
+		attempts++
+		return errors.New("boom")
+	})
+
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:         src,
+		Marshal:        passthroughMarshaler,
+		SourceRetryMax: -1,
+		Logger:         newSilentLogger(),
+	})
+
+	// No WS client needed — we're asserting the source goroutine doesn't
+	// spin. Give the goroutine time to (not) retry.
+	time.Sleep(50 * time.Millisecond)
+	if attempts != 1 {
+		t.Errorf("expected exactly 1 attempt with retry disabled, got %d", attempts)
+	}
+}
+
+type funcSource func(ctx context.Context, out chan<- events.BroadcastFrame) error
+
+func (f funcSource) Run(ctx context.Context, out chan<- events.BroadcastFrame) error {
+	return f(ctx, out)
 }
 
 func TestHeadersToLabels_NilOrEmpty(t *testing.T) {
