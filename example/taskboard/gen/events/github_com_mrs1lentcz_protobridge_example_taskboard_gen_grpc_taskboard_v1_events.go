@@ -5,12 +5,19 @@ package events
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/mrs1lentcz/protobridge/example/taskboard/gen/grpc/taskboard/v1"
 	"github.com/mrs1lentcz/protobridge/runtime/events"
 )
+
+// Suppress unused-import warnings when no durable events are present
+// (time is only touched by the heartbeat wrapper generated for durable
+// subscribers). The var consumes one reference so the import always
+// compiles even if every event is BROADCAST-only.
+var _ = time.Second
 
 // SubjectTaskCompletedEvent is the bus subject this event is published on.
 const SubjectTaskCompletedEvent = "task_completed_event"
@@ -81,11 +88,66 @@ type TaskCreatedEventHandler func(ctx context.Context, ev *pb.TaskCreatedEvent) 
 // subscriber. group identifies the consumer group; multiple processes in
 // the same group split the message stream. Pass an empty string to use
 // the message name as the default group identifier.
-func SubscribeTaskCreatedEvent(bus events.Bus, group string, h TaskCreatedEventHandler) (events.Subscription, error) {
+//
+// The generated wrapper spawns a heartbeat goroutine that calls
+// m.InProgress on an AckWait-derived timer so long-running handlers never
+// race the ack deadline — a delivery can only be redelivered by the
+// backend when the process dies, the handler panics (recovered → Nack),
+// or the handler returns an error. Deadlocked handlers inside a live
+// process are the one case the runtime can't detect; application-level
+// timeouts / watchdogs remain the caller's responsibility.
+func SubscribeTaskCreatedEvent(bus events.Bus, group string, h TaskCreatedEventHandler, opts ...events.DurableOption) (events.Subscription, error) {
 	if group == "" {
 		group = SubjectTaskCreatedEvent
 	}
-	return bus.SubscribeDurable(SubjectTaskCreatedEvent, group, func(ctx context.Context, m events.Message) error {
+	annotationOpts := []events.DurableOption{}
+	// Caller opts win — they're appended after annotation defaults so
+	// later calls overwrite earlier ones in DurableConfig.
+	resolved := append(annotationOpts, opts...)
+	cfg := events.ResolveDurableConfig(SubjectTaskCreatedEvent, resolved...)
+	return bus.SubscribeDurable(SubjectTaskCreatedEvent, group, func(ctx context.Context, m events.Message) (err error) {
+		// Recover panics into a Nack so the subscriber goroutine survives
+		// and JetStream redelivers after AckWait. Without this a single
+		// handler panic would kill the consume goroutine silently.
+		defer func() {
+			if rec := recover(); rec != nil {
+				m.Nack()
+				err = fmt.Errorf("SubscribeTaskCreatedEvent: handler panic: %v", rec)
+			}
+		}()
+
+		// Heartbeat ticker: fire at half the configured AckWait so a
+		// single missed tick still leaves the other one inside the
+		// deadline. Stops when the handler returns, so a returned
+		// handler never issues a stale InProgress.
+		heartbeatStop := make(chan struct{})
+		heartbeatDone := make(chan struct{})
+		go func() {
+			defer close(heartbeatDone)
+			// Half the AckWait gives a missed heartbeat one full cycle to
+			// recover before the deadline expires. Clamp to AckWait when
+			// the configured value is so small that /2 rounds to zero —
+			// time.NewTicker(0) panics.
+			heartbeatInterval := cfg.AckWait / 2
+			if heartbeatInterval <= 0 {
+				heartbeatInterval = cfg.AckWait
+			}
+			ticker := time.NewTicker(heartbeatInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-heartbeatStop:
+					return
+				case <-ticker.C:
+					_ = m.InProgress()
+				}
+			}
+		}()
+		defer func() {
+			close(heartbeatStop)
+			<-heartbeatDone
+		}()
+
 		ev := &pb.TaskCreatedEvent{}
 		if err := proto.Unmarshal(m.Payload, ev); err != nil {
 			m.Nack()
@@ -97,7 +159,7 @@ func SubscribeTaskCreatedEvent(bus events.Bus, group string, h TaskCreatedEventH
 		}
 		m.Ack()
 		return nil
-	})
+	}, resolved...)
 }
 
 // SubscribeBroadcastTaskCreatedEvent registers an ephemeral fan-out
@@ -142,11 +204,66 @@ type TaskGCRequestedHandler func(ctx context.Context, ev *pb.TaskGCRequested) er
 // subscriber. group identifies the consumer group; multiple processes in
 // the same group split the message stream. Pass an empty string to use
 // "task-gc" (declared in the proto annotation).
-func SubscribeTaskGCRequested(bus events.Bus, group string, h TaskGCRequestedHandler) (events.Subscription, error) {
+//
+// The generated wrapper spawns a heartbeat goroutine that calls
+// m.InProgress on an AckWait-derived timer so long-running handlers never
+// race the ack deadline — a delivery can only be redelivered by the
+// backend when the process dies, the handler panics (recovered → Nack),
+// or the handler returns an error. Deadlocked handlers inside a live
+// process are the one case the runtime can't detect; application-level
+// timeouts / watchdogs remain the caller's responsibility.
+func SubscribeTaskGCRequested(bus events.Bus, group string, h TaskGCRequestedHandler, opts ...events.DurableOption) (events.Subscription, error) {
 	if group == "" {
 		group = "task-gc"
 	}
-	return bus.SubscribeDurable(SubjectTaskGCRequested, group, func(ctx context.Context, m events.Message) error {
+	annotationOpts := []events.DurableOption{}
+	// Caller opts win — they're appended after annotation defaults so
+	// later calls overwrite earlier ones in DurableConfig.
+	resolved := append(annotationOpts, opts...)
+	cfg := events.ResolveDurableConfig(SubjectTaskGCRequested, resolved...)
+	return bus.SubscribeDurable(SubjectTaskGCRequested, group, func(ctx context.Context, m events.Message) (err error) {
+		// Recover panics into a Nack so the subscriber goroutine survives
+		// and JetStream redelivers after AckWait. Without this a single
+		// handler panic would kill the consume goroutine silently.
+		defer func() {
+			if rec := recover(); rec != nil {
+				m.Nack()
+				err = fmt.Errorf("SubscribeTaskGCRequested: handler panic: %v", rec)
+			}
+		}()
+
+		// Heartbeat ticker: fire at half the configured AckWait so a
+		// single missed tick still leaves the other one inside the
+		// deadline. Stops when the handler returns, so a returned
+		// handler never issues a stale InProgress.
+		heartbeatStop := make(chan struct{})
+		heartbeatDone := make(chan struct{})
+		go func() {
+			defer close(heartbeatDone)
+			// Half the AckWait gives a missed heartbeat one full cycle to
+			// recover before the deadline expires. Clamp to AckWait when
+			// the configured value is so small that /2 rounds to zero —
+			// time.NewTicker(0) panics.
+			heartbeatInterval := cfg.AckWait / 2
+			if heartbeatInterval <= 0 {
+				heartbeatInterval = cfg.AckWait
+			}
+			ticker := time.NewTicker(heartbeatInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-heartbeatStop:
+					return
+				case <-ticker.C:
+					_ = m.InProgress()
+				}
+			}
+		}()
+		defer func() {
+			close(heartbeatStop)
+			<-heartbeatDone
+		}()
+
 		ev := &pb.TaskGCRequested{}
 		if err := proto.Unmarshal(m.Payload, ev); err != nil {
 			m.Nack()
@@ -158,5 +275,5 @@ func SubscribeTaskGCRequested(bus events.Bus, group string, h TaskGCRequestedHan
 		}
 		m.Ack()
 		return nil
-	})
+	}, resolved...)
 }

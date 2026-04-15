@@ -109,9 +109,16 @@ func (b *WatermillBus) Publish(ctx context.Context, subject string, payload []by
 // caller to track this caveat; instead the bus accepts the group, logs a
 // warning the first time it sees one, and proceeds with the configured
 // subscriber. Tracked as v0.5+ work — a per-group Subscriber factory.
-func (b *WatermillBus) SubscribeDurable(subject, group string, h Handler) (Subscription, error) {
+func (b *WatermillBus) SubscribeDurable(subject, group string, h Handler, opts ...DurableOption) (Subscription, error) {
 	if group != "" {
 		b.logger().Warn("events: SubscribeDurable group is informational only — see WatermillBus docs",
+			"subject", subject, "group", group)
+	}
+	if len(opts) > 0 {
+		// Accepted for API consistency across Bus implementations; only
+		// JetStreamBus honors them. Log once per subscribe so misconfigured
+		// production callers notice they're on the wrong transport.
+		b.logger().Warn("events: WatermillBus ignores DurableOption(s); use JetStreamBus for production durable semantics",
 			"subject", subject, "group", group)
 	}
 	return b.subscribe(b.DurableSubscriber, subject, h)
@@ -166,11 +173,12 @@ func (b *WatermillBus) dispatch(ctx context.Context, subject string, m *wmsg.Mes
 	// Subject must be the actual subscribed topic — Watermill doesn't stamp
 	// it on the Message, so we pass it through from subscribe().
 	msg := Message{
-		Subject: subject,
-		Payload: m.Payload,
-		Headers: headers,
-		Ack:     func() { m.Ack() },
-		Nack:    func() { m.Nack() },
+		Subject:    subject,
+		Payload:    m.Payload,
+		Headers:    headers,
+		Ack:        func() { m.Ack() },
+		Nack:       func() { m.Nack() },
+		InProgress: func() error { return nil }, // no deadline on Watermill path
 	}
 	// Contract per Bus.Handler doc: the handler is responsible for calling
 	// Ack/Nack on msg before returning. dispatch only logs a non-nil error;

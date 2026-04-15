@@ -62,6 +62,20 @@ message EventOptions {
 
   // Optional human-readable description, used in generated AsyncAPI docs.
   string description = 5;
+
+  // For DURABLE / BOTH only: JetStream ack deadline in seconds. The
+  // generated Subscribe* wrapper heartbeats at half this interval so
+  // handlers slower than AckWait still don't trigger redelivery — the
+  // only way a message gets redelivered is if the handler crashes,
+  // panics (recovered → Nack), or returns an error. Zero → runtime
+  // default (30s).
+  uint32 ack_wait_seconds = 6;
+
+  // For DURABLE / BOTH only: maximum redelivery attempts before the
+  // message is routed to the dead-letter subject. Zero → runtime
+  // default (5). Set explicitly for events where retries are cheap
+  // (higher) or expensive (lower, with tight idempotency).
+  uint32 max_deliver = 7;
 }
 
 enum EventKind {

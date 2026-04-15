@@ -198,7 +198,19 @@ type EventOptions struct {
 	// events are visible only to in-cluster gRPC subscribers.
 	Visibility Visibility `protobuf:"varint,4,opt,name=visibility,proto3,enum=protobridge.Visibility" json:"visibility,omitempty"`
 	// Optional human-readable description, used in generated AsyncAPI docs.
-	Description   string `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	Description string `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	// For DURABLE / BOTH only: JetStream ack deadline in seconds. The
+	// generated Subscribe* wrapper heartbeats at half this interval so
+	// handlers slower than AckWait still don't trigger redelivery — the
+	// only way a message gets redelivered is if the handler crashes,
+	// panics (recovered → Nack), or returns an error. Zero → runtime
+	// default (30s).
+	AckWaitSeconds uint32 `protobuf:"varint,6,opt,name=ack_wait_seconds,json=ackWaitSeconds,proto3" json:"ack_wait_seconds,omitempty"`
+	// For DURABLE / BOTH only: maximum redelivery attempts before the
+	// message is routed to the dead-letter subject. Zero → runtime
+	// default (5). Set explicitly for events where retries are cheap
+	// (higher) or expensive (lower, with tight idempotency).
+	MaxDeliver    uint32 `protobuf:"varint,7,opt,name=max_deliver,json=maxDeliver,proto3" json:"max_deliver,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -268,6 +280,20 @@ func (x *EventOptions) GetDescription() string {
 	return ""
 }
 
+func (x *EventOptions) GetAckWaitSeconds() uint32 {
+	if x != nil {
+		return x.AckWaitSeconds
+	}
+	return 0
+}
+
+func (x *EventOptions) GetMaxDeliver() uint32 {
+	if x != nil {
+		return x.MaxDeliver
+	}
+	return 0
+}
+
 var file_protobridge_events_proto_extTypes = []protoimpl.ExtensionInfo{
 	{
 		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
@@ -305,7 +331,7 @@ const file_protobridge_events_proto_rawDesc = "" +
 	"\n" +
 	"\x18protobridge/events.proto\x12\vprotobridge\x1a google/protobuf/descriptor.proto\"(\n" +
 	"\x10BroadcastOptions\x12\x14\n" +
-	"\x05route\x18\x01 \x01(\tR\x05route\"\xd4\x01\n" +
+	"\x05route\x18\x01 \x01(\tR\x05route\"\x9f\x02\n" +
 	"\fEventOptions\x12\x18\n" +
 	"\asubject\x18\x01 \x01(\tR\asubject\x12*\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x16.protobridge.EventKindR\x04kind\x12#\n" +
@@ -313,7 +339,10 @@ const file_protobridge_events_proto_rawDesc = "" +
 	"\n" +
 	"visibility\x18\x04 \x01(\x0e2\x17.protobridge.VisibilityR\n" +
 	"visibility\x12 \n" +
-	"\vdescription\x18\x05 \x01(\tR\vdescription*M\n" +
+	"\vdescription\x18\x05 \x01(\tR\vdescription\x12(\n" +
+	"\x10ack_wait_seconds\x18\x06 \x01(\rR\x0eackWaitSeconds\x12\x1f\n" +
+	"\vmax_deliver\x18\a \x01(\rR\n" +
+	"maxDeliver*M\n" +
 	"\tEventKind\x12\x1a\n" +
 	"\x16EVENT_KIND_UNSPECIFIED\x10\x00\x12\r\n" +
 	"\tBROADCAST\x10\x01\x12\v\n" +

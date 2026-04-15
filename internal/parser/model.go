@@ -70,6 +70,13 @@ type Event struct {
 	Visibility   EventVisibility
 	Description  string
 
+	// AckWaitSeconds / MaxDeliver: durable-only tuning copied from the
+	// annotation. Zero means "runtime default" — codegen emits the
+	// corresponding DurableOption only when non-zero, so the generated
+	// call site stays explicit about overrides.
+	AckWaitSeconds uint32
+	MaxDeliver     uint32
+
 	// GoPackage is the Go import path of the proto package that owns this
 	// message, copied so the events plugin doesn't have to re-derive it.
 	GoPackage string

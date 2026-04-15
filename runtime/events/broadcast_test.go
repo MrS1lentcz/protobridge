@@ -483,6 +483,24 @@ func TestBroadcastHub_RetriesSourceAfterError(t *testing.T) {
 	}
 }
 
+func TestBroadcastHub_ClampsMaxBelowInitial(t *testing.T) {
+	// SourceRetryMax < Initial would make the cap clamp shrink the
+	// backoff after the first retry. NewBroadcastHub silently bumps Max
+	// up to Initial — exercise that branch.
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	hub := events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:             newFakeSource(),
+		Marshal:            passthroughMarshaler,
+		SourceRetryInitial: 5 * time.Second,
+		SourceRetryMax:     1 * time.Second, // < Initial → clamped up
+		Logger:             newSilentLogger(),
+	})
+	if hub == nil {
+		t.Fatal("hub == nil")
+	}
+}
+
 func TestBroadcastHub_RetryMaxNegativeDisablesRetry(t *testing.T) {
 	var attempts atomic.Int32
 	src := funcSource(func(_ context.Context, _ chan<- events.BroadcastFrame) error {
