@@ -55,9 +55,13 @@ type JetStreamConfig struct {
 	// default) — override via StreamSubjects when integrating with an
 	// existing stream layout.
 	StreamName string
-	// StreamSubjects lists the subjects the stream should bind. Default
-	// []string{">"} — catches everything. Narrow this when sharing a
-	// NATS account with other apps.
+	// StreamSubjects lists the subjects the stream should bind. Must be
+	// set — JetStream refuses the unrestricted ">" default because it
+	// would capture reserved "$JS.>" subjects. A typical production
+	// value is []string{"events.>"} or a per-domain list like
+	// []string{"task.>", "session.>"}. Callers who use the broadcast leg
+	// on the same NATS account should keep broadcast subjects outside
+	// these patterns.
 	StreamSubjects []string
 	// Logger receives broadcast best-effort failures, dispatch panics,
 	// DLQ routing decisions, and heartbeat failures. Defaults to slog.Default().
@@ -72,7 +76,7 @@ func NewJetStreamBus(ctx context.Context, cfg JetStreamConfig) (*JetStreamBus, e
 		cfg.StreamName = "protobridge"
 	}
 	if len(cfg.StreamSubjects) == 0 {
-		cfg.StreamSubjects = []string{">"}
+		return nil, errors.New("events: JetStreamConfig.StreamSubjects must be non-empty (e.g. []string{\"events.>\"})")
 	}
 
 	var (
