@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -23,14 +22,44 @@ type WSAcceptConfig struct {
 	PerRPCPatterns string
 }
 
+// ErrWSInsecureInProduction is the message panicked by InitWSConfig and
+// WSAcceptOptions when the dev-only origin-skip escape hatch is enabled
+// under a production marker. Exposed as a named constant so deployment
+// automation can grep for it in crash logs.
+const ErrWSInsecureInProduction = "runtime: PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY=true is forbidden when PROTOBRIDGE_ENV=production"
+
+// InitWSConfig validates WS-related environment variables at process
+// startup. The generated gateway main invokes it before any router is
+// registered, so misconfiguration fails fast — before traffic hits the
+// first WS upgrade and before downstream connections are established.
+//
+// Currently it refuses the combination
+// PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY=true + PROTOBRIDGE_ENV=production
+// (panics with ErrWSInsecureInProduction). Non-production processes are
+// allowed to toggle skip-verify for local development.
+//
+// Safe to call more than once; idempotent. Callers outside the generated
+// gateway (e.g. custom bootstraps) should invoke it explicitly once
+// after parsing env.
+func InitWSConfig() {
+	if os.Getenv("PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY") != "true" {
+		return
+	}
+	if strings.EqualFold(os.Getenv("PROTOBRIDGE_ENV"), "production") {
+		panic(ErrWSInsecureInProduction)
+	}
+}
+
 // WSAcceptOptions resolves the coder/websocket.AcceptOptions for a single
 // WS upgrade. It merges WSAcceptConfig.PerRPCPatterns with the env-wide
 // PROTOBRIDGE_WS_ORIGIN_PATTERNS allow-list, and honours the dev-only
 // PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY escape hatch.
 //
-// PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY=true disables origin checking
-// entirely — dangerous in production, so when PROTOBRIDGE_ENV=production
-// the process exits rather than silently accepting untrusted origins.
+// Misconfiguration (skip-verify in production) normally trips InitWSConfig
+// at startup; the same check is mirrored here as defence in depth for
+// bootstraps that skip InitWSConfig — panics with ErrWSInsecureInProduction
+// rather than log.Fatal so deferred server-shutdown runs and the panic
+// surfaces through tests.
 //
 // Returns nil when neither per-RPC nor env patterns are set and skip-verify
 // is off; coder/websocket then falls back to the default same-origin check.
@@ -38,7 +67,7 @@ type WSAcceptConfig struct {
 func WSAcceptOptions(cfg WSAcceptConfig) *websocket.AcceptOptions {
 	if os.Getenv("PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY") == "true" {
 		if strings.EqualFold(os.Getenv("PROTOBRIDGE_ENV"), "production") {
-			log.Fatal("PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY=true is forbidden when PROTOBRIDGE_ENV=production")
+			panic(ErrWSInsecureInProduction)
 		}
 		return &websocket.AcceptOptions{InsecureSkipVerify: true}
 	}

@@ -41,6 +41,11 @@ import (
 )
 
 func main() {
+	// Validate WS-related env combinations at startup so misconfiguration
+	// surfaces before any traffic hits the gateway rather than on the
+	// first WS upgrade.
+	runtime.InitWSConfig()
+
 	// OpenTelemetry (tracing + metrics)
 	serviceName := os.Getenv("PROTOBRIDGE_OTEL_SERVICE_NAME")
 	if serviceName == "" {

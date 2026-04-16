@@ -67,6 +67,55 @@ func TestWSAcceptOptions_EmptyPatternsAfterTrim(t *testing.T) {
 	}
 }
 
+func TestInitWSConfig_AllowsDev(t *testing.T) {
+	// Skip-verify in a dev/local environment is the documented escape
+	// hatch — InitWSConfig must return without panic.
+	t.Setenv("PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY", "true")
+	t.Setenv("PROTOBRIDGE_ENV", "development")
+	runtime.InitWSConfig()
+
+	t.Setenv("PROTOBRIDGE_ENV", "")
+	runtime.InitWSConfig()
+}
+
+func TestInitWSConfig_NoOpWhenSkipVerifyOff(t *testing.T) {
+	// When the escape hatch isn't engaged InitWSConfig must bail before
+	// touching PROTOBRIDGE_ENV — "production" must not be a tripwire by
+	// itself.
+	t.Setenv("PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY", "")
+	t.Setenv("PROTOBRIDGE_ENV", "production")
+	runtime.InitWSConfig()
+}
+
+func TestInitWSConfig_PanicsInProduction(t *testing.T) {
+	t.Setenv("PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY", "true")
+	t.Setenv("PROTOBRIDGE_ENV", "production")
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic when skip-verify meets production")
+		}
+		if msg, _ := r.(string); msg != runtime.ErrWSInsecureInProduction {
+			t.Fatalf("panic = %v, want %q", r, runtime.ErrWSInsecureInProduction)
+		}
+	}()
+	runtime.InitWSConfig()
+}
+
+func TestWSAcceptOptions_PanicsOnProductionSkipVerify(t *testing.T) {
+	// Mirrors InitWSConfig's guard as defence in depth — a custom bootstrap
+	// that skipped InitWSConfig still can't silently downgrade to an
+	// open-origin upgrade in production.
+	t.Setenv("PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY", "true")
+	t.Setenv("PROTOBRIDGE_ENV", "PRODUCTION") // case-insensitive
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic on skip-verify in production")
+		}
+	}()
+	_ = runtime.WSAcceptOptions(runtime.WSAcceptConfig{})
+}
+
 func TestUnmarshalWSFrame_Text(t *testing.T) {
 	// Text frames go through protojson, which accepts the JSON-encoded form.
 	payload := []byte(`{"name":"txt","age":7}`)
