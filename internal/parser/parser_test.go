@@ -1299,6 +1299,26 @@ func TestGetWSMode_EmptyOptions(t *testing.T) {
 	if got := getWSMode(m); got != "" {
 		t.Errorf("expected empty, got %q", got)
 	}
+	if got := getWSOriginPatterns(m); got != "" {
+		t.Errorf("expected empty ws_origin_patterns, got %q", got)
+	}
+	if got := getWSAuth(m); got != "" {
+		t.Errorf("expected empty ws_auth, got %q", got)
+	}
+}
+
+func TestGetWSOriginPatternsAndAuth_SetValues(t *testing.T) {
+	opts := &descriptorpb.MethodOptions{}
+	proto.SetExtension(opts, optionspb.E_WsOriginPatterns, "example.com, *.preview.example.com")
+	proto.SetExtension(opts, optionspb.E_WsAuth, "header,ticket")
+	m := &descriptorpb.MethodDescriptorProto{Name: sp("Stream"), Options: opts}
+
+	if got := getWSOriginPatterns(m); got != "example.com, *.preview.example.com" {
+		t.Errorf("getWSOriginPatterns: %q", got)
+	}
+	if got := getWSAuth(m); got != "header,ticket" {
+		t.Errorf("getWSAuth: %q", got)
+	}
 }
 
 func TestGetDisplayName_EmptyOptions(t *testing.T) {
@@ -1353,6 +1373,12 @@ func TestOptionGetters_NilOptions(t *testing.T) {
 	}
 	if got := getWSMode(m); got != "" {
 		t.Errorf("getWSMode: got %q", got)
+	}
+	if got := getWSOriginPatterns(m); got != "" {
+		t.Errorf("getWSOriginPatterns: got %q", got)
+	}
+	if got := getWSAuth(m); got != "" {
+		t.Errorf("getWSAuth: got %q", got)
 	}
 
 	f := &descriptorpb.FieldDescriptorProto{Name: sp("f")}

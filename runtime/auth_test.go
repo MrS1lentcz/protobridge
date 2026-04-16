@@ -74,6 +74,30 @@ func TestMakeAuthFunc_Success(t *testing.T) {
 	}
 }
 
+func TestMakeAuthFunc_SkipsEmptyHeaderValues(t *testing.T) {
+	// An http.Header slice with an empty value slice must not panic and
+	// must not forward a phantom entry — covers the `len(v) > 0` guard.
+	var captured map[string]string
+	caller := &headerCaptureCaller{
+		resp:    &pb.SimpleResponse{},
+		capture: &captured,
+	}
+	fn := runtime.MakeAuthFunc(caller)
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header["X-Empty"] = []string{} // empty slice, no values
+	r.Header.Set("X-Set", "value")
+
+	if _, err := fn(context.Background(), r); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := captured["X-Empty"]; ok {
+		t.Fatalf("empty-valued header must be dropped, got %v", captured)
+	}
+	if captured["X-Set"] != "value" {
+		t.Fatalf("non-empty header lost, got %v", captured)
+	}
+}
+
 func TestMakeAuthFunc_CallerError(t *testing.T) {
 	caller := &mockAuthCaller{err: fmt.Errorf("auth service down")}
 

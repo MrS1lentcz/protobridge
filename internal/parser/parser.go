@@ -173,6 +173,8 @@ func Parse(req *pluginpb.CodeGeneratorRequest) (*ParsedAPI, error) {
 					StreamType:        resolveStreamType(m),
 					SSE:               getSSE(m),
 					WSMode:            getWSMode(m),
+					WSOriginPatterns:  getWSOriginPatterns(m),
+					WSAuth:            getWSAuth(m),
 					MCP:               mcpEnabled,
 					MCPSet:            mcpSet,
 					MCPScope:          getMCPScope(m),

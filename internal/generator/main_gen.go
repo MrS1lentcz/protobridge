@@ -41,6 +41,11 @@ import (
 )
 
 func main() {
+	// Validate WS-related env combinations at startup so misconfiguration
+	// surfaces before any traffic hits the gateway rather than on the
+	// first WS upgrade.
+	runtime.InitWSConfig()
+
 	// OpenTelemetry (tracing + metrics)
 	serviceName := os.Getenv("PROTOBRIDGE_OTEL_SERVICE_NAME")
 	if serviceName == "" {
@@ -72,10 +77,10 @@ func main() {
 
 	// Validate required environment variables
 	{{ range .Services -}}
-	{{ .EnvAddr }} := requireEnv("{{ .EnvAddrKey }}")
+	{{ .EnvAddr }} := runtime.PreferIPFamily(requireEnv("{{ .EnvAddrKey }}"))
 	{{ end }}
 	{{ range .BroadcastServices -}}
-	{{ .EnvAddr }} := requireEnv("{{ .EnvAddrKey }}")
+	{{ .EnvAddr }} := runtime.PreferIPFamily(requireEnv("{{ .EnvAddrKey }}"))
 	{{ end }}
 
 	// gRPC connection pool with adaptive scaling and health monitoring.

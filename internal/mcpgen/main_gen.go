@@ -63,9 +63,15 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/mrs1lentcz/gox/grpcx"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/mrs1lentcz/protobridge/runtime"
 	"github.com/mrs1lentcz/protobridge/runtime/mcp"
 	"{{ .HandlerPkg }}"
 )
@@ -75,11 +81,11 @@ func main() {
 	defer stop()
 
 	{{ range .Services -}}
-	{{ .EnvAddr }} := requireEnv("{{ .EnvAddrKey }}")
+	{{ .EnvAddr }} := runtime.PreferIPFamily(requireEnv("{{ .EnvAddrKey }}"))
 	{{ end }}
 
 	pool := grpcx.NewPool()
-	pool.EnableHealthWatch(30 * 1_000_000_000) // 30s, expressed in ns to avoid time import
+	pool.EnableHealthWatch(30 * time.Second)
 	defer pool.Close()
 
 	scalingCfg := grpcx.ScalingConfig{
@@ -88,7 +94,7 @@ func main() {
 	}
 
 	{{ range .Services }}
-	if _, err := pool.ConnectScaled({{ .EnvAddr }}, scalingCfg); err != nil {
+	if _, err := pool.ConnectScaled({{ .EnvAddr }}, scalingCfg, dialOpts("{{ .EnvTLSKey }}", "{{ .EnvGRPCOptsKey }}")...); err != nil {
 		log.Fatalf("connect %s: %v", "{{ .ServiceName }}", err)
 	}
 	{{ end }}
@@ -111,6 +117,35 @@ func requireEnv(key string) string {
 		log.Fatalf("required env var %s is not set", key)
 	}
 	return v
+}
+
+func dialOpts(tlsEnvKey, grpcOptsEnvKey string) []grpc.DialOption {
+	opts := []grpc.DialOption{
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+	}
+	if os.Getenv(tlsEnvKey) == "true" {
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(nil)))
+	} else {
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+
+	if globalOpts := os.Getenv("PROTOBRIDGE_GRPC_OPTIONS"); globalOpts != "" {
+		parsed, err := runtime.ParseGRPCOptions(globalOpts)
+		if err != nil {
+			log.Fatalf("PROTOBRIDGE_GRPC_OPTIONS: %v", err)
+		}
+		opts = append(opts, parsed...)
+	}
+
+	if serviceOpts := os.Getenv(grpcOptsEnvKey); serviceOpts != "" {
+		parsed, err := runtime.ParseGRPCOptions(serviceOpts)
+		if err != nil {
+			log.Fatalf("%s: %v", grpcOptsEnvKey, err)
+		}
+		opts = append(opts, parsed...)
+	}
+
+	return opts
 }
 `))
 

@@ -22,7 +22,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/mrs1lentcz/gox/grpcx"
 	"google.golang.org/grpc/metadata"
-	{{ if .UsesProtojson }}"google.golang.org/protobuf/encoding/protojson"{{ end }}
 
 	"github.com/mrs1lentcz/protobridge/runtime"
 	pb "{{ .ProtoImport }}"
@@ -153,7 +152,9 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		}
 		{{ else if .IsServerStream }}
 		// WebSocket: server → client streaming.
-		ws, err := websocket.Accept(w, r, nil)
+		{{ if .WSAuth }}// Accepted auth sources: {{ .WSAuth }}. Wrap AuthFunc with runtime.NewWSAuth in main to honour them.
+		{{ end -}}
+		ws, err := websocket.Accept(w, r, runtime.WSAcceptOptions(runtime.WSAcceptConfig{PerRPCPatterns: {{ printf "%q" .WSOriginPatterns }}}))
 		if err != nil {
 			return
 		}
@@ -186,7 +187,9 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		}
 		{{ else if .IsClientStream }}
 		// WebSocket: client → server streaming.
-		ws, err := websocket.Accept(w, r, nil)
+		{{ if .WSAuth }}// Accepted auth sources: {{ .WSAuth }}. Wrap AuthFunc with runtime.NewWSAuth in main to honour them.
+		{{ end -}}
+		ws, err := websocket.Accept(w, r, runtime.WSAcceptOptions(runtime.WSAcceptConfig{PerRPCPatterns: {{ printf "%q" .WSOriginPatterns }}}))
 		if err != nil {
 			return
 		}
@@ -199,7 +202,7 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		}
 
 		for {
-			_, data, err := ws.Read(ctx)
+			msgType, data, err := ws.Read(ctx)
 			if err != nil {
 				resp, err := stream.CloseAndRecv()
 				if err != nil {
@@ -218,8 +221,8 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 				return
 			}
 			msg := &{{ .InputTypeRef }}{}
-			if err := protojson.Unmarshal(data, msg); err != nil {
-				ws.Close(websocket.StatusInvalidFramePayloadData, "invalid JSON")
+			if err := runtime.UnmarshalWSFrame(msgType, data, msg); err != nil {
+				ws.Close(websocket.StatusInvalidFramePayloadData, "invalid frame payload")
 				return
 			}
 			if err := stream.Send(msg); err != nil {
@@ -229,7 +232,9 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		}
 		{{ else if .IsBidiStream }}
 		// WebSocket: bidirectional streaming.
-		ws, err := websocket.Accept(w, r, nil)
+		{{ if .WSAuth }}// Accepted auth sources: {{ .WSAuth }}. Wrap AuthFunc with runtime.NewWSAuth in main to honour them.
+		{{ end -}}
+		ws, err := websocket.Accept(w, r, runtime.WSAcceptOptions(runtime.WSAcceptConfig{PerRPCPatterns: {{ printf "%q" .WSOriginPatterns }}}))
 		if err != nil {
 			return
 		}
@@ -266,14 +271,14 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 
 		// WS → gRPC
 		for {
-			_, data, err := ws.Read(recvCtx)
+			msgType, data, err := ws.Read(recvCtx)
 			if err != nil {
 				stream.CloseSend()
 				return
 			}
 			msg := &{{ .InputTypeRef }}{}
-			if err := protojson.Unmarshal(data, msg); err != nil {
-				ws.Close(websocket.StatusInvalidFramePayloadData, "invalid JSON")
+			if err := runtime.UnmarshalWSFrame(msgType, data, msg); err != nil {
+				ws.Close(websocket.StatusInvalidFramePayloadData, "invalid frame payload")
 				return
 			}
 			if err := stream.Send(msg); err != nil {
@@ -294,7 +299,6 @@ type serviceFileData struct {
 	UsesFmt       bool
 	UsesIO        bool
 	UsesWebsocket bool
-	UsesProtojson bool
 	Methods       []methodData
 }
 
@@ -319,6 +323,8 @@ type methodData struct {
 	QueryParamsTarget string
 	HasRequiredFields bool
 	RequiredFieldsList string
+	WSOriginPatterns  string
+	WSAuth            string
 }
 
 type headerData struct {
@@ -359,9 +365,6 @@ func generateServiceFile(svc *parser.Service, api *parser.ParsedAPI) string {
 			if m.StreamType == parser.StreamServer {
 				data.UsesIO = true
 			}
-			if m.StreamType == parser.StreamClient || m.StreamType == parser.StreamBidi {
-				data.UsesProtojson = true
-			}
 		}
 		md := methodData{
 			MethodName:      m.Name,
@@ -381,6 +384,8 @@ func generateServiceFile(svc *parser.Service, api *parser.ParsedAPI) string {
 			IsSSE:           m.SSE,
 			HasBody:         m.HTTPMethod == "POST" || m.HTTPMethod == "PUT" || m.HTTPMethod == "PATCH",
 			QueryParamsTarget: m.QueryParamsTarget,
+			WSOriginPatterns:  m.WSOriginPatterns,
+			WSAuth:            m.WSAuth,
 		}
 
 		for _, h := range m.RequiredHeaders {

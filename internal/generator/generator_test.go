@@ -1230,9 +1230,10 @@ func TestGenerateServiceFile_NoUnusedImports_WSBidi(t *testing.T) {
 	content := generateServiceFile(api.Services[0], api)
 	assertImports(t, content,
 		// Bidi calls context.WithCancel(ctx) → context import is required
-		// even though there is no unary closure.
-		[]string{"github.com/coder/websocket", "google.golang.org/protobuf/encoding/protojson", "context"},
-		nil,
+		// even though there is no unary closure. Frame decoding goes through
+		// runtime.UnmarshalWSFrame so protojson is no longer imported here.
+		[]string{"github.com/coder/websocket", "context"},
+		[]string{"google.golang.org/protobuf/encoding/protojson"},
 	)
 }
 

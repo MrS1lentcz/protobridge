@@ -65,6 +65,20 @@ func getWSMode(m *descriptorpb.MethodDescriptorProto) string {
 	return proto.GetExtension(m.Options, optionspb.E_WsMode).(string)
 }
 
+func getWSOriginPatterns(m *descriptorpb.MethodDescriptorProto) string {
+	if m.Options == nil {
+		return ""
+	}
+	return proto.GetExtension(m.Options, optionspb.E_WsOriginPatterns).(string)
+}
+
+func getWSAuth(m *descriptorpb.MethodDescriptorProto) string {
+	if m.Options == nil {
+		return ""
+	}
+	return proto.GetExtension(m.Options, optionspb.E_WsAuth).(string)
+}
+
 func getDisplayName(s *descriptorpb.ServiceDescriptorProto) string {
 	if s.Options == nil {
 		return ""

@@ -12,7 +12,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/mrs1lentcz/gox/grpcx"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	pb "github.com/mrs1lentcz/protobridge/example/taskboard/gen/grpc/taskboard/v1"
 	"github.com/mrs1lentcz/protobridge/runtime"
@@ -369,7 +368,7 @@ func watchTasksHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingCo
 		ctx = runtime.SetUserMetadata(ctx, userData)
 
 		// WebSocket: server → client streaming.
-		ws, err := websocket.Accept(w, r, nil)
+		ws, err := websocket.Accept(w, r, runtime.WSAcceptOptions(runtime.WSAcceptConfig{PerRPCPatterns: ""}))
 		if err != nil {
 			return
 		}
@@ -524,7 +523,7 @@ func bulkCreateTasksHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		ctx = runtime.SetUserMetadata(ctx, userData)
 
 		// WebSocket: client → server streaming.
-		ws, err := websocket.Accept(w, r, nil)
+		ws, err := websocket.Accept(w, r, runtime.WSAcceptOptions(runtime.WSAcceptConfig{PerRPCPatterns: ""}))
 		if err != nil {
 			return
 		}
@@ -537,7 +536,7 @@ func bulkCreateTasksHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		}
 
 		for {
-			_, data, err := ws.Read(ctx)
+			msgType, data, err := ws.Read(ctx)
 			if err != nil {
 				resp, err := stream.CloseAndRecv()
 				if err != nil {
@@ -556,8 +555,8 @@ func bulkCreateTasksHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 				return
 			}
 			msg := &pb.BulkCreateTaskRequest{}
-			if err := protojson.Unmarshal(data, msg); err != nil {
-				ws.Close(websocket.StatusInvalidFramePayloadData, "invalid JSON")
+			if err := runtime.UnmarshalWSFrame(msgType, data, msg); err != nil {
+				ws.Close(websocket.StatusInvalidFramePayloadData, "invalid frame payload")
 				return
 			}
 			if err := stream.Send(msg); err != nil {
@@ -607,7 +606,7 @@ func taskChatHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConf
 		ctx = runtime.SetUserMetadata(ctx, userData)
 
 		// WebSocket: bidirectional streaming.
-		ws, err := websocket.Accept(w, r, nil)
+		ws, err := websocket.Accept(w, r, runtime.WSAcceptOptions(runtime.WSAcceptConfig{PerRPCPatterns: ""}))
 		if err != nil {
 			return
 		}
@@ -644,14 +643,14 @@ func taskChatHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.ScalingConf
 
 		// WS → gRPC
 		for {
-			_, data, err := ws.Read(recvCtx)
+			msgType, data, err := ws.Read(recvCtx)
 			if err != nil {
 				stream.CloseSend()
 				return
 			}
 			msg := &pb.ChatMessage{}
-			if err := protojson.Unmarshal(data, msg); err != nil {
-				ws.Close(websocket.StatusInvalidFramePayloadData, "invalid JSON")
+			if err := runtime.UnmarshalWSFrame(msgType, data, msg); err != nil {
+				ws.Close(websocket.StatusInvalidFramePayloadData, "invalid frame payload")
 				return
 			}
 			if err := stream.Send(msg); err != nil {
@@ -693,7 +692,7 @@ func activityFeedHandler(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scaling
 		ctx = runtime.SetUserMetadata(ctx, userData)
 
 		// WebSocket: server → client streaming.
-		ws, err := websocket.Accept(w, r, nil)
+		ws, err := websocket.Accept(w, r, runtime.WSAcceptOptions(runtime.WSAcceptConfig{PerRPCPatterns: ""}))
 		if err != nil {
 			return
 		}

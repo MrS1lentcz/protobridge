@@ -32,6 +32,11 @@ import (
 )
 
 func main() {
+	// Validate WS-related env combinations at startup so misconfiguration
+	// surfaces before any traffic hits the gateway rather than on the
+	// first WS upgrade.
+	runtime.InitWSConfig()
+
 	// OpenTelemetry (tracing + metrics)
 	serviceName := os.Getenv("PROTOBRIDGE_OTEL_SERVICE_NAME")
 	if serviceName == "" {
@@ -62,10 +67,10 @@ func main() {
 	defer errorx.CloseReporter()
 
 	// Validate required environment variables
-	taskServiceAddr := requireEnv("PROTOBRIDGE_TASK_SERVICE_ADDR")
-	authServiceAddr := requireEnv("PROTOBRIDGE_AUTH_SERVICE_ADDR")
+	taskServiceAddr := runtime.PreferIPFamily(requireEnv("PROTOBRIDGE_TASK_SERVICE_ADDR"))
+	authServiceAddr := runtime.PreferIPFamily(requireEnv("PROTOBRIDGE_AUTH_SERVICE_ADDR"))
 
-	taskBroadcastAddr := requireEnv("PROTOBRIDGE_TASK_BROADCAST_ADDR")
+	taskBroadcastAddr := runtime.PreferIPFamily(requireEnv("PROTOBRIDGE_TASK_BROADCAST_ADDR"))
 
 	// gRPC connection pool with adaptive scaling and health monitoring.
 	// Each service scales from 1 to MaxConns connections based on load.

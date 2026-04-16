@@ -60,6 +60,21 @@ func GenerateEnvExample(api *parser.ParsedAPI) string {
 		fmt.Fprintf(&b, "# PROTOBRIDGE_%s_TLS=true\n", screaming)
 	}
 
+	// WebSocket
+	b.WriteString("\n# --- WebSocket upgrade ---\n")
+	b.WriteString("# Comma-separated Origin allow-list merged with per-RPC (protobridge.ws_origin_patterns).\n")
+	b.WriteString("# Leave unset to enforce strict same-origin (coder/websocket default).\n")
+	b.WriteString("# PROTOBRIDGE_WS_ORIGIN_PATTERNS=https://app.example.com,https://*.preview.example.com\n")
+	b.WriteString("# Dev-only escape hatch — disables origin verification entirely. Refused when PROTOBRIDGE_ENV=production.\n")
+	b.WriteString("# PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY=false\n")
+	b.WriteString("# PROTOBRIDGE_ENV=production\n")
+
+	// Dial-time IP family preference
+	b.WriteString("\n# --- gRPC dial IP family (runtime.PreferIPFamily) ---\n")
+	b.WriteString("# auto|ipv4|ipv6 — pins the initial dial address to a single family.\n")
+	b.WriteString("# Useful inside Docker Desktop where AAAA records are not routable on the bridge network.\n")
+	b.WriteString("# PROTOBRIDGE_DIAL_IP_FAMILY=auto\n")
+
 	// CORS
 	b.WriteString("\n# --- CORS ---\n")
 	b.WriteString("# PROTOBRIDGE_CORS_ORIGINS=https://app.example.com,https://admin.example.com\n")
