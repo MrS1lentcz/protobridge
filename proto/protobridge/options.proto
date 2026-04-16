@@ -45,6 +45,22 @@ extend google.protobuf.MethodOptions {
   //                 Backend pushes to everyone. No per-user routing.
   string ws_mode = 50022;
 
+  // Comma-separated list of host patterns (coder/websocket OriginPatterns
+  // / path.Match syntax). Merged with the global env list
+  // PROTOBRIDGE_WS_ORIGIN_PATTERNS at WS upgrade time — a request is
+  // accepted when its Origin matches any entry. Empty here means "env
+  // list only". Only consulted when (protobridge.ws_mode) is set.
+  string ws_origin_patterns = 50023;
+
+  // Comma-separated list of accepted auth sources for the WS handshake.
+  // Values: "header" (Authorization header, default) and "ticket"
+  // (?ticket=<t> redeemed via events.TicketStore). "header,ticket" tries
+  // the header first, falls back to the ticket. Empty means "header".
+  // Documents the expected runtime.NewWSAuth wiring; the generator does
+  // not enforce it, it only surfaces the list as a comment so integrators
+  // know which AuthFunc wrapper the service needs.
+  string ws_auth = 50024;
+
   // Expose this RPC as an MCP tool in the generated MCP proxy.
   // The tool name defaults to snake_case of the method name.
   // Description comes from the method's leading proto comment (or

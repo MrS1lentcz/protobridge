@@ -72,10 +72,10 @@ func main() {
 
 	// Validate required environment variables
 	{{ range .Services -}}
-	{{ .EnvAddr }} := requireEnv("{{ .EnvAddrKey }}")
+	{{ .EnvAddr }} := runtime.PreferIPFamily(requireEnv("{{ .EnvAddrKey }}"))
 	{{ end }}
 	{{ range .BroadcastServices -}}
-	{{ .EnvAddr }} := requireEnv("{{ .EnvAddrKey }}")
+	{{ .EnvAddr }} := runtime.PreferIPFamily(requireEnv("{{ .EnvAddrKey }}"))
 	{{ end }}
 
 	// gRPC connection pool with adaptive scaling and health monitoring.

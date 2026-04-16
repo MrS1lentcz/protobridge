@@ -3,13 +3,91 @@ package runtime
 import (
 	"context"
 	"io"
+	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/coder/websocket"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
+
+// WSAcceptConfig is threaded from the generated WS handlers into
+// WSAcceptOptions. Per-RPC patterns come from (protobridge.ws_origin_patterns).
+type WSAcceptConfig struct {
+	// PerRPCPatterns is the comma-separated Origin allow-list declared on
+	// the individual RPC. Merged union-style with the env-wide list. Empty
+	// means "use the env list only".
+	PerRPCPatterns string
+}
+
+// WSAcceptOptions resolves the coder/websocket.AcceptOptions for a single
+// WS upgrade. It merges WSAcceptConfig.PerRPCPatterns with the env-wide
+// PROTOBRIDGE_WS_ORIGIN_PATTERNS allow-list, and honours the dev-only
+// PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY escape hatch.
+//
+// PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY=true disables origin checking
+// entirely — dangerous in production, so when PROTOBRIDGE_ENV=production
+// the process exits rather than silently accepting untrusted origins.
+//
+// Returns nil when neither per-RPC nor env patterns are set and skip-verify
+// is off; coder/websocket then falls back to the default same-origin check.
+// Env vars are read at call time so tests can toggle them per-case.
+func WSAcceptOptions(cfg WSAcceptConfig) *websocket.AcceptOptions {
+	if os.Getenv("PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY") == "true" {
+		if strings.EqualFold(os.Getenv("PROTOBRIDGE_ENV"), "production") {
+			log.Fatal("PROTOBRIDGE_WS_INSECURE_SKIP_VERIFY=true is forbidden when PROTOBRIDGE_ENV=production")
+		}
+		return &websocket.AcceptOptions{InsecureSkipVerify: true}
+	}
+
+	patterns := mergeOriginPatterns(cfg.PerRPCPatterns, os.Getenv("PROTOBRIDGE_WS_ORIGIN_PATTERNS"))
+	if len(patterns) == 0 {
+		return nil
+	}
+	return &websocket.AcceptOptions{OriginPatterns: patterns}
+}
+
+// mergeOriginPatterns unions two comma-separated lists, preserving the
+// first-seen order and dropping duplicates / empty entries. Trimming is
+// applied so users can write "a.com, b.com" without the space ending up
+// in the allow-list key.
+func mergeOriginPatterns(perRPC, global string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, src := range []string{perRPC, global} {
+		if src == "" {
+			continue
+		}
+		for _, raw := range strings.Split(src, ",") {
+			p := strings.TrimSpace(raw)
+			if p == "" {
+				continue
+			}
+			if _, dup := seen[p]; dup {
+				continue
+			}
+			seen[p] = struct{}{}
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// UnmarshalWSFrame decodes a single WebSocket frame into a typed proto.
+// Text frames are JSON (protojson) — same envelope the gRPC→WS direction
+// already writes — while binary frames are wire-format proto, letting
+// non-browser clients skip the JSON encode/decode round-trip. The caller
+// passes the msgType returned by websocket.Conn.Read so this helper can
+// dispatch without another opcode peek.
+func UnmarshalWSFrame(msgType websocket.MessageType, data []byte, m proto.Message) error {
+	if msgType == websocket.MessageBinary {
+		return proto.Unmarshal(data, m)
+	}
+	return protojson.Unmarshal(data, m)
+}
 
 // StreamFactory creates a gRPC stream from a client connection and context.
 // The generated code provides concrete implementations per streaming RPC.
@@ -46,8 +124,10 @@ func WSHandler(conn *grpc.ClientConn, factory StreamFactory, auth AuthFunc, excl
 			ctx = SetUserMetadata(ctx, userData)
 		}
 
-		// Upgrade
-		ws, err := websocket.Accept(w, r, nil)
+		// Upgrade — same PROTOBRIDGE_WS_ORIGIN_PATTERNS semantics as
+		// generated handlers, so users wiring WSHandler directly get the
+		// env-wide allow-list without extra plumbing.
+		ws, err := websocket.Accept(w, r, WSAcceptOptions(WSAcceptConfig{}))
 		if err != nil {
 			return // Accept already wrote the error response
 		}
@@ -102,15 +182,15 @@ func WSHandler(conn *grpc.ClientConn, factory StreamFactory, auth AuthFunc, excl
 
 		// WebSocket → gRPC
 		for {
-			_, data, err := ws.Read(ctx)
+			msgType, data, err := ws.Read(ctx)
 			if err != nil {
 				// Client disconnected or context cancelled – normal.
 				_ = stream.CloseSend()
 				return
 			}
 			msg := stream.NewRequestMessage()
-			if err := protojson.Unmarshal(data, msg); err != nil {
-				_ = ws.Close(websocket.StatusInvalidFramePayloadData, "invalid JSON")
+			if err := UnmarshalWSFrame(msgType, data, msg); err != nil {
+				_ = ws.Close(websocket.StatusInvalidFramePayloadData, "invalid frame payload")
 				return
 			}
 			if err := stream.Send(msg); err != nil {

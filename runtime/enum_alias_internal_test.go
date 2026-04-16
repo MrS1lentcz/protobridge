@@ -49,6 +49,30 @@ func TestApplyEnumAliasesToOutput_NonObjectReturnsFalse(t *testing.T) {
 	}
 }
 
+func TestPostprocessEnumAliases_BadJSONPassthrough(t *testing.T) {
+	// Malformed JSON → postprocessEnumAliases must return the original
+	// bytes verbatim rather than panicking. In production this branch is
+	// unreachable (json.Marshal feeds the input), but the safety net is
+	// load-bearing if callers ever pass hand-crafted payloads.
+	msg := &pb.EnumContainerRequest{}
+	body := []byte(`{not valid json`)
+	got := postprocessEnumAliases(body, msg)
+	if string(got) != string(body) {
+		t.Errorf("expected passthrough on invalid JSON, got %q", got)
+	}
+}
+
+func TestPostprocessEnumAliases_NonObjectRootPassthrough(t *testing.T) {
+	// JSON array (valid JSON but not an object) must pass through — the
+	// rewrite logic only applies to message-shaped JSON trees.
+	msg := &pb.EnumContainerRequest{}
+	body := []byte(`[1,2,3]`)
+	got := postprocessEnumAliases(body, msg)
+	if string(got) != string(body) {
+		t.Errorf("expected passthrough on non-object root, got %q", got)
+	}
+}
+
 func TestApplyOutputFieldValue_TypeMismatchesPassThrough(t *testing.T) {
 	desc := (&pb.EnumContainerRequest{}).ProtoReflect().Descriptor()
 	for _, tc := range []struct {

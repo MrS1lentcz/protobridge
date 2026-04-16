@@ -127,6 +127,17 @@ type Method struct {
 	SSE              bool   // use SSE instead of WS (server-streaming only)
 	WSMode           string // "private" or "broadcast" (streaming only)
 
+	// WSOriginPatterns carries the comma-separated per-RPC Origin allow-list
+	// declared via (protobridge.ws_origin_patterns). Merged with the env-wide
+	// PROTOBRIDGE_WS_ORIGIN_PATTERNS at WS upgrade time. Empty = env only.
+	WSOriginPatterns string
+
+	// WSAuth is the comma-separated list of accepted auth sources from
+	// (protobridge.ws_auth): "header", "ticket", or both. Surfaced by the
+	// generator in a handler comment so integrators know whether to wrap
+	// AuthFunc with runtime.NewWSAuth. Empty = header-only.
+	WSAuth string
+
 	// MCP attributes — used by the MCP plugin to decide which RPCs become
 	// tools and how they're presented to the LLM client.
 	MCP            bool   // explicitly set or inherited from service mcp_default

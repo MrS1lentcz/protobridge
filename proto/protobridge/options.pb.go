@@ -80,6 +80,22 @@ var file_protobridge_options_proto_extTypes = []protoimpl.ExtensionInfo{
 	},
 	{
 		ExtendedType:  (*descriptorpb.MethodOptions)(nil),
+		ExtensionType: (*string)(nil),
+		Field:         50023,
+		Name:          "protobridge.ws_origin_patterns",
+		Tag:           "bytes,50023,opt,name=ws_origin_patterns",
+		Filename:      "protobridge/options.proto",
+	},
+	{
+		ExtendedType:  (*descriptorpb.MethodOptions)(nil),
+		ExtensionType: (*string)(nil),
+		Field:         50024,
+		Name:          "protobridge.ws_auth",
+		Tag:           "bytes,50024,opt,name=ws_auth",
+		Filename:      "protobridge/options.proto",
+	},
+	{
+		ExtendedType:  (*descriptorpb.MethodOptions)(nil),
 		ExtensionType: (*bool)(nil),
 		Field:         50050,
 		Name:          "protobridge.mcp",
@@ -182,27 +198,45 @@ var (
 	//
 	// optional string ws_mode = 50022;
 	E_WsMode = &file_protobridge_options_proto_extTypes[6]
+	// Comma-separated list of host patterns (coder/websocket OriginPatterns
+	// / path.Match syntax). Merged with the global env list
+	// PROTOBRIDGE_WS_ORIGIN_PATTERNS at WS upgrade time — a request is
+	// accepted when its Origin matches any entry. Empty here means "env
+	// list only". Only consulted when (protobridge.ws_mode) is set.
+	//
+	// optional string ws_origin_patterns = 50023;
+	E_WsOriginPatterns = &file_protobridge_options_proto_extTypes[7]
+	// Comma-separated list of accepted auth sources for the WS handshake.
+	// Values: "header" (Authorization header, default) and "ticket"
+	// (?ticket=<t> redeemed via events.TicketStore). "header,ticket" tries
+	// the header first, falls back to the ticket. Empty means "header".
+	// Documents the expected runtime.NewWSAuth wiring; the generator does
+	// not enforce it, it only surfaces the list as a comment so integrators
+	// know which AuthFunc wrapper the service needs.
+	//
+	// optional string ws_auth = 50024;
+	E_WsAuth = &file_protobridge_options_proto_extTypes[8]
 	// Expose this RPC as an MCP tool in the generated MCP proxy.
 	// The tool name defaults to snake_case of the method name.
 	// Description comes from the method's leading proto comment (or
 	// mcp_description override below).
 	//
 	// optional bool mcp = 50050;
-	E_Mcp = &file_protobridge_options_proto_extTypes[7]
+	E_Mcp = &file_protobridge_options_proto_extTypes[9]
 	// Optional MCP scope hint. Free-form string appended to the tool
 	// description so an LLM client knows when the tool is applicable
 	// (e.g. "chat session", "worker scope", "validation"). Enforcement
 	// of scope rules belongs in the gRPC backend; this is documentation.
 	//
 	// optional string mcp_scope = 50051;
-	E_McpScope = &file_protobridge_options_proto_extTypes[8]
+	E_McpScope = &file_protobridge_options_proto_extTypes[10]
 	// Override for the MCP tool description. Use only when the proto
 	// leading comment is unsuitable (e.g. you want different prose for
 	// human readers than for an LLM). When empty, the proto comment
 	// extracted from SourceCodeInfo is used.
 	//
 	// optional string mcp_description = 50052;
-	E_McpDescription = &file_protobridge_options_proto_extTypes[9]
+	E_McpDescription = &file_protobridge_options_proto_extTypes[11]
 )
 
 // Extension fields to descriptorpb.ServiceOptions.
@@ -211,19 +245,19 @@ var (
 	// If not set, the proto service name is used.
 	//
 	// optional string display_name = 50040;
-	E_DisplayName = &file_protobridge_options_proto_extTypes[10]
+	E_DisplayName = &file_protobridge_options_proto_extTypes[12]
 	// Path prefix prepended to all HTTP paths in this service.
 	// Must start with "/" and not end with "/". Example: "/api/v1"
 	//
 	// optional string path_prefix = 50041;
-	E_PathPrefix = &file_protobridge_options_proto_extTypes[11]
+	E_PathPrefix = &file_protobridge_options_proto_extTypes[13]
 	// When true, every method in this service is exposed as an MCP tool
 	// by default. Per-method (protobridge.mcp) = false opts a method out.
 	// Without this, methods are MCP-exposed only when they explicitly
 	// set (protobridge.mcp) = true.
 	//
 	// optional bool mcp_default = 50042;
-	E_McpDefault = &file_protobridge_options_proto_extTypes[12]
+	E_McpDefault = &file_protobridge_options_proto_extTypes[14]
 )
 
 // Extension fields to descriptorpb.EnumValueOptions.
@@ -231,7 +265,7 @@ var (
 	// Override the enum value name in OpenAPI / JSON output.
 	//
 	// optional string x_var_name = 50030;
-	E_XVarName = &file_protobridge_options_proto_extTypes[13]
+	E_XVarName = &file_protobridge_options_proto_extTypes[15]
 )
 
 var File_protobridge_options_proto protoreflect.FileDescriptor
@@ -246,7 +280,9 @@ const file_protobridge_options_proto_rawDesc = "" +
 	"\vauth_method\x12\x1e.google.protobuf.MethodOptions\x18\xe4\x86\x03 \x01(\bR\n" +
 	"authMethod:2\n" +
 	"\x03sse\x12\x1e.google.protobuf.MethodOptions\x18\xe5\x86\x03 \x01(\bR\x03sse:9\n" +
-	"\aws_mode\x12\x1e.google.protobuf.MethodOptions\x18\xe6\x86\x03 \x01(\tR\x06wsMode:2\n" +
+	"\aws_mode\x12\x1e.google.protobuf.MethodOptions\x18\xe6\x86\x03 \x01(\tR\x06wsMode:N\n" +
+	"\x12ws_origin_patterns\x12\x1e.google.protobuf.MethodOptions\x18\xe7\x86\x03 \x01(\tR\x10wsOriginPatterns:9\n" +
+	"\aws_auth\x12\x1e.google.protobuf.MethodOptions\x18\xe8\x86\x03 \x01(\tR\x06wsAuth:2\n" +
 	"\x03mcp\x12\x1e.google.protobuf.MethodOptions\x18\x82\x87\x03 \x01(\bR\x03mcp:=\n" +
 	"\tmcp_scope\x12\x1e.google.protobuf.MethodOptions\x18\x83\x87\x03 \x01(\tR\bmcpScope:I\n" +
 	"\x0fmcp_description\x12\x1e.google.protobuf.MethodOptions\x18\x84\x87\x03 \x01(\tR\x0emcpDescription:D\n" +
@@ -272,17 +308,19 @@ var file_protobridge_options_proto_depIdxs = []int32{
 	1,  // 4: protobridge.auth_method:extendee -> google.protobuf.MethodOptions
 	1,  // 5: protobridge.sse:extendee -> google.protobuf.MethodOptions
 	1,  // 6: protobridge.ws_mode:extendee -> google.protobuf.MethodOptions
-	1,  // 7: protobridge.mcp:extendee -> google.protobuf.MethodOptions
-	1,  // 8: protobridge.mcp_scope:extendee -> google.protobuf.MethodOptions
-	1,  // 9: protobridge.mcp_description:extendee -> google.protobuf.MethodOptions
-	2,  // 10: protobridge.display_name:extendee -> google.protobuf.ServiceOptions
-	2,  // 11: protobridge.path_prefix:extendee -> google.protobuf.ServiceOptions
-	2,  // 12: protobridge.mcp_default:extendee -> google.protobuf.ServiceOptions
-	3,  // 13: protobridge.x_var_name:extendee -> google.protobuf.EnumValueOptions
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	0,  // [0:14] is the sub-list for extension extendee
+	1,  // 7: protobridge.ws_origin_patterns:extendee -> google.protobuf.MethodOptions
+	1,  // 8: protobridge.ws_auth:extendee -> google.protobuf.MethodOptions
+	1,  // 9: protobridge.mcp:extendee -> google.protobuf.MethodOptions
+	1,  // 10: protobridge.mcp_scope:extendee -> google.protobuf.MethodOptions
+	1,  // 11: protobridge.mcp_description:extendee -> google.protobuf.MethodOptions
+	2,  // 12: protobridge.display_name:extendee -> google.protobuf.ServiceOptions
+	2,  // 13: protobridge.path_prefix:extendee -> google.protobuf.ServiceOptions
+	2,  // 14: protobridge.mcp_default:extendee -> google.protobuf.ServiceOptions
+	3,  // 15: protobridge.x_var_name:extendee -> google.protobuf.EnumValueOptions
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	0,  // [0:16] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name
 }
 
@@ -298,7 +336,7 @@ func file_protobridge_options_proto_init() {
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protobridge_options_proto_rawDesc), len(file_protobridge_options_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   0,
-			NumExtensions: 14,
+			NumExtensions: 16,
 			NumServices:   0,
 		},
 		GoTypes:           file_protobridge_options_proto_goTypes,
