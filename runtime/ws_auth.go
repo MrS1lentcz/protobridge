@@ -56,6 +56,27 @@ type WSAuthConfig struct {
 // (a valid 401) from a TicketStore transport failure.
 var ErrWSAuthNoTicket = errors.New("runtime: ticket required but not supplied")
 
+// ErrWSAuthTicketNoHeader is returned by WSAuthTicketPrincipal when the
+// issuer request arrives without an Authorization header — nothing to
+// record, so issuing a ticket would produce an unusable one.
+var ErrWSAuthTicketNoHeader = errors.New("runtime: WS auth ticket requires Authorization header")
+
+// WSAuthTicketPrincipal is an events.TicketIssuerConfig.Principal that
+// records the incoming Authorization header into the ticket labels so
+// NewWSAuth can replay it on the redeemed WS handshake. Tickets are
+// issued only when the header is present; validation happens at redeem
+// time via the wrapped AuthFunc, so this Principal deliberately does
+// not call the upstream auth service — the issuer is a thin
+// "trade your header for a ticket" trampoline for browsers that can't
+// set Authorization on new WebSocket().
+func WSAuthTicketPrincipal(r *http.Request) (map[string]string, error) {
+	auth := r.Header.Get("Authorization")
+	if auth == "" {
+		return nil, ErrWSAuthTicketNoHeader
+	}
+	return map[string]string{WSAuthTicketHeaderLabel: auth}, nil
+}
+
 // NewWSAuth returns an AuthFunc that layers ticket-based auth on top of
 // an existing header-auth function. The browser WebSocket constructor
 // can't set custom headers, so services that accept browser upgrades

@@ -56,9 +56,13 @@ extend google.protobuf.MethodOptions {
   // Values: "header" (Authorization header, default) and "ticket"
   // (?ticket=<t> redeemed via events.TicketStore). "header,ticket" tries
   // the header first, falls back to the ticket. Empty means "header".
-  // Documents the expected runtime.NewWSAuth wiring; the generator does
-  // not enforce it, it only surfaces the list as a comment so integrators
-  // know which AuthFunc wrapper the service needs.
+  // When any method on a service declares a non-empty value, the
+  // generated main.go mounts a WS ticket issuer (POST, path from
+  // PROTOBRIDGE_WS_TICKET_PATH, default /api/ws/ticket) and wraps the
+  // service's AuthFunc via runtime.NewWSAuth so the browser's
+  // new WebSocket(url + "?ticket=<t>") handshake authenticates
+  // transparently. Per-service union of modes applies because
+  // handler.Register… takes one AuthFunc for the whole service.
   string ws_auth = 50024;
 
   // Expose this RPC as an MCP tool in the generated MCP proxy.

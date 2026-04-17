@@ -152,8 +152,6 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		}
 		{{ else if .IsServerStream }}
 		// WebSocket: server → client streaming.
-		{{ if .WSAuth }}// Accepted auth sources: {{ .WSAuth }}. Wrap AuthFunc with runtime.NewWSAuth in main to honour them.
-		{{ end -}}
 		ws, err := websocket.Accept(w, r, runtime.WSAcceptOptions(runtime.WSAcceptConfig{PerRPCPatterns: {{ printf "%q" .WSOriginPatterns }}}))
 		if err != nil {
 			return
@@ -187,8 +185,6 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		}
 		{{ else if .IsClientStream }}
 		// WebSocket: client → server streaming.
-		{{ if .WSAuth }}// Accepted auth sources: {{ .WSAuth }}. Wrap AuthFunc with runtime.NewWSAuth in main to honour them.
-		{{ end -}}
 		ws, err := websocket.Accept(w, r, runtime.WSAcceptOptions(runtime.WSAcceptConfig{PerRPCPatterns: {{ printf "%q" .WSOriginPatterns }}}))
 		if err != nil {
 			return
@@ -232,8 +228,6 @@ func {{ .HandlerFuncName }}(addr string, pool *grpcx.Pool, scalingCfg grpcx.Scal
 		}
 		{{ else if .IsBidiStream }}
 		// WebSocket: bidirectional streaming.
-		{{ if .WSAuth }}// Accepted auth sources: {{ .WSAuth }}. Wrap AuthFunc with runtime.NewWSAuth in main to honour them.
-		{{ end -}}
 		ws, err := websocket.Accept(w, r, runtime.WSAcceptOptions(runtime.WSAcceptConfig{PerRPCPatterns: {{ printf "%q" .WSOriginPatterns }}}))
 		if err != nil {
 			return

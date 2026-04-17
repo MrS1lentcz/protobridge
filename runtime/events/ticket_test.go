@@ -76,6 +76,73 @@ func TestMemoryTicketStore_LabelsAreCopied(t *testing.T) {
 	}
 }
 
+// stubRouter is the minimal events.Router implementation tests need to
+// observe what MountIssuer registers without pulling chi in.
+type stubRouter struct {
+	method  string
+	pattern string
+	handler http.Handler
+}
+
+func (r *stubRouter) Method(method, pattern string, h http.Handler) {
+	r.method = method
+	r.pattern = pattern
+	r.handler = h
+}
+
+func TestMountIssuer_RegistersPOSTHandlerAndReturnsWiredStore(t *testing.T) {
+	router := &stubRouter{}
+	principalCalled := false
+	store := events.MountIssuer(router, "/api/ws/ticket", func(r *http.Request) (map[string]string, error) {
+		principalCalled = true
+		return map[string]string{"authorization": r.Header.Get("Authorization")}, nil
+	})
+	t.Cleanup(store.Close)
+
+	if router.method != http.MethodPost {
+		t.Fatalf("method: %q, want POST", router.method)
+	}
+	if router.pattern != "/api/ws/ticket" {
+		t.Fatalf("pattern: %q", router.pattern)
+	}
+	if router.handler == nil {
+		t.Fatal("handler not registered")
+	}
+
+	// Round-trip: POST to the registered handler issues a ticket, the
+	// returned store redeems it. Proves the three pieces are wired
+	// together, not just separately constructed.
+	srv := httptest.NewServer(router.handler)
+	t.Cleanup(srv.Close)
+	req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+	req.Header.Set("Authorization", "Bearer xyz")
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	if !principalCalled {
+		t.Fatal("principal not invoked")
+	}
+
+	var body struct {
+		Ticket string `json:"ticket"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	labels, err := store.Redeem(context.Background(), body.Ticket)
+	if err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	if labels["authorization"] != "Bearer xyz" {
+		t.Fatalf("labels: %v", labels)
+	}
+}
+
 func TestTicketIssuer_POSTReturnsTicket(t *testing.T) {
 	store := events.NewMemoryTicketStore()
 	t.Cleanup(store.Close)

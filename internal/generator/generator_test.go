@@ -2395,15 +2395,12 @@ func TestGenerateMain_WithBroadcastsAndLabeledAuth(t *testing.T) {
 
 	content := generateMain(api, "example.com/test/handler", "example.com/gen/events")
 	for _, want := range []string{
-		"ticketStore := events.NewMemoryTicketStore()",
-		"defer ticketStore.Close()",
+		"broadcastTicketStore := events.MountIssuer(r, broadcastTicketPath, principalLabelsFn)",
+		"defer broadcastTicketStore.Close()",
 		`os.Getenv("PROTOBRIDGE_EVENTS_TICKET_PATH")`,
-		`ticketPath = "/api/events/ticket"`,
-		"events.NewTicketIssuer(events.TicketIssuerConfig{",
-		"Principal: principalLabelsFn,",
-		"Store:     ticketStore,",
+		`broadcastTicketPath = "/api/events/ticket"`,
 		"PrincipalLabels: principalLabelsFn,",
-		"TicketStore:     ticketStore,",
+		"TicketStore:     broadcastTicketStore,",
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("labeled-auth broadcast main.go missing %q\n---\n%s", want, content)
@@ -2425,6 +2422,161 @@ func TestGenerateMain_NoBroadcastsOmitsEventsImport(t *testing.T) {
 	} {
 		if strings.Contains(content, forbidden) {
 			t.Errorf("non-broadcast main.go must not contain %q", forbidden)
+		}
+	}
+}
+
+// TestGenerateMain_WithWSAuthMountsIssuerAndWrapsAuthFn covers the
+// browser-WS ticket flow the 0.8.1 proto+runtime already supported but
+// which the main template previously ignored: a service with at least
+// one streaming method declaring (protobridge.ws_auth) must produce a
+// main.go that mounts /api/ws/ticket, builds a per-service
+// runtime.NewWSAuth wrapper, and passes that wrapper (not the raw
+// authFn) to handler.Register…. Without this the anotace is a no-op
+// and new WebSocket(url) has no way to authenticate.
+func TestGenerateMain_WithWSAuthMountsIssuerAndWrapsAuthFn(t *testing.T) {
+	api := &parser.ParsedAPI{
+		AuthMethod: &parser.AuthMethod{
+			ServiceName: "AuthService",
+			MethodName:  "Authenticate",
+			GoPackage:   "example.com/auth",
+			InputType:   &parser.MessageType{Name: "AuthRequest"},
+			OutputType:  &parser.MessageType{Name: "AuthResponse"},
+		},
+		Services: []*parser.Service{
+			{
+				Name:      "AuthService",
+				GoPackage: "example.com/auth",
+				Methods: []*parser.Method{{
+					Name:       "Authenticate",
+					HTTPMethod: "POST",
+					HTTPPath:   "/auth",
+					StreamType: parser.StreamUnary,
+					InputType:  &parser.MessageType{Name: "AuthRequest"},
+					OutputType: &parser.MessageType{Name: "AuthResponse"},
+				}},
+			},
+			{
+				Name:      "EchoService",
+				GoPackage: "example.com/echo",
+				Methods: []*parser.Method{{
+					Name:       "Stream",
+					HTTPMethod: "GET",
+					HTTPPath:   "/echo/stream",
+					StreamType: parser.StreamServer,
+					WSMode:     "private",
+					WSAuth:     "header,ticket",
+					InputType:  &parser.MessageType{Name: "StreamReq"},
+					OutputType: &parser.MessageType{Name: "StreamResp"},
+				}},
+			},
+		},
+	}
+
+	content := generateMain(api, "example.com/test/handler", "")
+	for _, want := range []string{
+		`"github.com/mrs1lentcz/protobridge/runtime/events"`,
+		`os.Getenv("PROTOBRIDGE_WS_TICKET_PATH")`,
+		`wsTicketPath = "/api/ws/ticket"`,
+		"wsTicketStore := events.MountIssuer(r, wsTicketPath, runtime.WSAuthTicketPrincipal)",
+		"defer wsTicketStore.Close()",
+		"echoServiceAuthFn := runtime.NewWSAuth(runtime.WSAuthConfig{",
+		"Inner:       authFn,",
+		"TicketStore: wsTicketStore,",
+		`Modes:       []string{"header", "ticket"},`,
+		"handler.RegisterEchoService(r, echoServiceAddr, pool, scalingCfg, echoServiceAuthFn)",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("ws-auth main.go missing %q\n---\n%s", want, content)
+		}
+	}
+	// AuthService has no ws_auth → must still get the raw authFn so its
+	// own handler.Register… isn't wrapped by the WS-flow logic.
+	if !strings.Contains(content, "handler.RegisterAuthService(r, authServiceAddr, pool, scalingCfg, authFn)") {
+		t.Errorf("non-ws_auth service must receive raw authFn\n---\n%s", content)
+	}
+	// Broadcast-only artifacts must not leak when there are no broadcast
+	// services, even though the events import is now shared.
+	for _, forbidden := range []string{
+		"eventspb",
+		"BroadcastConfig",
+		"principalLabelsFn",
+	} {
+		if strings.Contains(content, forbidden) {
+			t.Errorf("ws-auth-only main.go must not contain broadcast artifact %q", forbidden)
+		}
+	}
+	if _, err := parser2.ParseFile(token.NewFileSet(), "main.go", content, parser2.AllErrors); err != nil {
+		t.Errorf("generated ws-auth main.go is not parseable Go: %v\n%s", err, content)
+	}
+}
+
+// TestGenerateMain_WSAuthModesUnion proves the per-service mode list is
+// the union across the service's methods, sorted header-before-ticket
+// for stable output. One method declaring "header" and another
+// "header,ticket" must produce the same wrap as a single
+// "header,ticket" method — NewWSAuth operates at service scope.
+func TestGenerateMain_WSAuthModesUnion(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{{
+			Name:      "ChatService",
+			GoPackage: "example.com/chat",
+			Methods: []*parser.Method{
+				{
+					Name:       "Listen",
+					HTTPMethod: "GET",
+					HTTPPath:   "/chat/listen",
+					StreamType: parser.StreamServer,
+					WSAuth:     "header",
+					InputType:  &parser.MessageType{Name: "ListenReq"},
+					OutputType: &parser.MessageType{Name: "ListenResp"},
+				},
+				{
+					Name:       "Send",
+					HTTPMethod: "GET",
+					HTTPPath:   "/chat/send",
+					StreamType: parser.StreamBidi,
+					WSAuth:     "ticket , header",
+					InputType:  &parser.MessageType{Name: "SendReq"},
+					OutputType: &parser.MessageType{Name: "SendResp"},
+				},
+			},
+		}},
+	}
+	content := generateMain(api, "example.com/test/handler", "")
+	if !strings.Contains(content, `Modes:       []string{"header", "ticket"},`) {
+		t.Errorf("expected header-before-ticket union, got:\n%s", content)
+	}
+}
+
+// TestGenerateMain_NoWSAuthOmitsIssuer guards the negative case: a
+// service with streaming methods but no ws_auth option must not pull in
+// the ticket issuer or NewWSAuth wrap. The events import also stays out
+// when there are no broadcasts and no ws_auth.
+func TestGenerateMain_NoWSAuthOmitsIssuer(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{{
+			Name:      "EchoService",
+			GoPackage: "example.com/echo",
+			Methods: []*parser.Method{{
+				Name:       "Stream",
+				HTTPMethod: "GET",
+				HTTPPath:   "/echo/stream",
+				StreamType: parser.StreamServer,
+				WSMode:     "private",
+				InputType:  &parser.MessageType{Name: "StreamReq"},
+				OutputType: &parser.MessageType{Name: "StreamResp"},
+			}},
+		}},
+	}
+	content := generateMain(api, "example.com/test/handler", "")
+	for _, forbidden := range []string{
+		"PROTOBRIDGE_WS_TICKET_PATH",
+		"runtime.NewWSAuth",
+		"runtime.WSAuthTicketPrincipal",
+	} {
+		if strings.Contains(content, forbidden) {
+			t.Errorf("no-ws_auth main.go must not contain %q", forbidden)
 		}
 	}
 }

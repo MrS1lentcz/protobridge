@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"sort"
 	"strings"
 	"text/template"
 
@@ -34,8 +35,8 @@ import (
 	{{ if .HasAuth }}"google.golang.org/protobuf/proto"{{ end }}
 
 	"github.com/mrs1lentcz/protobridge/runtime"
-	{{ if .HasBroadcasts }}"github.com/mrs1lentcz/protobridge/runtime/events"
-	eventspb "{{ .EventsPkg }}"{{ end }}
+	{{ if or .HasBroadcasts .HasWSAuth }}"github.com/mrs1lentcz/protobridge/runtime/events"{{ end }}
+	{{ if .HasBroadcasts }}eventspb "{{ .EventsPkg }}"{{ end }}
 	"{{ .HandlerPkg }}"
 	{{ if .HasAuth }}{{ .AuthPkgAlias }} "{{ .AuthProtoImport }}"{{ end }}
 )
@@ -140,9 +141,34 @@ func main() {
 	// Proxy health endpoint (always available, independent of backend services)
 	r.Get("/healthz", runtime.HealthHandler())
 
+	{{ if .HasWSAuth -}}
+	// WebSocket ticket flow: browser new WebSocket() can't set Authorization,
+	// so FE POSTs to the issuer with its normal auth header, gets a ticket,
+	// and appends ?ticket=<t> to the ws:// URL. NewWSAuth below replays the
+	// stored header into a cloned request on redeem so the upstream AuthFunc
+	// sees the same shape it would for a header upgrade. Independent of the
+	// broadcast ticket subsystem — its labels (Authorization header) differ
+	// from broadcast labels (principal metadata).
+	wsTicketPath := os.Getenv("PROTOBRIDGE_WS_TICKET_PATH")
+	if wsTicketPath == "" {
+		wsTicketPath = "/api/ws/ticket"
+	}
+	wsTicketStore := events.MountIssuer(r, wsTicketPath, runtime.WSAuthTicketPrincipal)
+	defer wsTicketStore.Close()
+	{{ range .Services -}}
+	{{ if .HasWSAuth -}}
+	{{ .ServiceAuthFnVar }} := runtime.NewWSAuth(runtime.WSAuthConfig{
+		Inner:       authFn,
+		TicketStore: wsTicketStore,
+		Modes:       []string{ {{ range $i, $m := .WSAuthModes }}{{ if $i }}, {{ end }}{{ printf "%q" $m }}{{ end }} },
+	})
+	{{ end -}}
+	{{ end }}
+	{{ end }}
+
 	{{ range .Services -}}
 	{{ if .HasREST -}}
-	handler.Register{{ .ServiceName }}(r, {{ .EnvAddr }}, pool, scalingCfg, authFn)
+	handler.Register{{ .ServiceName }}(r, {{ .EnvAddr }}, pool, scalingCfg, {{ if .HasWSAuth }}{{ .ServiceAuthFnVar }}{{ else }}authFn{{ end }})
 	{{ end -}}
 	{{ end }}
 
@@ -184,19 +210,15 @@ func main() {
 	// SSE stream with ?ticket=<t>. In-memory store is fine for single-
 	// replica gateways; swap for a shared backend (Redis, DB) when scaling
 	// issuer and hub across pods.
-	ticketStore := events.NewMemoryTicketStore()
-	defer ticketStore.Close()
-	ticketPath := os.Getenv("PROTOBRIDGE_EVENTS_TICKET_PATH")
-	if ticketPath == "" {
-		ticketPath = "/api/events/ticket"
+	broadcastTicketPath := os.Getenv("PROTOBRIDGE_EVENTS_TICKET_PATH")
+	if broadcastTicketPath == "" {
+		broadcastTicketPath = "/api/events/ticket"
 	}
-	r.Method(http.MethodPost, ticketPath, events.NewTicketIssuer(events.TicketIssuerConfig{
-		Principal: principalLabelsFn,
-		Store:     ticketStore,
-	}))
+	broadcastTicketStore := events.MountIssuer(r, broadcastTicketPath, principalLabelsFn)
+	defer broadcastTicketStore.Close()
 	{{ else -}}
 	var principalLabelsFn func(*http.Request) (map[string]string, error)
-	var ticketStore events.TicketStore
+	var broadcastTicketStore events.TicketStore
 	{{ end }}
 	{{ range .BroadcastServices }}
 	{{ .ConnVar }}, err := grpc.NewClient({{ .EnvAddr }}, dialOpts({{ printf "%q" .EnvTLSKey }}, {{ printf "%q" .EnvGRPCOptsKey }})...)
@@ -206,7 +228,7 @@ func main() {
 	defer func() { _ = {{ .ConnVar }}.Close() }()
 	eventspb.Register{{ .ServiceName }}Broadcast(broadcastCtx, r, {{ .ConnVar }}, {{ printf "%q" .Route }}, events.BroadcastConfig{
 		PrincipalLabels: principalLabelsFn,
-		TicketStore:     ticketStore,
+		TicketStore:     broadcastTicketStore,
 	})
 	{{ end }}
 	{{ end }}
@@ -369,6 +391,11 @@ type mainData struct {
 	HasBroadcasts     bool
 	EventsPkg         string // import path of the events plugin output
 	BroadcastServices []mainBroadcastData
+
+	// HasWSAuth is true when at least one streaming method somewhere in
+	// Services carries (protobridge.ws_auth). Drives the WS ticket issuer
+	// mount and the per-service NewWSAuth wrap.
+	HasWSAuth bool
 }
 
 type mainBroadcastData struct {
@@ -379,6 +406,51 @@ type mainBroadcastData struct {
 	EnvAddrKey     string // env key, e.g. "PROTOBRIDGE_V1_BROADCAST_ADDR"
 	EnvTLSKey      string // env key, e.g. "PROTOBRIDGE_V1_BROADCAST_TLS"
 	EnvGRPCOptsKey string // env key, e.g. "PROTOBRIDGE_V1_BROADCAST_GRPC_OPTIONS"
+}
+
+// collectWSAuthModes returns the sorted, de-duplicated union of
+// (protobridge.ws_auth) tokens across every method of svc. Empty when
+// no method declares the option — the caller treats that as "no WS
+// auth wrap needed". The per-service union is what the generated
+// NewWSAuth wrap accepts, since handler.Register… takes a single
+// AuthFunc for the whole service; a method declaring only "header"
+// coexists with the wrap because NewWSAuth short-circuits to Inner
+// when an Authorization header is present.
+func collectWSAuthModes(svc *parser.Service) []string {
+	seen := map[string]struct{}{}
+	for _, m := range svc.Methods {
+		if m.WSAuth == "" {
+			continue
+		}
+		for _, tok := range strings.Split(m.WSAuth, ",") {
+			tok = strings.TrimSpace(tok)
+			if tok == "" {
+				continue
+			}
+			seen[tok] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	// Fixed order so template output is stable: header before ticket,
+	// unknown tokens (if any ever slip past the parser) trail
+	// alphabetically so the generator output remains deterministic and
+	// diff-friendly.
+	ordered := make([]string, 0, len(seen))
+	for _, pref := range []string{"header", "ticket"} {
+		if _, ok := seen[pref]; ok {
+			ordered = append(ordered, pref)
+			delete(seen, pref)
+		}
+	}
+	rest := make([]string, 0, len(seen))
+	for k := range seen {
+		rest = append(rest, k)
+	}
+	sort.Strings(rest)
+	ordered = append(ordered, rest...)
+	return ordered
 }
 
 // hasLabelsMapField returns true when the AuthResponse declares
@@ -418,6 +490,15 @@ type mainServiceData struct {
 	// connection (for the auth function) but have no generated register*
 	// function. The main template skips register* for these.
 	HasREST bool
+
+	// HasWSAuth is true when at least one method on this service declares
+	// (protobridge.ws_auth). When set, the generated main wraps authFn in
+	// runtime.NewWSAuth and passes ServiceAuthFnVar to handler.Register…
+	// instead of the raw authFn. Scope is per-service because
+	// handler.Register… takes one AuthFunc for the whole service.
+	HasWSAuth        bool
+	WSAuthModes      []string // union of ws_auth tokens across this service's methods, e.g. ["header","ticket"]
+	ServiceAuthFnVar string   // variable name holding the wrapped AuthFunc, e.g. "voiceChatServiceAuthFn"
 }
 
 func generateMain(api *parser.ParsedAPI, handlerPkg, eventsPkg string) string {
@@ -449,6 +530,12 @@ func generateMain(api *parser.ParsedAPI, handlerPkg, eventsPkg string) string {
 			EnvGRPCOptsKey: "PROTOBRIDGE_" + screaming + "_GRPC_OPTIONS",
 			ConnVar:        toLowerCamel(svc.Name) + "Conn",
 			HasREST:        true,
+		}
+		sd.WSAuthModes = collectWSAuthModes(svc)
+		if len(sd.WSAuthModes) > 0 {
+			sd.HasWSAuth = true
+			sd.ServiceAuthFnVar = toLowerCamel(svc.Name) + "AuthFn"
+			data.HasWSAuth = true
 		}
 		data.Services = append(data.Services, sd)
 	}

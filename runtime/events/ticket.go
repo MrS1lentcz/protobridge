@@ -176,6 +176,27 @@ type TicketIssuerConfig struct {
 	Logger *slog.Logger
 }
 
+// Router is the minimal subset of chi.Router needed by MountIssuer —
+// accepting an interface (rather than importing chi) keeps this package
+// free of a hard router dependency while staying chi-compatible.
+type Router interface {
+	Method(method, pattern string, h http.Handler)
+}
+
+// MountIssuer creates an in-memory ticket store, mounts a POST issuer at
+// path on r, and returns the store so callers can hand it to
+// BroadcastConfig.TicketStore / runtime.NewWSAuth and Close it on
+// shutdown. Shared by the generated broadcast and WS-auth wiring so both
+// paths go through a single issuer contract.
+func MountIssuer(r Router, path string, principal func(*http.Request) (map[string]string, error)) *MemoryTicketStore {
+	store := NewMemoryTicketStore()
+	r.Method(http.MethodPost, path, NewTicketIssuer(TicketIssuerConfig{
+		Principal: principal,
+		Store:     store,
+	}))
+	return store
+}
+
 // NewTicketIssuer returns an http.Handler that accepts POST requests,
 // resolves the caller's principal via the configured function, issues a
 // ticket, and returns {"ticket":"...","expires_in":<seconds>} as JSON.
