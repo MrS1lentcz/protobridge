@@ -2586,6 +2586,73 @@ func TestGenerateMain_WSAuthModesUnion(t *testing.T) {
 	}
 }
 
+// TestGenerateMain_WSAuthTicketOnlyWithUnaryForcesHeader covers the
+// safety relaxation in collectWSAuthModes: when a service mixes a
+// unary REST endpoint with a streaming method declaring ws_auth="ticket",
+// the per-service wrap must accept "header" too — otherwise every
+// unary request would fail with ErrWSAuthNoTicket because browsers
+// and non-browser clients can't attach ?ticket= to a regular REST
+// call. Per-method strictness is impossible under the single-AuthFunc-
+// per-service contract of handler.Register…
+func TestGenerateMain_WSAuthTicketOnlyWithUnaryForcesHeader(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{{
+			Name:      "MixedService",
+			GoPackage: "example.com/mixed",
+			Methods: []*parser.Method{
+				{
+					Name:       "GetItem",
+					HTTPMethod: "GET",
+					HTTPPath:   "/items/{id}",
+					StreamType: parser.StreamUnary,
+					InputType:  &parser.MessageType{Name: "GetItemReq"},
+					OutputType: &parser.MessageType{Name: "GetItemResp"},
+				},
+				{
+					Name:       "Subscribe",
+					HTTPMethod: "GET",
+					HTTPPath:   "/items/subscribe",
+					StreamType: parser.StreamServer,
+					WSAuth:     "ticket",
+					InputType:  &parser.MessageType{Name: "SubReq"},
+					OutputType: &parser.MessageType{Name: "SubResp"},
+				},
+			},
+		}},
+	}
+	content := generateMain(api, "example.com/test/handler", "")
+	if !strings.Contains(content, `Modes:       []string{"header", "ticket"},`) {
+		t.Errorf("expected header forced into union for ticket-only service with unary method; got:\n%s", content)
+	}
+}
+
+// TestGenerateMain_WSAuthTicketOnlyPureStreamingKept verifies the
+// opposite side of the relaxation: a pure-streaming service (no unary
+// endpoints) keeps ticket-only semantics, because there's no REST
+// handler that would break. This preserves the proto author's intent
+// when they genuinely want to reject stray Authorization headers.
+func TestGenerateMain_WSAuthTicketOnlyPureStreamingKept(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{{
+			Name:      "LiveService",
+			GoPackage: "example.com/live",
+			Methods: []*parser.Method{{
+				Name:       "Subscribe",
+				HTTPMethod: "GET",
+				HTTPPath:   "/live/subscribe",
+				StreamType: parser.StreamServer,
+				WSAuth:     "ticket",
+				InputType:  &parser.MessageType{Name: "SubReq"},
+				OutputType: &parser.MessageType{Name: "SubResp"},
+			}},
+		}},
+	}
+	content := generateMain(api, "example.com/test/handler", "")
+	if !strings.Contains(content, `Modes:       []string{"ticket"},`) {
+		t.Errorf("pure-streaming service must keep ticket-only union; got:\n%s", content)
+	}
+}
+
 // TestGenerateMain_NoWSAuthOmitsIssuer guards the negative case: a
 // service with streaming methods but no ws_auth option must not pull in
 // the ticket issuer or NewWSAuth wrap. The events import also stays out

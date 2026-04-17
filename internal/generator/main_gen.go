@@ -416,9 +416,23 @@ type mainBroadcastData struct {
 // AuthFunc for the whole service; a method declaring only "header"
 // coexists with the wrap because NewWSAuth short-circuits to Inner
 // when an Authorization header is present.
+//
+// Safety relaxation: when svc has at least one non-streaming method
+// (unary REST endpoint), "header" is forced into the union even if
+// every streaming method declared ticket-only. Without this, the
+// per-service wrap would reject unary requests with ErrWSAuthNoTicket
+// — unary REST can't carry ?ticket=<t>, and forbidding Authorization
+// on a unary endpoint just because a sibling WS method opted into
+// ticket-only would break the entire service. A pure-streaming
+// service (no unary methods) keeps whatever modes the proto declared,
+// including ticket-only, since there's no unary endpoint to break.
 func collectWSAuthModes(svc *parser.Service) []string {
 	seen := map[string]struct{}{}
+	hasUnary := false
 	for _, m := range svc.Methods {
+		if m.StreamType == parser.StreamUnary && m.HTTPMethod != "" {
+			hasUnary = true
+		}
 		if m.WSAuth == "" {
 			continue
 		}
@@ -432,6 +446,9 @@ func collectWSAuthModes(svc *parser.Service) []string {
 	}
 	if len(seen) == 0 {
 		return nil
+	}
+	if hasUnary {
+		seen["header"] = struct{}{}
 	}
 	// Fixed order so template output is stable: header before ticket,
 	// unknown tokens (if any ever slip past the parser) trail

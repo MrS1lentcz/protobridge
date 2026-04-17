@@ -162,53 +162,88 @@ func TestServer_ServeStreamableHTTP_HappyPathShutdownOnCtxCancel(t *testing.T) {
 }
 
 func TestServer_ServeStreamableHTTP_HTTPRequestStashesHeaders(t *testing.T) {
-	// Drive the WithHTTPContextFunc branch: make a real HTTP request to the
-	// streamable-HTTP MCP server. The handler itself returns a JSON-RPC
-	// error for an un-initialized client, but the call flow reaches the
-	// contextFunc that stashes r.Header on ctx.
+	// Covers the WithHTTPContextFunc closure in ServeStreamableHTTP — only
+	// reachable when the production code path actually serves an HTTP
+	// request. mcp-go's StreamableHTTPServer binds its own listener
+	// internally, so the test picks a free port by listening briefly and
+	// closing. That leaves a small race window where another process
+	// could snatch the port between Close and the server's own Listen;
+	// handle it by retrying the whole sequence on connection-refused.
 	srv := mcp.NewServer("t", "0", mcp.DefaultAuthFunc())
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 
-	// Pick a free port via net.Listen then close it — a very short window
-	// may allow a collision but the coverage hit is what matters.
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	addr := lis.Addr().String()
-	_ = lis.Close()
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		ctx, cancel := context.WithCancel(context.Background())
 
-	serverDone := make(chan error, 1)
-	go func() { serverDone <- srv.ServeStreamableHTTP(ctx, addr) }()
-
-	// Wait for the listener to come up.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		conn, dialErr := net.DialTimeout("tcp", addr, 50*time.Millisecond)
-		if dialErr == nil {
-			_ = conn.Close()
-			break
+		lis, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			cancel()
+			t.Fatalf("listen: %v", err)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		addr := lis.Addr().String()
+		_ = lis.Close()
 
-	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/mcp",
-		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set("X-Trace-Id", "trace-123") // header that the contextFunc stashes
-	resp, err := http.DefaultClient.Do(req)
-	if err == nil {
+		serverDone := make(chan error, 1)
+		go func() { serverDone <- srv.ServeStreamableHTTP(ctx, addr) }()
+
+		// Wait for the server to bind (or observe Start erroring out early
+		// with "address already in use" — the race we're guarding against).
+		ready := false
+		deadline := time.Now().Add(2 * time.Second)
+	waitLoop:
+		for time.Now().Before(deadline) {
+			select {
+			case err := <-serverDone:
+				lastErr = err
+				break waitLoop
+			default:
+			}
+			conn, dialErr := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+			if dialErr == nil {
+				_ = conn.Close()
+				ready = true
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if !ready {
+			cancel()
+			<-serverDone
+			continue // retry with a fresh port
+		}
+
+		req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/mcp",
+			strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+		if err != nil {
+			cancel()
+			<-serverDone
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("X-Trace-Id", "trace-123")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			cancel()
+			<-serverDone
+			t.Fatalf("do request: %v", err)
+		}
 		_ = resp.Body.Close()
-	}
+		if resp.StatusCode >= 500 {
+			cancel()
+			<-serverDone
+			t.Fatalf("unexpected 5xx from MCP server: %d", resp.StatusCode)
+		}
 
-	cancel()
-	select {
-	case <-serverDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("server did not shutdown")
+		cancel()
+		select {
+		case <-serverDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("server did not shutdown")
+		}
+		return // success
 	}
+	t.Fatalf("could not bind a free port across 3 attempts; last error: %v", lastErr)
 }
 
 func TestServer_ServeStreamableHTTP_BadAddr(t *testing.T) {
