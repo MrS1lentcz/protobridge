@@ -242,6 +242,68 @@ func TestNewWSAuth_HeaderPlusTicketFallsThrough(t *testing.T) {
 	}
 }
 
+// TestWSAuthTicketPrincipal_RecordsHeader verifies the helper Principal
+// that the generated main.go hands to the WS ticket issuer copies the
+// caller's Authorization header into the ticket labels verbatim — which
+// is exactly what NewWSAuth re-reads at redeem time via
+// WSAuthTicketHeaderLabel.
+func TestWSAuthTicketPrincipal_RecordsHeader(t *testing.T) {
+	req := mustRequest(t, http.MethodPost, "/api/ws/ticket")
+	req.Header.Set("Authorization", "Bearer abc")
+
+	labels, err := runtime.WSAuthTicketPrincipal(req)
+	if err != nil {
+		t.Fatalf("principal: %v", err)
+	}
+	if labels[runtime.WSAuthTicketHeaderLabel] != "Bearer abc" {
+		t.Fatalf("labels: %v", labels)
+	}
+}
+
+func TestWSAuthTicketPrincipal_RejectsMissingHeader(t *testing.T) {
+	req := mustRequest(t, http.MethodPost, "/api/ws/ticket")
+	if _, err := runtime.WSAuthTicketPrincipal(req); !errors.Is(err, runtime.ErrWSAuthTicketNoHeader) {
+		t.Fatalf("expected ErrWSAuthTicketNoHeader, got %v", err)
+	}
+}
+
+// TestWSAuthTicketPrincipal_IntegratesWithNewWSAuth is the end-to-end
+// contract the generated main.go depends on: issuer records the header
+// via WSAuthTicketPrincipal, NewWSAuth redeems it and replays it into
+// Inner. Exercising them together guards against drift between the
+// label key the Principal writes and the one NewWSAuth reads.
+func TestWSAuthTicketPrincipal_IntegratesWithNewWSAuth(t *testing.T) {
+	store := events.NewMemoryTicketStore()
+	t.Cleanup(store.Close)
+
+	issueReq := mustRequest(t, http.MethodPost, "/api/ws/ticket")
+	issueReq.Header.Set("Authorization", "Bearer roundtrip")
+	labels, err := runtime.WSAuthTicketPrincipal(issueReq)
+	if err != nil {
+		t.Fatalf("principal: %v", err)
+	}
+	ticket, err := store.Issue(context.Background(), labels, time.Minute)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+
+	inner := runtime.AuthFunc(func(_ context.Context, r *http.Request) ([]byte, error) {
+		if got := r.Header.Get("Authorization"); got != "Bearer roundtrip" {
+			t.Fatalf("inner saw %q", got)
+		}
+		return nil, nil
+	})
+	wrapped := runtime.NewWSAuth(runtime.WSAuthConfig{
+		Inner:       inner,
+		TicketStore: store,
+		Modes:       []string{runtime.WSAuthModeHeader, runtime.WSAuthModeTicket},
+	})
+	upgradeReq := mustRequest(t, http.MethodGet, "/ws?ticket="+ticket)
+	if _, err := wrapped(context.Background(), upgradeReq); err != nil {
+		t.Fatalf("wrapped: %v", err)
+	}
+}
+
 func TestNewWSAuth_Panics(t *testing.T) {
 	cases := []struct {
 		name string

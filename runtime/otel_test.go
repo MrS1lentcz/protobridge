@@ -92,6 +92,23 @@ func TestInitOTel_WithEndpoint(t *testing.T) {
 	runtime.GracefulShutdownOTel(shutdown)
 }
 
+func TestInitOTel_ShutdownReturnsFirstError(t *testing.T) {
+	cfg := runtime.OTelConfig{
+		ServiceName:  "test-service",
+		OTLPEndpoint: "localhost:4317",
+	}
+	shutdown, err := runtime.InitOTel(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := shutdown(ctx); err == nil {
+		t.Fatal("expected shutdown error with canceled context")
+	}
+}
+
 func TestGracefulShutdownOTel_WithError(t *testing.T) {
 	// OTelShutdown that returns an error.
 	shutdown := runtime.OTelShutdown(func(_ context.Context) error {

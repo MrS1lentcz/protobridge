@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -160,6 +161,91 @@ func TestServer_ServeStreamableHTTP_HappyPathShutdownOnCtxCancel(t *testing.T) {
 	}
 }
 
+func TestServer_ServeStreamableHTTP_HTTPRequestStashesHeaders(t *testing.T) {
+	// Covers the WithHTTPContextFunc closure in ServeStreamableHTTP — only
+	// reachable when the production code path actually serves an HTTP
+	// request. mcp-go's StreamableHTTPServer binds its own listener
+	// internally, so the test picks a free port by listening briefly and
+	// closing. That leaves a small race window where another process
+	// could snatch the port between Close and the server's own Listen;
+	// handle it by retrying the whole sequence on connection-refused.
+	srv := mcp.NewServer("t", "0", mcp.DefaultAuthFunc())
+
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		lis, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			cancel()
+			t.Fatalf("listen: %v", err)
+		}
+		addr := lis.Addr().String()
+		_ = lis.Close()
+
+		serverDone := make(chan error, 1)
+		go func() { serverDone <- srv.ServeStreamableHTTP(ctx, addr) }()
+
+		// Wait for the server to bind (or observe Start erroring out early
+		// with "address already in use" — the race we're guarding against).
+		ready := false
+		deadline := time.Now().Add(2 * time.Second)
+	waitLoop:
+		for time.Now().Before(deadline) {
+			select {
+			case err := <-serverDone:
+				lastErr = err
+				break waitLoop
+			default:
+			}
+			conn, dialErr := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+			if dialErr == nil {
+				_ = conn.Close()
+				ready = true
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if !ready {
+			cancel()
+			<-serverDone
+			continue // retry with a fresh port
+		}
+
+		req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/mcp",
+			strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+		if err != nil {
+			cancel()
+			<-serverDone
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("X-Trace-Id", "trace-123")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			cancel()
+			<-serverDone
+			t.Fatalf("do request: %v", err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode >= 500 {
+			cancel()
+			<-serverDone
+			t.Fatalf("unexpected 5xx from MCP server: %d", resp.StatusCode)
+		}
+
+		cancel()
+		select {
+		case <-serverDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("server did not shutdown")
+		}
+		return // success
+	}
+	t.Fatalf("could not bind a free port across 3 attempts; last error: %v", lastErr)
+}
+
 func TestServer_ServeStreamableHTTP_BadAddr(t *testing.T) {
 	srv := mcp.NewServer("t", "0", mcp.DefaultAuthFunc())
 	// Address not preceded by ':' is invalid per net.Listen — exercises the
@@ -312,5 +398,24 @@ func TestServer_CallUnary_NoArguments(t *testing.T) {
 	}
 	if out == nil {
 		t.Fatal("expected result")
+	}
+}
+
+func TestServer_CallUnary_UnmarshalableRawArgumentsErrors(t *testing.T) {
+	// A channel value can't be JSON-encoded — exercises the json.Marshal
+	// failure branch of the raw-arguments preprocessing.
+	srv := mcp.NewServer("t", "0", mcp.DefaultAuthFunc())
+	req := mcpsdk.CallToolRequest{}
+	req.Params.Arguments = make(chan int)
+	_, err := srv.CallUnary(context.Background(), req, &pb.SimpleRequest{},
+		func(_ context.Context, _ proto.Message) (proto.Message, error) {
+			t.Fatal("invoke must not run when arguments marshaling fails")
+			return nil, nil
+		})
+	if err == nil {
+		t.Fatal("expected json.Marshal failure to surface")
+	}
+	if !strings.Contains(err.Error(), "encode arguments") {
+		t.Errorf("expected 'encode arguments' in error, got: %v", err)
 	}
 }

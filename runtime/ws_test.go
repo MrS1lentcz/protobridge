@@ -90,6 +90,35 @@ func TestWSHandler_AuthFailure(t *testing.T) {
 	}
 }
 
+// TestWSHandler_MarshalFailureClosesStream drives the protojson.Marshal
+// error branch in the gRPC→WS goroutine. A SimpleResponse with
+// invalid-UTF-8 id triggers Marshal failure → ws.Close with
+// StatusInternalError ("marshal error") and goroutine exit; the client
+// dial observes the close rather than a normal message.
+func TestWSHandler_MarshalFailureClosesStream(t *testing.T) {
+	proxy := &mockStreamProxy{
+		recvMessages: []proto.Message{
+			&pb.SimpleResponse{Id: "\xff\xfe"},
+		},
+	}
+	factory := &mockStreamFactory{proxy: proxy}
+	handler := runtime.WSHandler(nil, factory, runtime.NoAuth(), true)
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ws, _, err := websocket.Dial(ctx, "ws"+srv.URL[4:], nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = ws.CloseNow() }()
+
+	if _, _, err := ws.Read(ctx); err == nil {
+		t.Fatal("expected read to fail after marshal-error close")
+	}
+}
+
 func TestWSHandler_StreamOpenError(t *testing.T) {
 	factory := &mockStreamFactory{
 		err: fmt.Errorf("cannot open stream"),
