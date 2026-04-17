@@ -1,0 +1,28 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 99%
+        threshold: 0.5%
+        informational: false
+    patch:
+      default:
+        target: 99%
+        threshold: 0.5%
+        informational: false
+
+ignore:
+  # Entrypoints — main.go only, no logic.
+  - "cmd/**"
+  # Benchmark harness — runs perf scenarios, not unit-tested.
+  - "bench/**"
+  # Sample gateway — illustrates usage, coverage is not meaningful.
+  - "example/**"
+  # Generated proto bindings.
+  - "proto/**"
+  # Fixture data for runtime benchmarks.
+  - "runtime/benchdata/**"
+
+comment:
+  layout: "condensed_header, diff, flags, files"
+  require_changes: false

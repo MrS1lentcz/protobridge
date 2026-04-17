@@ -92,3 +92,72 @@ func TestApplyOutputFieldValue_TypeMismatchesPassThrough(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyEnumAliasesToOutput_UnknownJSONKeyIgnored(t *testing.T) {
+	// JSON key that doesn't match any field (neither ByJSONName nor ByName)
+	// must be left alone — otherwise the alias pass would corrupt free-form
+	// side data some marshaler drops into the tree.
+	desc := (&pb.SimpleResponse{}).ProtoReflect().Descriptor()
+	tree := map[string]any{
+		"unknown_extra_key": "some value",
+	}
+	if changed := applyEnumAliasesToOutput(tree, desc); changed {
+		t.Error("unknown key must not mark tree as changed")
+	}
+	if tree["unknown_extra_key"] != "some value" {
+		t.Error("unknown key value mutated")
+	}
+}
+
+func TestApplyOutputScalarOrMessage_NonStringEnumPassesThrough(t *testing.T) {
+	// When protojson emits an enum as a number (for unknown values) the
+	// post-process step must leave the number alone rather than forcing it
+	// through the alias map.
+	desc := (&pb.SimpleResponse{}).ProtoReflect().Descriptor()
+	fd := desc.Fields().ByName("status")
+	got, changed := applyOutputScalarOrMessage(float64(99), fd)
+	if changed {
+		t.Errorf("numeric enum value must not be mapped, got changed=true")
+	}
+	if got != float64(99) {
+		t.Errorf("value mutated: got %v", got)
+	}
+}
+
+func TestApplyOutputScalarOrMessage_EnumValueNotInAliasMap(t *testing.T) {
+	// STATUS_UNSPECIFIED has no x_var_name alias, so the reverse map lookup
+	// misses and the canonical name must survive to the wire.
+	desc := (&pb.SimpleResponse{}).ProtoReflect().Descriptor()
+	fd := desc.Fields().ByName("status")
+	got, changed := applyOutputScalarOrMessage("STATUS_UNSPECIFIED", fd)
+	if changed {
+		t.Errorf("unaliased enum must not be mapped, got changed=true")
+	}
+	if got != "STATUS_UNSPECIFIED" {
+		t.Errorf("unaliased enum value mutated: got %v", got)
+	}
+}
+
+func TestFieldHasAliases_SelfReferentialMessageStopsRecursion(t *testing.T) {
+	// Cycle detection: fieldHasAliases must not re-descend into a message
+	// whose full name is already in `seen`. We drive the branch directly to
+	// avoid depending on a circular proto in testdata.
+	desc := (&pb.WrapperRequest{}).ProtoReflect().Descriptor()
+	innerFD := desc.Fields().ByName("inner")
+	seen := map[protoreflect.FullName]bool{
+		innerFD.Message().FullName(): true,
+	}
+	if fieldHasAliases(innerFD, seen) {
+		t.Error("expected false when nested message already in seen set")
+	}
+}
+
+func TestDescriptorHasAliases_MapBranchContinues(t *testing.T) {
+	// MapOnlyEnumRequest's single field is a map<string, Status>. The map
+	// branch walks the value's field descriptor; when it has aliases the
+	// function returns true. Verify that positive branch.
+	md := (&pb.MapOnlyEnumRequest{}).ProtoReflect().Descriptor()
+	if !descriptorHasAliases(md, map[protoreflect.FullName]bool{md.FullName(): true}) {
+		t.Error("expected map<string, Status> to report aliases (Status has x_var_name)")
+	}
+}

@@ -67,6 +67,32 @@ func TestSSEHandler_StreamsMessages(t *testing.T) {
 	}
 }
 
+// TestSSEHandler_MarshalFailureContinuesStream drives the protojson.Marshal
+// error branch (reportError + continue) by feeding a message whose string
+// field violates proto3 UTF-8, then a valid message — the handler must skip
+// the bad one and emit the next frame without terminating the stream.
+func TestSSEHandler_MarshalFailureContinuesStream(t *testing.T) {
+	stream := &mockServerStream{
+		messages: []proto.Message{
+			&pb.SimpleResponse{Id: "\xff\xfe"},
+			&pb.SimpleResponse{Id: "2"},
+		},
+	}
+	opener := &mockServerStreamOpener{stream: stream}
+	handler := runtime.SSEHandler(nil, opener, runtime.NoAuth(), true)
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/stream", nil))
+
+	body := w.Body.String()
+	if !strings.Contains(body, `"id":"2"`) {
+		t.Fatalf("expected post-error frame emitted, got: %s", body)
+	}
+	if strings.Contains(body, "\xff") {
+		t.Fatalf("invalid-UTF-8 message must not leak into output: %s", body)
+	}
+}
+
 func TestSSEHandler_OpenStreamError(t *testing.T) {
 	opener := &mockServerStreamOpener{
 		err: fmt.Errorf("stream open failed"),
@@ -301,5 +327,79 @@ func TestSSEHandler_AuthSuccess(t *testing.T) {
 	body := w.Body.String()
 	if !strings.Contains(body, `"id":"1"`) {
 		t.Fatalf("expected message, got: %s", body)
+	}
+}
+
+// flakyWriter fails Write after a given number of successful writes. Used
+// to drive the "fmt.Fprintf returns error → return" branches in SSEHandler
+// (stream-ended, error-event, and data-write sites).
+type flakyWriter struct {
+	header http.Header
+	code   int
+	writes int
+	failAt int
+}
+
+func (w *flakyWriter) Header() http.Header { return w.header }
+func (w *flakyWriter) WriteHeader(c int)   { w.code = c }
+func (w *flakyWriter) Write(b []byte) (int, error) {
+	w.writes++
+	if w.writes >= w.failAt {
+		return 0, io.ErrClosedPipe
+	}
+	return len(b), nil
+}
+func (w *flakyWriter) Flush() {}
+
+func TestSSEHandler_EOFWriteFailsReturnsCleanly(t *testing.T) {
+	// Empty stream → Recv returns io.EOF on the first call, handler tries
+	// to write "event: close\ndata: {}\n\n". If that write fails the handler
+	// must return without panicking.
+	stream := &mockServerStream{}
+	opener := &mockServerStreamOpener{stream: stream}
+	handler := runtime.SSEHandler(nil, opener, runtime.NoAuth(), true)
+
+	r := httptest.NewRequest(http.MethodGet, "/stream", nil)
+	w := &flakyWriter{header: make(http.Header), failAt: 1}
+	handler.ServeHTTP(w, r)
+}
+
+func TestSSEHandler_ErrorEventWriteFailsReturnsCleanly(t *testing.T) {
+	stream := &mockServerStream{err: fmt.Errorf("stream broke")}
+	opener := &mockServerStreamOpener{stream: stream}
+	handler := runtime.SSEHandler(nil, opener, runtime.NoAuth(), true)
+
+	r := httptest.NewRequest(http.MethodGet, "/stream", nil)
+	w := &flakyWriter{header: make(http.Header), failAt: 1}
+	handler.ServeHTTP(w, r)
+}
+
+func TestSSEHandler_DataWriteFailsReturnsCleanly(t *testing.T) {
+	// One message delivered, then the data: write fails — handler must
+	// return without falling through to a second Recv call.
+	stream := &mockServerStream{
+		messages: []proto.Message{&pb.SimpleResponse{Id: "x"}},
+	}
+	opener := &mockServerStreamOpener{stream: stream}
+	handler := runtime.SSEHandler(nil, opener, runtime.NoAuth(), true)
+
+	r := httptest.NewRequest(http.MethodGet, "/stream", nil)
+	w := &flakyWriter{header: make(http.Header), failAt: 1}
+	handler.ServeHTTP(w, r)
+}
+
+func TestSSEHandler_ClientGoneErrorReturnsSilently(t *testing.T) {
+	// stream.Recv returns context.Canceled — isClientGone matches and
+	// the handler returns without writing an error event.
+	stream := &mockServerStream{err: context.Canceled}
+	opener := &mockServerStreamOpener{stream: stream}
+	handler := runtime.SSEHandler(nil, opener, runtime.NoAuth(), true)
+
+	r := httptest.NewRequest(http.MethodGet, "/stream", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	if strings.Contains(w.Body.String(), "event: error") {
+		t.Errorf("client-gone error must not surface as SSE error event: %s", w.Body.String())
 	}
 }
