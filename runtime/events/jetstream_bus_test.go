@@ -394,6 +394,66 @@ func TestJetStreamBus_ReusesCallerOwnedConn(t *testing.T) {
 	}
 }
 
+func TestJetStreamBus_BroadcastAckNackAreNoops(t *testing.T) {
+	// Broadcast subscriptions have no ack semantics — Ack/Nack on the
+	// delivered Message are wired to no-op closures. Exercising them must
+	// not panic and must not affect further delivery.
+	bus := newTestJetStreamBus(t)
+
+	received := make(chan struct{}, 1)
+	sub, err := bus.SubscribeBroadcast("notify.noop", func(_ context.Context, m events.Message) error {
+		m.Ack()
+		m.Nack()
+		if err := m.InProgress(); err != nil {
+			t.Errorf("broadcast InProgress must be a no-op, got %v", err)
+		}
+		received <- struct{}{}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	time.Sleep(50 * time.Millisecond) // let subscription settle
+	if err := bus.Publish(context.Background(), "notify.noop", []byte("x"), events.KindBroadcast, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("broadcast delivery never arrived")
+	}
+}
+
+func TestJetStreamBus_BroadcastHandlerErrorIsLogged(t *testing.T) {
+	// A handler returning non-nil is logged but the subscription stays
+	// healthy. Exercises the Warn branch.
+	bus := newTestJetStreamBus(t)
+
+	received := make(chan struct{}, 1)
+	sub, err := bus.SubscribeBroadcast("notify.warn", func(_ context.Context, _ events.Message) error {
+		received <- struct{}{}
+		return errors.New("soft failure")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	time.Sleep(50 * time.Millisecond)
+	if err := bus.Publish(context.Background(), "notify.warn", []byte("x"), events.KindBroadcast, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("broadcast delivery never arrived")
+	}
+}
+
 func init() {
 	// keep the default logger quiet during tests
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))

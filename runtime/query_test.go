@@ -272,3 +272,4 @@ func TestDecodeQueryParams_Int64Param_Invalid(t *testing.T) {
 		t.Fatal("expected error for invalid int64")
 	}
 }
+

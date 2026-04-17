@@ -32,3 +32,4 @@ func TestHealthHandler_ReturnsOK(t *testing.T) {
 		t.Fatalf("expected status 'ok', got %q", body["status"])
 	}
 }
+

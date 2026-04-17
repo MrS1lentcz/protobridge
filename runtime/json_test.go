@@ -323,6 +323,37 @@ func TestWriteValidationError_WriteFailure(t *testing.T) {
 	}
 }
 
+// invalidUTF8 is a byte sequence that Go's `string` accepts but
+// protojson.Marshal rejects (proto3 requires valid UTF-8 in string
+// fields). Used to drive the marshal-failure branches of MarshalProto,
+// WriteResponse, and MarshalOneofField without mocking protojson.
+const invalidUTF8 = "\xff\xfe\xfd"
+
+func TestMarshalProto_InvalidUTF8ReturnsError(t *testing.T) {
+	_, err := runtime.MarshalProto(&pb.SimpleRequest{Name: invalidUTF8})
+	if err == nil {
+		t.Fatal("expected marshal error for invalid UTF-8 string")
+	}
+}
+
+func TestWriteResponse_MarshalFailureWrites500(t *testing.T) {
+	w := httptest.NewRecorder()
+	runtime.WriteResponse(w, http.StatusOK, &pb.SimpleRequest{Name: invalidUTF8})
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", w.Code)
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("INTERNAL")) {
+		t.Fatalf("expected INTERNAL code in body, got: %s", w.Body.String())
+	}
+}
+
+func TestMarshalOneofField_MarshalFailurePropagates(t *testing.T) {
+	_, err := runtime.MarshalOneofField(&pb.TextContent{Body: invalidUTF8}, "TextContent")
+	if err == nil {
+		t.Fatal("expected error for invalid UTF-8 in oneof variant")
+	}
+}
+
 func TestMarshalProto_HappyPath(t *testing.T) {
 	msg := &pb.SimpleResponse{Id: "1", Status: pb.Status_STATUS_ACTIVE}
 	data, err := runtime.MarshalProto(msg)

@@ -441,6 +441,38 @@ func TestGenerateServiceBroadcastFile_EmptyGoPackageFallsBackToService(t *testin
 	}
 }
 
+func TestGenerateServiceBroadcastFile_ServicePkgDisjointFromEventPkg(t *testing.T) {
+	// Service's own GoPackage lives outside every event's GoPackage — the
+	// generator must append a fresh import under the `svcpb` alias instead
+	// of reusing an existing entry.
+	orderMt := &parserpkg.MessageType{Name: "OrderCreated", FullName: ".orders.OrderCreated"}
+	envMt := &parserpkg.MessageType{Name: "Envelope", FullName: ".gw.Envelope"}
+	svc := &parserpkg.BroadcastService{
+		Name:         "GatewayBroadcast",
+		MethodName:   "Stream",
+		Route:        "/gw",
+		GoPackage:    "example.com/gw", // distinct from event GoPackages
+		ProtoPackage: "gw",
+		Envelope:     envMt,
+		Events: []*parserpkg.BroadcastEvent{
+			{OneofFieldName: "order_created", Message: orderMt, Subject: "order_created", GoPackage: "example.com/orders"},
+		},
+	}
+	got := generateServiceBroadcastFile(svc, "events")
+	// Must contain the svcpb alias import for the service's own GoPackage.
+	if !strings.Contains(got, `svcpb "example.com/gw"`) {
+		t.Errorf("expected svcpb-aliased import for service GoPackage, got:\n%s", got)
+	}
+	// Must also contain the event's own pb import.
+	if !strings.Contains(got, `pb "example.com/orders"`) {
+		t.Errorf("expected pb-aliased import for event GoPackage, got:\n%s", got)
+	}
+	// The service stubs should reference the svcpb alias.
+	if !strings.Contains(got, "svcpb.NewGatewayBroadcastClient") {
+		t.Errorf("expected svcpb.New<Svc>Client reference, got:\n%s", got)
+	}
+}
+
 func TestGenerate_MultipleBroadcastServicesSortedDeterministically(t *testing.T) {
 	a := &parserpkg.MessageType{Name: "A", FullName: ".x.A"}
 	b := &parserpkg.MessageType{Name: "B", FullName: ".x.B"}

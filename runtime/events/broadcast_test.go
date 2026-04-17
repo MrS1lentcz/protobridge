@@ -638,6 +638,65 @@ func TestBroadcastHub_ShutdownDuringBackoff(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 }
 
+// TestBroadcastHub_CancelBeforeBackoffExpires cancels the hub context while
+// the source is mid-backoff — runSource's select must pick ctx.Done and
+// stop the timer cleanly. Covers the ctx.Done arm of the backoff select;
+// the `if !timer.Stop()` inner drain is a race window that fires only
+// when the timer pre-empts the cancel and is intentionally left uncovered.
+func TestBroadcastHub_CancelBeforeBackoffExpires(t *testing.T) {
+	var runs atomic.Int32
+	src := funcSource(func(_ context.Context, _ chan<- events.BroadcastFrame) error {
+		runs.Add(1)
+		return errors.New("flake")
+	})
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:             src,
+		Marshal:            passthroughMarshaler,
+		SourceRetryInitial: 500 * time.Millisecond,
+		SourceRetryMax:     500 * time.Millisecond,
+		Logger:             newSilentLogger(),
+	})
+	// Wait for the first failed Run, then cancel during the backoff wait.
+	waitForAttempts(t, &runs, 1, time.Second)
+	time.Sleep(5 * time.Millisecond) // ensure we're inside the select
+	hubCancel()
+	time.Sleep(20 * time.Millisecond)
+	if runs.Load() != 1 {
+		t.Errorf("cancel-during-backoff should stop retry, got %d runs", runs.Load())
+	}
+}
+
+// canceledCtxErrSource returns context.Canceled directly (as a wrapped gRPC
+// client might when the stream context is cancelled mid-flight). runSource's
+// errors.Is(err, context.Canceled) branch must detect it and stop retrying
+// regardless of whether retry is enabled.
+func TestBroadcastHub_SourceReturnsContextCanceledStops(t *testing.T) {
+	var attempts atomic.Int32
+	src := funcSource(func(ctx context.Context, _ chan<- events.BroadcastFrame) error {
+		attempts.Add(1)
+		// Wrap context.Canceled so errors.Is still matches, and return even
+		// if the hub's own ctx isn't cancelled yet.
+		return errors.Join(errors.New("stream aborted"), context.Canceled)
+	})
+
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	t.Cleanup(hubCancel)
+	events.NewBroadcastHub(hubCtx, events.BroadcastConfig{
+		Source:             src,
+		Marshal:            passthroughMarshaler,
+		SourceRetryInitial: 1 * time.Millisecond,
+		SourceRetryMax:     1 * time.Millisecond,
+		Logger:             newSilentLogger(),
+	})
+
+	waitForAttempts(t, &attempts, 1, time.Second)
+	time.Sleep(30 * time.Millisecond)
+	if got := attempts.Load(); got != 1 {
+		t.Errorf("source returning context.Canceled must stop retry, got %d attempts", got)
+	}
+}
+
 func TestBroadcastHub_NilCtxDowngradesToBackground(t *testing.T) {
 	// Must not panic — ctx=nil is misuse, but degrading to Background keeps
 	// the hub usable rather than crashing every request goroutine.

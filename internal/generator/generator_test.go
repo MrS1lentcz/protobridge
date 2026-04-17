@@ -204,6 +204,43 @@ func TestGenerateServiceFile(t *testing.T) {
 	}
 }
 
+func TestGenerateServiceFile_SkipsMCPOnlyMethods(t *testing.T) {
+	// A method whose HTTPMethod is empty is carried in the parser model
+	// purely for the MCP plugin — the REST generator must emit nothing for it.
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{{
+			Name:         "HybridService",
+			ProtoPackage: "h.v1",
+			GoPackage:    "example.com/h",
+			PathPrefix:   "/api/v1",
+			Methods: []*parser.Method{
+				{
+					Name:       "RestMethod",
+					HTTPMethod: "POST",
+					HTTPPath:   "/api/v1/rest",
+					StreamType: parser.StreamUnary,
+					InputType:  &parser.MessageType{Name: "Req", FullName: ".h.v1.Req"},
+					OutputType: &parser.MessageType{Name: "Resp", FullName: ".h.v1.Resp"},
+				},
+				{
+					Name:       "McpOnly",
+					HTTPMethod: "", // MCP-only — must be skipped by REST generator
+					StreamType: parser.StreamUnary,
+					InputType:  &parser.MessageType{Name: "Req", FullName: ".h.v1.Req"},
+					OutputType: &parser.MessageType{Name: "Resp", FullName: ".h.v1.Resp"},
+				},
+			},
+		}},
+	}
+	content := generateServiceFile(api.Services[0], api)
+	if !strings.Contains(content, "restMethodHandler") {
+		t.Errorf("REST method handler missing from generated output")
+	}
+	if strings.Contains(content, "mcpOnlyHandler") || strings.Contains(content, "McpOnly") {
+		t.Errorf("MCP-only method must not produce a REST handler, got:\n%s", content)
+	}
+}
+
 func TestGenerateServiceFileWithQueryParamsTarget(t *testing.T) {
 	api := &parser.ParsedAPI{
 		Services: []*parser.Service{
