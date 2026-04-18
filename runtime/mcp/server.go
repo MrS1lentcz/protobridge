@@ -12,8 +12,9 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/mrs1lentcz/protobridge/runtime"
 )
 
 // Server wraps an mcp-go server and centralises the auth/metadata pipeline
@@ -152,11 +153,8 @@ func (s *Server) CallUnary(
 		if err != nil {
 			return nil, fmt.Errorf("encode arguments: %w", err)
 		}
-		if len(data) > 0 && string(data) != "null" {
-			opts := protojson.UnmarshalOptions{DiscardUnknown: true}
-			if err := opts.Unmarshal(data, reqMsg); err != nil {
-				return nil, fmt.Errorf("decode arguments into %T: %w", reqMsg, err)
-			}
+		if err := runtime.UnmarshalProto(data, reqMsg); err != nil {
+			return nil, fmt.Errorf("decode arguments into %T: %w", reqMsg, err)
 		}
 	}
 
@@ -181,7 +179,7 @@ func (s *Server) CallUnary(
 		return nil, err
 	}
 
-	out, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(respMsg)
+	out, err := runtime.MarshalProto(respMsg)
 	if err != nil {
 		return nil, fmt.Errorf("marshal response: %w", err)
 	}

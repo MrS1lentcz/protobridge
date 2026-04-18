@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,16 +27,30 @@ func DecodeRequest(r *http.Request, msg proto.Message) error {
 	if err != nil {
 		return fmt.Errorf("reading request body: %w", err)
 	}
-	if len(body) == 0 {
-		return nil
-	}
-	if rewritten, perr := preprocessEnumAliases(body, msg); perr == nil {
-		body = rewritten
-	}
-	if err := unmarshaller.Unmarshal(body, msg); err != nil {
+	if err := UnmarshalProto(body, msg); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
 	return nil
+}
+
+// UnmarshalProto decodes JSON bytes into a proto message using the runtime's
+// standard options: x_var_name enum aliases are rewritten to canonical names
+// and unknown fields are discarded. Non-HTTP transports (MCP, WebSocket) use
+// this so they share decoding semantics with the REST gateway.
+//
+// Empty / whitespace-only / `null` input leaves msg untouched and returns nil.
+// HTTP bodies routinely carry trailing newlines and some clients pad bare
+// `null` with whitespace, so the no-op check must be whitespace-tolerant —
+// bytes.TrimSpace allocates nothing when there is nothing to trim.
+func UnmarshalProto(data []byte, msg proto.Message) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	if rewritten, perr := preprocessEnumAliases(data, msg); perr == nil {
+		data = rewritten
+	}
+	return unmarshaller.Unmarshal(data, msg)
 }
 
 // MarshalProto marshals a proto message to JSON using the runtime's standard
