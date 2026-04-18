@@ -166,6 +166,43 @@ func TestDecodeRequest_EnumAliasPrepass_NumericEnumLeftUntouched(t *testing.T) {
 	}
 }
 
+func TestUnmarshalProto_EnumAliasPrepassAndEmpty(t *testing.T) {
+	// UnmarshalProto is the shared byte-based entry point used by non-HTTP
+	// transports (MCP, future WebSocket). It must run the same x_var_name
+	// prepass as DecodeRequest and accept empty / null input as a no-op so
+	// transports don't have to special-case those.
+	t.Run("empty bytes no-op", func(t *testing.T) {
+		msg := &pb.SimpleRequest{Name: "unchanged"}
+		if err := runtime.UnmarshalProto(nil, msg); err != nil {
+			t.Fatalf("nil: %v", err)
+		}
+		if err := runtime.UnmarshalProto([]byte(""), msg); err != nil {
+			t.Fatalf("empty: %v", err)
+		}
+		if err := runtime.UnmarshalProto([]byte("null"), msg); err != nil {
+			t.Fatalf("null: %v", err)
+		}
+		if msg.Name != "unchanged" {
+			t.Fatalf("no-op input should not clobber msg, got Name=%q", msg.Name)
+		}
+	})
+	t.Run("alias rewrite", func(t *testing.T) {
+		msg := &pb.SimpleRequest{}
+		if err := runtime.UnmarshalProto([]byte(`{"status":"active"}`), msg); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if msg.Status != pb.Status_STATUS_ACTIVE {
+			t.Fatalf("got %v, want STATUS_ACTIVE", msg.Status)
+		}
+	})
+	t.Run("invalid JSON surfaces error", func(t *testing.T) {
+		msg := &pb.SimpleRequest{}
+		if err := runtime.UnmarshalProto([]byte("{not json"), msg); err == nil {
+			t.Fatal("expected parse error")
+		}
+	})
+}
+
 func TestDecodeRequest_EnumAliasPrepass_NullNestedMessage(t *testing.T) {
 	// JSON null for a nested message field exercises the
 	// `node.(map[string]any)` failure branch when recursing.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
@@ -398,6 +399,41 @@ func TestServer_CallUnary_NoArguments(t *testing.T) {
 	}
 	if out == nil {
 		t.Fatal("expected result")
+	}
+}
+
+func TestServer_CallUnary_EnumAliasRoundTrip(t *testing.T) {
+	// Generated MCP tool schemas advertise x_var_name aliases ("active",
+	// "inactive") for enum fields, so a client that honors the schema sends
+	// the alias. protojson.Unmarshal alone rejects it with "invalid value for
+	// Status"; CallUnary must run the same alias prepass as the REST gateway.
+	// The response path is symmetric: canonical names in the proto response
+	// must be rewritten back to aliases so the client sees what the schema
+	// promised.
+	srv := mcp.NewServer("t", "0", mcp.DefaultAuthFunc())
+	req := mcpsdk.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"name": "alice", "status": "active"}
+
+	reqMsg := &pb.SimpleRequest{}
+	out, err := srv.CallUnary(context.Background(), req, reqMsg,
+		func(_ context.Context, _ proto.Message) (proto.Message, error) {
+			if reqMsg.Status != pb.Status_STATUS_ACTIVE {
+				return nil, fmt.Errorf("expected STATUS_ACTIVE, got %v", reqMsg.Status)
+			}
+			return &pb.SimpleResponse{Id: "r1", Status: pb.Status_STATUS_INACTIVE}, nil
+		})
+	if err != nil {
+		t.Fatalf("CallUnary: %v", err)
+	}
+	tc, ok := out.Content[0].(mcpsdk.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", out.Content[0])
+	}
+	if !strings.Contains(tc.Text, `"status":"inactive"`) {
+		t.Errorf("response should emit x_var_name alias, got: %s", tc.Text)
+	}
+	if strings.Contains(tc.Text, "STATUS_INACTIVE") {
+		t.Errorf("response should not emit canonical enum name, got: %s", tc.Text)
 	}
 }
 
