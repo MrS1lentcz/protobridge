@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,9 +38,13 @@ func DecodeRequest(r *http.Request, msg proto.Message) error {
 // and unknown fields are discarded. Non-HTTP transports (MCP, WebSocket) use
 // this so they share decoding semantics with the REST gateway.
 //
-// Empty or `null` input leaves msg untouched and returns nil.
+// Empty / whitespace-only / `null` input leaves msg untouched and returns nil.
+// HTTP bodies routinely carry trailing newlines and some clients pad bare
+// `null` with whitespace, so the no-op check must be whitespace-tolerant —
+// bytes.TrimSpace allocates nothing when there is nothing to trim.
 func UnmarshalProto(data []byte, msg proto.Message) error {
-	if len(data) == 0 || string(data) == "null" {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return nil
 	}
 	if rewritten, perr := preprocessEnumAliases(data, msg); perr == nil {

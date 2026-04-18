@@ -172,18 +172,27 @@ func TestUnmarshalProto_EnumAliasPrepassAndEmpty(t *testing.T) {
 	// prepass as DecodeRequest and accept empty / null input as a no-op so
 	// transports don't have to special-case those.
 	t.Run("empty bytes no-op", func(t *testing.T) {
-		msg := &pb.SimpleRequest{Name: "unchanged"}
-		if err := runtime.UnmarshalProto(nil, msg); err != nil {
-			t.Fatalf("nil: %v", err)
+		// Whitespace-padded null is what HTTP clients occasionally send
+		// (trailing newline on bare `null`) — must be treated the same as
+		// empty input, not fall through to protojson which rejects top-level
+		// null.
+		noops := [][]byte{
+			nil,
+			[]byte(""),
+			[]byte("   "),
+			[]byte("\n\t"),
+			[]byte("null"),
+			[]byte("null\n"),
+			[]byte("  null  "),
 		}
-		if err := runtime.UnmarshalProto([]byte(""), msg); err != nil {
-			t.Fatalf("empty: %v", err)
-		}
-		if err := runtime.UnmarshalProto([]byte("null"), msg); err != nil {
-			t.Fatalf("null: %v", err)
-		}
-		if msg.Name != "unchanged" {
-			t.Fatalf("no-op input should not clobber msg, got Name=%q", msg.Name)
+		for _, in := range noops {
+			msg := &pb.SimpleRequest{Name: "unchanged"}
+			if err := runtime.UnmarshalProto(in, msg); err != nil {
+				t.Fatalf("no-op %q: %v", string(in), err)
+			}
+			if msg.Name != "unchanged" {
+				t.Fatalf("no-op %q should not clobber msg, got Name=%q", string(in), msg.Name)
+			}
 		}
 	})
 	t.Run("alias rewrite", func(t *testing.T) {
