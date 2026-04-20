@@ -962,6 +962,13 @@ func TestGenerateOpenAPIOneofComment(t *testing.T) {
 	if !strings.Contains(content, "# oneof: payload") {
 		t.Error("expected oneof comment in OpenAPI schema")
 	}
+	// A message whose only fields are oneof variants must not emit an
+	// empty `properties:` key — that parses as null and violates the JSON
+	// Schema requirement that properties be an object.
+	if strings.Contains(content, "properties:\n      # oneof") ||
+		strings.Contains(content, "properties:\n        # oneof") {
+		t.Error("oneof-only schema must not emit an empty properties: key")
+	}
 }
 
 func TestToPascalCase_HyphenatedHeaders(t *testing.T) {
