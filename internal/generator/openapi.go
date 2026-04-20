@@ -159,7 +159,14 @@ func writeSchema(b *strings.Builder, mt *parser.MessageType) {
 		}
 	}
 
-	if len(mt.Fields) > 0 {
+	hasRegularField := false
+	for _, f := range mt.Fields {
+		if f.OneofIndex == nil {
+			hasRegularField = true
+			break
+		}
+	}
+	if hasRegularField {
 		fmt.Fprintf(b, "      properties:\n")
 		for _, f := range mt.Fields {
 			if f.OneofIndex != nil {
