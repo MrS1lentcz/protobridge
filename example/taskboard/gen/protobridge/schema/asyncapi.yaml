@@ -90,39 +90,6 @@ components:
           type: string
         task:
           $ref: '#/components/schemas/Task'
-    Task:
-      type: object
-      properties:
-        id:
-          type: string
-        title:
-          type: string
-        description:
-          type: string
-        priority:
-          type: string
-          enum:
-            - low
-            - medium
-            - high
-            - critical
-        status:
-          type: string
-          enum:
-            - todo
-            - in_progress
-            - done
-        assignee_id:
-          type: string
-        tags:
-          type: array
-          items:
-            type: string
-        created_by:
-          type: string
-        updated_by:
-          type: string
-      # oneof: attachment
     BulkCreateTaskRequest:
       type: object
       properties:
@@ -153,4 +120,62 @@ components:
         content:
           type: string
         sender:
+          type: string
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum:
+            - low
+            - medium
+            - high
+            - critical
+        status:
+          type: string
+          enum:
+            - todo
+            - in_progress
+            - done
+        assignee_id:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        file:
+          $ref: '#/components/schemas/FileAttachment'
+        link:
+          $ref: '#/components/schemas/LinkAttachment'
+        created_by:
+          type: string
+        updated_by:
+          type: string
+      oneOf:
+        - required:
+            - file
+        - required:
+            - link
+    FileAttachment:
+      type: object
+      properties:
+        filename:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        mime_type:
+          type: string
+    LinkAttachment:
+      type: object
+      properties:
+        url:
+          type: string
+        title:
           type: string

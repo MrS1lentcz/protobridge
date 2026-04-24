@@ -211,13 +211,19 @@ components:
           type: array
           items:
             type: string
+        file:
+          $ref: '#/components/schemas/FileAttachment'
+        link:
+          $ref: '#/components/schemas/LinkAttachment'
         created_by:
           type: string
         updated_by:
           type: string
-      # oneof: attachment
-    GetTaskRequest:
-      type: object
+      oneOf:
+        - required:
+            - file
+        - required:
+            - link
     UpdateTaskRequest:
       type: object
       properties:
@@ -244,8 +250,6 @@ components:
           type: array
           items:
             type: string
-    DeleteTaskRequest:
-      type: object
     DeleteTaskResponse:
       type: object
       properties:
@@ -253,24 +257,6 @@ components:
           type: boolean
         deleted_by:
           type: string
-    ListTasksRequest:
-      type: object
-      properties:
-        paging:
-          $ref: '#/components/schemas/Paging'
-        status_filter:
-          type: string
-          enum:
-            - todo
-            - in_progress
-            - done
-        priority_filter:
-          type: string
-          enum:
-            - low
-            - medium
-            - high
-            - critical
     ListTasksResponse:
       type: object
       properties:
@@ -281,43 +267,20 @@ components:
         total:
           type: integer
           format: int32
-    WatchTasksRequest:
-      type: object
-    TaskEvent:
+    FileAttachment:
       type: object
       properties:
-        event_type:
+        filename:
           type: string
-        task:
-          $ref: '#/components/schemas/Task'
-    BulkCreateTaskRequest:
-      type: object
-      properties:
-        title:
-          type: string
-        description:
-          type: string
-        priority:
-          type: string
-          enum:
-            - low
-            - medium
-            - high
-            - critical
-    BulkCreateTaskResponse:
-      type: object
-      properties:
-        created_count:
+        size_bytes:
           type: integer
-          format: int32
-        ids:
-          type: array
-          items:
-            type: string
-    ChatMessage:
+          format: int64
+        mime_type:
+          type: string
+    LinkAttachment:
       type: object
       properties:
-        content:
+        url:
           type: string
-        sender:
+        title:
           type: string
