@@ -3064,3 +3064,375 @@ func TestQualifiedID(t *testing.T) {
 		}
 	}
 }
+
+// TestGenerateOpenAPIWellKnownAsRPCType covers RPCs whose input or output
+// is a google.protobuf.* WKT. The BFS collector intentionally skips WKTs
+// from components.schemas (they render inline at field sites), so path-
+// level schema slots must also inline them — otherwise the emitted
+// $ref: '#/components/schemas/Empty' resolves to nothing and downstream
+// tooling (Spectral, openapi-generator, Redocly) rejects the spec.
+func TestGenerateOpenAPIWellKnownAsRPCType(t *testing.T) {
+	empty := &parser.MessageType{Name: "Empty", FullName: ".google.protobuf.Empty"}
+	timestamp := &parser.MessageType{Name: "Timestamp", FullName: ".google.protobuf.Timestamp"}
+	api := &parser.ParsedAPI{
+		Messages: map[string]*parser.MessageType{
+			empty.FullName:     empty,
+			timestamp.FullName: timestamp,
+		},
+		Services: []*parser.Service{
+			{
+				Name:         "PingService",
+				ProtoPackage: "repro.v1",
+				DisplayName:  "Ping",
+				Methods: []*parser.Method{
+					{
+						// POST — body + response both Empty: the symmetric
+						// dead-$ref case the bug report reproduces.
+						Name:       "Ping",
+						HTTPMethod: "POST",
+						HTTPPath:   "/ping",
+						StreamType: parser.StreamUnary,
+						InputType:  empty,
+						OutputType: empty,
+					},
+					{
+						// GET — no requestBody, but response is a WKT
+						// wrapper; the response slot used to dead-ref too.
+						Name:       "Now",
+						HTTPMethod: "GET",
+						HTTPPath:   "/now",
+						StreamType: parser.StreamUnary,
+						InputType:  empty,
+						OutputType: timestamp,
+					},
+				},
+			},
+		},
+	}
+
+	content := GenerateOpenAPI(api)
+
+	// No $ref should target a WKT short name — those are rendered inline
+	// at field sites and must be inlined at path sites too.
+	for _, orphan := range []string{
+		"$ref: '#/components/schemas/Empty'",
+		"$ref: '#/components/schemas/Timestamp'",
+	} {
+		if strings.Contains(content, orphan) {
+			t.Errorf("WKT used as RPC type must not emit a $ref (%q):\n%s", orphan, content)
+		}
+	}
+
+	// components.schemas must stay empty (no WKT leaked in) and no other
+	// schema should exist either — both RPCs use only WKTs.
+	componentsIdx := strings.Index(content, "components:\n  schemas:\n")
+	if componentsIdx < 0 {
+		t.Fatalf("expected components.schemas header in output:\n%s", content)
+	}
+	tail := content[componentsIdx+len("components:\n  schemas:\n"):]
+	if strings.TrimSpace(tail) != "" {
+		t.Errorf("components.schemas should be empty when every RPC uses only WKTs; got:\n%q", tail)
+	}
+
+	// Ping's POST body and 200 response inline Empty as type: object.
+	pingIdx := strings.Index(content, "/ping:")
+	nowIdx := strings.Index(content, "/now:")
+	if pingIdx < 0 || nowIdx < 0 {
+		t.Fatalf("expected /ping and /now paths:\n%s", content)
+	}
+	pingSlice := content[pingIdx:nowIdx]
+	if !strings.Contains(pingSlice, "            schema:\n              type: object\n") {
+		t.Errorf("expected Empty-as-requestBody rendered inline (type: object):\n%s", pingSlice)
+	}
+	// The response schema slot is one indent level deeper.
+	if !strings.Contains(pingSlice, "              schema:\n                type: object\n") {
+		t.Errorf("expected Empty-as-response rendered inline (type: object):\n%s", pingSlice)
+	}
+
+	// Now's 200 response inlines Timestamp with date-time format.
+	nowSlice := content[nowIdx:]
+	if i := strings.Index(nowSlice, "components:"); i > 0 {
+		nowSlice = nowSlice[:i]
+	}
+	if !strings.Contains(nowSlice, "              schema:\n                type: string\n                format: date-time\n") {
+		t.Errorf("expected Timestamp response rendered inline (type: string, format: date-time):\n%s", nowSlice)
+	}
+}
+
+// TestWriteWellKnownInlineAllTypes exercises every google.protobuf.* WKT
+// mapping directly. The existing BFS/field/RPC tests only hit a handful
+// of types (Timestamp, Empty, Struct, StringValue), so the rest of the
+// switch arms would go uncovered — this table drives them all so
+// renames/typos in the YAML output show up as test failures rather than
+// silent regressions in downstream specs.
+func TestWriteWellKnownInlineAllTypes(t *testing.T) {
+	cases := map[string]string{
+		".google.protobuf.Timestamp":   "type: string\nformat: date-time\n",
+		".google.protobuf.Duration":    "type: string\n",
+		".google.protobuf.FieldMask":   "type: string\n",
+		".google.protobuf.Empty":       "type: object\n",
+		".google.protobuf.Struct":      "type: object\nadditionalProperties: true\n",
+		".google.protobuf.Any":         "type: object\nadditionalProperties: true\n",
+		".google.protobuf.Value":       "{}\n",
+		".google.protobuf.ListValue":   "type: array\nitems: {}\n",
+		".google.protobuf.BoolValue":   "type: boolean\n",
+		".google.protobuf.StringValue": "type: string\n",
+		".google.protobuf.BytesValue":  "type: string\nformat: byte\n",
+		".google.protobuf.Int32Value":  "type: integer\nformat: int32\n",
+		".google.protobuf.Int64Value":  "type: integer\nformat: int64\n",
+		".google.protobuf.UInt32Value": "type: integer\nformat: uint32\n",
+		".google.protobuf.UInt64Value": "type: integer\nformat: uint64\n",
+		".google.protobuf.FloatValue":  "type: number\nformat: float\n",
+		".google.protobuf.DoubleValue": "type: number\nformat: double\n",
+	}
+	for fqn, want := range cases {
+		var b strings.Builder
+		if ok := writeWellKnownInline(&b, fqn, ""); !ok {
+			t.Errorf("%s: expected handled=true, got false", fqn)
+			continue
+		}
+		if got := b.String(); got != want {
+			t.Errorf("%s: got %q, want %q", fqn, got, want)
+		}
+	}
+
+	// Non-WKT must return false and emit nothing.
+	var b strings.Builder
+	if ok := writeWellKnownInline(&b, ".other.pkg.NotWKT", ""); ok {
+		t.Error("non-WKT type must return false")
+	}
+	if b.Len() != 0 {
+		t.Errorf("non-WKT type must not emit output, got %q", b.String())
+	}
+}
+
+// TestSchemaRefFallbacks covers the nil/missing-in-ids branches of the
+// ref helpers. Real runs always populate api.Messages + schemaIDs, but
+// the fallback paths exist for tests (and for defensive recovery when a
+// parser bug would otherwise produce a nil-pointer dereference) so they
+// must be covered.
+func TestSchemaRefFallbacks(t *testing.T) {
+	// schemaRefForType: nil pointer → empty string.
+	if got := schemaRefForType(nil, nil); got != "" {
+		t.Errorf("nil MessageType should yield empty ID, got %q", got)
+	}
+	// schemaRefForType: not in ids → fall back to mt.Name.
+	mt := &parser.MessageType{Name: "Orphan", FullName: ".pkg.Orphan"}
+	if got := schemaRefForType(mt, map[string]string{}); got != "Orphan" {
+		t.Errorf("missing ID should fall back to Name, got %q", got)
+	}
+
+	// schemaRef: target resolved in index, but not in ids.
+	idx := map[string]*parser.MessageType{".pkg.Orphan": mt}
+	if got := schemaRef(".pkg.Orphan", idx, map[string]string{}); got != "Orphan" {
+		t.Errorf("indexed-but-unmapped should return target.Name, got %q", got)
+	}
+	// schemaRef: target missing from index → tail of TypeName.
+	if got := schemaRef(".pkg.Missing", idx, nil); got != "Missing" {
+		t.Errorf("unindexed should fall back to lastSegment, got %q", got)
+	}
+
+	// writeMessageSchemaRef: nil input is a no-op.
+	var b strings.Builder
+	writeMessageSchemaRef(&b, nil, "    ", nil)
+	if b.Len() != 0 {
+		t.Errorf("nil MessageType must emit nothing, got %q", b.String())
+	}
+	// writeMessageSchemaRef: non-WKT, not in ids → $ref uses Name fallback.
+	b.Reset()
+	writeMessageSchemaRef(&b, mt, "    ", map[string]string{})
+	if got := b.String(); got != "    $ref: '#/components/schemas/Orphan'\n" {
+		t.Errorf("fallback $ref got %q", got)
+	}
+}
+
+// TestLastSegmentNoDot covers the degenerate branch where the input has
+// no dot separator — defensive code for TypeName strings that the parser
+// wouldn't normally emit, but the function returning "" instead of the
+// whole string would produce empty $refs downstream.
+func TestLastSegmentNoDot(t *testing.T) {
+	if got := lastSegment("BareName"); got != "BareName" {
+		t.Errorf("no-dot input: got %q, want %q", got, "BareName")
+	}
+	if got := lastSegment(""); got != "" {
+		t.Errorf("empty input: got %q, want %q", got, "")
+	}
+	if got := lastSegment(".leading"); got != "leading" {
+		t.Errorf("leading-dot: got %q, want %q", got, "leading")
+	}
+}
+
+// TestWriteMapFieldDegenerateEntry covers the branch where a MapEntry
+// message somehow lacks a tag-2 value field. Won't happen from protoc
+// (map entries always have key/value with tags 1/2), but the defensive
+// fallback lets the generator keep producing a syntactically valid spec
+// instead of emitting a dangling additionalProperties: key.
+func TestWriteMapFieldDegenerateEntry(t *testing.T) {
+	entry := &parser.MessageType{
+		Name:     "BadEntry",
+		FullName: ".pkg.BadEntry",
+		MapEntry: true,
+		// Only a key field — no tag-2 value.
+		Fields: []*parser.Field{
+			{Name: "key", Number: 1, Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+		},
+	}
+	var b strings.Builder
+	writeMapField(&b, entry, "    ", nil, nil)
+	want := "    type: object\n    additionalProperties:\n      type: string\n"
+	if got := b.String(); got != want {
+		t.Errorf("degenerate map entry:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// TestCollectAsyncSchemasSkipsWKTSeed covers the "seed is a WKT" branch
+// of the async enqueue: a streaming RPC whose Input or Output is a WKT
+// must not result in the WKT landing in the emitted schema set (same
+// contract as OpenAPI). Not reachable from any current example; the test
+// guards future regressions if someone defines e.g. bidi streaming with
+// Empty as a side-channel type.
+func TestCollectAsyncSchemasSkipsWKTSeed(t *testing.T) {
+	empty := &parser.MessageType{Name: "Empty", FullName: ".google.protobuf.Empty"}
+	event := &parser.MessageType{Name: "Event", FullName: ".svc.v1.Event"}
+	channels := []asyncChannel{
+		{
+			svc: &parser.Service{Name: "Svc"},
+			method: &parser.Method{
+				Name:       "Bidi",
+				StreamType: parser.StreamBidi,
+				InputType:  empty, // WKT input — must be filtered
+				OutputType: event,
+			},
+		},
+	}
+	index := map[string]*parser.MessageType{empty.FullName: empty, event.FullName: event}
+	schemas := collectAsyncSchemas(channels, index)
+
+	for _, mt := range schemas {
+		if isWellKnown(mt.FullName) {
+			t.Errorf("WKT %q must not appear in async emitted set", mt.FullName)
+		}
+	}
+	// Event must still be there.
+	found := false
+	for _, mt := range schemas {
+		if mt.FullName == event.FullName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("non-WKT Event should be emitted; got %+v", schemas)
+	}
+}
+
+// TestCollectAsyncSchemasFieldExpansion hits the non-seed branches of
+// the async BFS walker: WKT fields are skipped (rendered inline at the
+// write site), unresolved message refs are dropped (no index entry), and
+// map<K,V> fields unwrap to their value-field target so the synthetic
+// *Entry message is never queued. Without this test every one of those
+// branches goes uncovered — no current example has a streaming RPC whose
+// output contains a map or a WKT field.
+func TestCollectAsyncSchemasFieldExpansion(t *testing.T) {
+	// Value type reachable transitively through the map entry.
+	item := &parser.MessageType{
+		Name: "Item", FullName: ".svc.v1.Item",
+		Fields: []*parser.Field{{Name: "id", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING}},
+	}
+	// Synthetic map entry for map<string, Item>.
+	entry := &parser.MessageType{
+		Name: "ItemsEntry", FullName: ".svc.v1.Event.ItemsEntry", MapEntry: true,
+		Fields: []*parser.Field{
+			{Name: "key", Number: 1, Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+			{Name: "value", Number: 2, Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".svc.v1.Item"},
+		},
+	}
+	// Event carries all three exotic branches in one schema.
+	event := &parser.MessageType{
+		Name: "Event", FullName: ".svc.v1.Event",
+		Fields: []*parser.Field{
+			// WKT — expander must skip, no error.
+			{Name: "ts", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".google.protobuf.Timestamp"},
+			// Unresolved: index doesn't contain .svc.v1.Ghost.
+			{Name: "ghost", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".svc.v1.Ghost"},
+			// Map — walker follows into Item, skips the entry.
+			{Name: "items", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: entry.FullName, Repeated: true},
+		},
+	}
+
+	index := map[string]*parser.MessageType{
+		event.FullName: event,
+		entry.FullName: entry,
+		item.FullName:  item,
+	}
+	channels := []asyncChannel{{
+		svc:    &parser.Service{Name: "Svc"},
+		method: &parser.Method{Name: "Watch", StreamType: parser.StreamServer, OutputType: event},
+	}}
+
+	schemas := collectAsyncSchemas(channels, index)
+
+	got := make(map[string]bool)
+	for _, mt := range schemas {
+		got[mt.FullName] = true
+	}
+	if !got[event.FullName] {
+		t.Errorf("Event should be emitted")
+	}
+	if !got[item.FullName] {
+		t.Errorf("Item (map value) should be reached transitively through the entry")
+	}
+	if got[entry.FullName] {
+		t.Errorf("synthetic map entry must not be emitted; got %+v", schemas)
+	}
+	// WKT and Ghost are silently absent — no error, just skipped.
+}
+
+// TestCollectOpenAPISchemasNilSeed covers the enqueue guard that drops
+// nil / empty-FullName pointers before they land on the queue. Real
+// runs won't hit this (RPCs always carry resolved Input/Output types),
+// but the guard is defensive against malformed ParsedAPI from a future
+// parser change.
+func TestCollectOpenAPISchemasNilSeed(t *testing.T) {
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name: "Svc",
+				Methods: []*parser.Method{
+					{
+						Name: "Do", HTTPMethod: "POST", HTTPPath: "/do",
+						StreamType: parser.StreamUnary,
+						InputType:  nil, // triggers nil guard
+						OutputType: &parser.MessageType{Name: "", FullName: ""}, // triggers empty-FullName guard
+					},
+				},
+			},
+		},
+	}
+	// Must not panic and must return an empty list.
+	schemas := collectOpenAPISchemas(api, buildMessageIndex(api))
+	if len(schemas) != 0 {
+		t.Errorf("expected no emitted schemas for nil/empty seeds, got %d", len(schemas))
+	}
+}
+
+// TestWalkFieldTargetsMapEntryNoValue covers the rare case where a
+// MapEntry in the index doesn't have a tag-2 field — the walker must
+// return cleanly without recursing on nil, matching writeMapField's
+// defensive behavior.
+func TestWalkFieldTargetsMapEntryNoValue(t *testing.T) {
+	entry := &parser.MessageType{
+		Name: "BadEntry", FullName: ".pkg.BadEntry", MapEntry: true,
+		Fields: []*parser.Field{
+			{Name: "key", Number: 1, Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+		},
+	}
+	index := map[string]*parser.MessageType{entry.FullName: entry}
+	f := &parser.Field{Name: "m", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: entry.FullName, Repeated: true}
+
+	enqueued := 0
+	walkFieldTargets(f, index, func(*parser.MessageType) { enqueued++ })
+	if enqueued != 0 {
+		t.Errorf("degenerate map entry must not enqueue anything; got %d calls", enqueued)
+	}
+}
