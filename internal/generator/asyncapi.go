@@ -70,8 +70,17 @@ func GenerateAsyncAPI(api *parser.ParsedAPI) string {
 	// Schemas – include all referenced types transitively
 	schemas := collectAsyncSchemas(channels, api)
 	b.WriteString("  schemas:\n")
+	index := api.Messages
+	if len(index) == 0 {
+		index = make(map[string]*parser.MessageType)
+		for _, mt := range schemas {
+			if mt.FullName != "" {
+				index[mt.FullName] = mt
+			}
+		}
+	}
 	for _, mt := range schemas {
-		writeSchema(&b, mt)
+		writeSchema(&b, mt, index)
 	}
 
 	return b.String()

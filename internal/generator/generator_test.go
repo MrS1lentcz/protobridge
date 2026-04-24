@@ -438,7 +438,6 @@ func TestGenerateOpenAPI(t *testing.T) {
 		"SendMessageReq:",
 		"type: object",
 		"SendMessageResp:",
-		"GetChatReq:",
 		"GetChatResp:",
 		// Required fields
 		"required:",
@@ -451,6 +450,13 @@ func TestGenerateOpenAPI(t *testing.T) {
 			t.Errorf("OpenAPI spec missing %q", check)
 		}
 	}
+
+	// GetChat is a GET method, so its InputType must NOT appear in the
+	// components section — no $ref targets it, emitting it would leave an
+	// orphan schema that tools (openapi-generator, Redocly) flag.
+	if strings.Contains(content, "\n    GetChatReq:\n") {
+		t.Error("GET-method input types must not be emitted as components")
+	}
 }
 
 func TestGenerateOpenAPIEnumWithXVarName(t *testing.T) {
@@ -462,7 +468,7 @@ func TestGenerateOpenAPIEnumWithXVarName(t *testing.T) {
 				Methods: []*parser.Method{
 					{
 						Name:       "Do",
-						HTTPMethod: "GET",
+						HTTPMethod: "POST",
 						HTTPPath:   "/do",
 						StreamType: parser.StreamUnary,
 						InputType: &parser.MessageType{
@@ -926,7 +932,8 @@ func TestGenerateOpenAPIRepeatedField(t *testing.T) {
 	}
 }
 
-func TestGenerateOpenAPIOneofComment(t *testing.T) {
+func TestGenerateOpenAPIOneof(t *testing.T) {
+	zero := int32(0)
 	api := &parser.ParsedAPI{
 		Services: []*parser.Service{
 			{
@@ -942,10 +949,17 @@ func TestGenerateOpenAPIOneofComment(t *testing.T) {
 							Name:     "Req",
 							FullName: ".svc.v1.Req",
 							Fields: []*parser.Field{
-								{Name: "text", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING, OneofIndex: new(int32)},
+								{Name: "text", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING, OneofIndex: &zero},
+								{Name: "code", Type: descriptorpb.FieldDescriptorProto_TYPE_INT32, OneofIndex: &zero},
 							},
 							OneofDecls: []*parser.OneofDecl{
-								{Name: "payload", Variants: []*parser.OneofVariant{{FieldName: "text"}}},
+								{
+									Name: "payload",
+									Variants: []*parser.OneofVariant{
+										{FieldName: "text"},
+										{FieldName: "code"},
+									},
+								},
 							},
 						},
 						OutputType: &parser.MessageType{
@@ -959,15 +973,85 @@ func TestGenerateOpenAPIOneofComment(t *testing.T) {
 	}
 
 	content := GenerateOpenAPI(api)
-	if !strings.Contains(content, "# oneof: payload") {
-		t.Error("expected oneof comment in OpenAPI schema")
+
+	// Variant fields must be listed as regular properties — current
+	// generator used to skip them, which left downstream codegen with a
+	// $ref-less discriminated union.
+	if !strings.Contains(content, "        text:\n          type: string\n") {
+		t.Errorf("expected oneof variant 'text' in properties:\n%s", content)
 	}
-	// A message whose only fields are oneof variants must not emit an
-	// empty `properties:` key — that parses as null and violates the JSON
-	// Schema requirement that properties be an object.
-	if strings.Contains(content, "properties:\n      # oneof") ||
-		strings.Contains(content, "properties:\n        # oneof") {
-		t.Error("oneof-only schema must not emit an empty properties: key")
+	if !strings.Contains(content, "        code:\n          type: integer\n") {
+		t.Errorf("expected oneof variant 'code' in properties:\n%s", content)
+	}
+
+	// Proper JSON Schema oneOf constraint: "exactly one of {text, code}".
+	if !strings.Contains(content, "      oneOf:\n") {
+		t.Errorf("expected oneOf block in schema:\n%s", content)
+	}
+	if !strings.Contains(content, "        - required:\n            - text\n") {
+		t.Errorf("expected required:[text] subschema under oneOf:\n%s", content)
+	}
+	if !strings.Contains(content, "        - required:\n            - code\n") {
+		t.Errorf("expected required:[code] subschema under oneOf:\n%s", content)
+	}
+
+	// Legacy "# oneof:" comment must be gone — it's a silent-downgrade
+	// sentinel for tools that used to parse the old output.
+	if strings.Contains(content, "# oneof:") {
+		t.Errorf("legacy # oneof comment must not appear:\n%s", content)
+	}
+}
+
+func TestGenerateOpenAPIMultipleOneof(t *testing.T) {
+	idx0 := int32(0)
+	idx1 := int32(1)
+	api := &parser.ParsedAPI{
+		Services: []*parser.Service{
+			{
+				Name:         "Svc",
+				ProtoPackage: "svc.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "Do",
+						HTTPMethod: "POST",
+						HTTPPath:   "/do",
+						StreamType: parser.StreamUnary,
+						InputType: &parser.MessageType{
+							Name:     "Req",
+							FullName: ".svc.v1.Req",
+							Fields: []*parser.Field{
+								{Name: "a", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING, OneofIndex: &idx0},
+								{Name: "b", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING, OneofIndex: &idx0},
+								{Name: "x", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING, OneofIndex: &idx1},
+								{Name: "y", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING, OneofIndex: &idx1},
+							},
+							OneofDecls: []*parser.OneofDecl{
+								{Name: "ab", Variants: []*parser.OneofVariant{{FieldName: "a"}, {FieldName: "b"}}},
+								{Name: "xy", Variants: []*parser.OneofVariant{{FieldName: "x"}, {FieldName: "y"}}},
+							},
+						},
+						OutputType: &parser.MessageType{Name: "Resp", FullName: ".svc.v1.Resp"},
+					},
+				},
+			},
+		},
+	}
+
+	content := GenerateOpenAPI(api)
+
+	// Multiple oneof decls can't share a single oneOf keyword — each lives
+	// in its own subschema under allOf so both are enforced independently.
+	if !strings.Contains(content, "      allOf:\n") {
+		t.Errorf("expected allOf wrapper for multi-oneof schema:\n%s", content)
+	}
+	if !strings.Contains(content, "        - oneOf:\n") {
+		t.Errorf("expected nested oneOf subschemas under allOf:\n%s", content)
+	}
+	if !strings.Contains(content, "            - required:\n                - a\n") {
+		t.Errorf("expected variant 'a' under nested oneOf:\n%s", content)
+	}
+	if !strings.Contains(content, "            - required:\n                - x\n") {
+		t.Errorf("expected variant 'x' under nested oneOf:\n%s", content)
 	}
 }
 
@@ -2711,5 +2795,171 @@ func TestParseOptions_EventsPkg(t *testing.T) {
 	}
 	if opts.EventsPkg != "example.com/gen/events" {
 		t.Errorf("EventsPkg: %q", opts.EventsPkg)
+	}
+}
+
+// TestGenerateOpenAPINestedSchemasBFS covers the reference graph walker:
+// nested messages reachable through Output types, well-known types rendered
+// inline, map<K,V> fields rendered as additionalProperties, and oneof
+// variants surfaced as real properties with a JSON Schema oneOf guard. The
+// old shallow generator would leave every non-seed schema undefined.
+func TestGenerateOpenAPINestedSchemasBFS(t *testing.T) {
+	zero := int32(0)
+	// Synthetic map entry message (proto3 map<string, Attachment>).
+	attachmentsEntry := &parser.MessageType{
+		Name:     "AttachmentsEntry",
+		FullName: ".svc.v1.Container.AttachmentsEntry",
+		MapEntry: true,
+		Fields: []*parser.Field{
+			{Name: "key", Number: 1, Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+			{Name: "value", Number: 2, Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".svc.v1.Attachment"},
+		},
+	}
+	attachment := &parser.MessageType{
+		Name:     "Attachment",
+		FullName: ".svc.v1.Attachment",
+		Fields: []*parser.Field{
+			{Name: "url", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+		},
+	}
+	// Oneof-bearing nested message — exercised to confirm BFS follows
+	// oneof variant $refs too.
+	fileRef := &parser.MessageType{
+		Name:     "FileRef",
+		FullName: ".svc.v1.FileRef",
+		Fields: []*parser.Field{
+			{Name: "path", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+		},
+	}
+	linkRef := &parser.MessageType{
+		Name:     "LinkRef",
+		FullName: ".svc.v1.LinkRef",
+		Fields: []*parser.Field{
+			{Name: "href", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+		},
+	}
+	container := &parser.MessageType{
+		Name:     "Container",
+		FullName: ".svc.v1.Container",
+		Fields: []*parser.Field{
+			// Regular nested message.
+			{Name: "attachment", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".svc.v1.Attachment"},
+			// Well-known: Timestamp (inline, no $ref).
+			{Name: "created_at", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".google.protobuf.Timestamp"},
+			// Well-known: StringValue (wrapper → string inline).
+			{Name: "nickname", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".google.protobuf.StringValue"},
+			// Well-known: Struct (object + additionalProperties: true).
+			{Name: "metadata", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".google.protobuf.Struct"},
+			// Map field — proto represents it as repeated MESSAGE of the
+			// synthetic Entry; generator must collapse to additionalProperties.
+			{Name: "attachments_by_key", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".svc.v1.Container.AttachmentsEntry", Repeated: true},
+			// Oneof variants.
+			{Name: "file", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".svc.v1.FileRef", OneofIndex: &zero},
+			{Name: "link", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".svc.v1.LinkRef", OneofIndex: &zero},
+		},
+		OneofDecls: []*parser.OneofDecl{
+			{
+				Name: "ref",
+				Variants: []*parser.OneofVariant{
+					{FieldName: "file", IsMessage: true, MessageName: "FileRef"},
+					{FieldName: "link", IsMessage: true, MessageName: "LinkRef"},
+				},
+			},
+		},
+	}
+
+	req := &parser.MessageType{Name: "GetReq", FullName: ".svc.v1.GetReq"}
+	resp := &parser.MessageType{
+		Name:     "GetResp",
+		FullName: ".svc.v1.GetResp",
+		Fields: []*parser.Field{
+			{Name: "item", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".svc.v1.Container"},
+		},
+	}
+
+	api := &parser.ParsedAPI{
+		Messages: map[string]*parser.MessageType{
+			container.FullName:        container,
+			attachment.FullName:       attachment,
+			attachmentsEntry.FullName: attachmentsEntry,
+			fileRef.FullName:          fileRef,
+			linkRef.FullName:          linkRef,
+			req.FullName:              req,
+			resp.FullName:             resp,
+		},
+		Services: []*parser.Service{
+			{
+				Name:         "Svc",
+				ProtoPackage: "svc.v1",
+				Methods: []*parser.Method{
+					{
+						Name:       "Get",
+						HTTPMethod: "GET",
+						HTTPPath:   "/items/{id}",
+						PathParams: []string{"id"},
+						StreamType: parser.StreamUnary,
+						InputType:  req,
+						OutputType: resp,
+					},
+				},
+			},
+		},
+	}
+
+	content := GenerateOpenAPI(api)
+
+	// Every transitively-reached message lands in components.schemas.
+	for _, name := range []string{"GetResp:", "Container:", "Attachment:", "FileRef:", "LinkRef:"} {
+		if !strings.Contains(content, "\n    "+name+"\n") {
+			t.Errorf("expected schema %q to be emitted:\n%s", name, content)
+		}
+	}
+
+	// GET method input never referenced → must be skipped.
+	if strings.Contains(content, "\n    GetReq:\n") {
+		t.Errorf("GET input type must not be emitted (no $ref targets it):\n%s", content)
+	}
+	// Map entry message is synthetic — never a components.schemas entry.
+	if strings.Contains(content, "\n    AttachmentsEntry:\n") {
+		t.Errorf("synthetic map entry must not be emitted as a schema:\n%s", content)
+	}
+
+	// Well-known types are inline, not references.
+	if strings.Contains(content, "#/components/schemas/Timestamp") {
+		t.Errorf("Timestamp must not be emitted via $ref:\n%s", content)
+	}
+	if !strings.Contains(content, "        created_at:\n          type: string\n          format: date-time\n") {
+		t.Errorf("expected Timestamp rendered as string/date-time:\n%s", content)
+	}
+	if !strings.Contains(content, "        nickname:\n          type: string\n") {
+		t.Errorf("expected StringValue wrapper as inline string:\n%s", content)
+	}
+	if !strings.Contains(content, "        metadata:\n          type: object\n          additionalProperties: true\n") {
+		t.Errorf("expected Struct as object+additionalProperties:true:\n%s", content)
+	}
+
+	// map<string, Attachment> becomes additionalProperties → $ref.
+	if !strings.Contains(content, "        attachments_by_key:\n          type: object\n          additionalProperties:\n            $ref: '#/components/schemas/Attachment'\n") {
+		t.Errorf("expected map field rendered as additionalProperties+$ref:\n%s", content)
+	}
+
+	// Oneof variant fields are real properties with $refs, plus a oneOf
+	// constraint at the schema level.
+	if !strings.Contains(content, "        file:\n          $ref: '#/components/schemas/FileRef'\n") {
+		t.Errorf("expected oneof variant 'file' as property with $ref:\n%s", content)
+	}
+	if !strings.Contains(content, "      oneOf:\n        - required:\n            - file\n        - required:\n            - link\n") {
+		t.Errorf("expected oneOf constraint for [file,link]:\n%s", content)
+	}
+
+	// Sanity: no unresolved $ref targets beyond what we expect.
+	for _, broken := range []string{
+		"#/components/schemas/AttachmentsEntry",
+		"#/components/schemas/Struct",
+		"#/components/schemas/StringValue",
+	} {
+		if strings.Contains(content, broken) {
+			t.Errorf("orphan $ref %q must not appear:\n%s", broken, content)
+		}
 	}
 }

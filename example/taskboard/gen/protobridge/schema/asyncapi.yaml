@@ -118,11 +118,19 @@ components:
           type: array
           items:
             type: string
+        file:
+          $ref: '#/components/schemas/FileAttachment'
+        link:
+          $ref: '#/components/schemas/LinkAttachment'
         created_by:
           type: string
         updated_by:
           type: string
-      # oneof: attachment
+      oneOf:
+        - required:
+            - file
+        - required:
+            - link
     BulkCreateTaskRequest:
       type: object
       properties:
