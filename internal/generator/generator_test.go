@@ -1735,38 +1735,6 @@ func TestGenerateAsyncAPITransitiveMessageRefs(t *testing.T) {
 	}
 }
 
-// --- findMessageTypeInAPI direct test ---
-
-func TestFindMessageTypeInAPI(t *testing.T) {
-	api := &parser.ParsedAPI{
-		Services: []*parser.Service{
-			{
-				Name: "Svc",
-				Methods: []*parser.Method{
-					{
-						Name:       "Do",
-						InputType:  &parser.MessageType{Name: "Req", FullName: ".svc.v1.Req"},
-						OutputType: &parser.MessageType{Name: "Resp", FullName: ".svc.v1.Resp"},
-					},
-				},
-			},
-		},
-	}
-
-	// Found as input type
-	if got := findMessageTypeInAPI(api, "Req"); got == nil || got.Name != "Req" {
-		t.Error("expected to find Req")
-	}
-	// Found as output type
-	if got := findMessageTypeInAPI(api, "Resp"); got == nil || got.Name != "Resp" {
-		t.Error("expected to find Resp")
-	}
-	// Not found
-	if got := findMessageTypeInAPI(api, "NotExist"); got != nil {
-		t.Error("expected nil for non-existent type")
-	}
-}
-
 // --- OpenAPI writeFieldType missing types ---
 
 func TestGenerateOpenAPIFieldTypes_AllTypes(t *testing.T) {
@@ -2347,7 +2315,7 @@ func TestCollectAsyncSchemasNilMessageType(t *testing.T) {
 	}
 
 	channels := []asyncChannel{{svc: api.Services[0], method: api.Services[0].Methods[0]}}
-	schemas := collectAsyncSchemas(channels, api)
+	schemas := collectAsyncSchemas(channels, buildMessageIndex(api))
 	// Should have Event but handle nil InputType gracefully
 	found := false
 	for _, s := range schemas {
@@ -2960,6 +2928,139 @@ func TestGenerateOpenAPINestedSchemasBFS(t *testing.T) {
 	} {
 		if strings.Contains(content, broken) {
 			t.Errorf("orphan $ref %q must not appear:\n%s", broken, content)
+		}
+	}
+}
+
+// TestGenerateOpenAPICrossPackageNameCollision exercises the schema-ID
+// disambiguation. When two messages share a short Name but live in
+// different proto packages, both must end up in components.schemas under
+// unique keys derived from their FullName — and every $ref targeting one
+// must resolve to that exact key, not the other message with the same
+// short name.
+func TestGenerateOpenAPICrossPackageNameCollision(t *testing.T) {
+	// Two distinct "Task" messages in different packages. The first is
+	// returned by service alpha, the second by service beta.
+	alphaTask := &parser.MessageType{
+		Name:     "Task",
+		FullName: ".alpha.v1.Task",
+		Fields: []*parser.Field{
+			{Name: "alpha_id", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+		},
+	}
+	betaTask := &parser.MessageType{
+		Name:     "Task",
+		FullName: ".beta.v1.Task",
+		Fields: []*parser.Field{
+			{Name: "beta_id", Type: descriptorpb.FieldDescriptorProto_TYPE_STRING},
+		},
+	}
+	// A wrapper in the alpha package that references alphaTask by FQN —
+	// the $ref must land on the alpha-qualified key, not the beta one.
+	alphaWrap := &parser.MessageType{
+		Name:     "Wrap",
+		FullName: ".alpha.v1.Wrap",
+		Fields: []*parser.Field{
+			{Name: "task", Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE, TypeName: ".alpha.v1.Task"},
+		},
+	}
+
+	api := &parser.ParsedAPI{
+		Messages: map[string]*parser.MessageType{
+			alphaTask.FullName: alphaTask,
+			betaTask.FullName:  betaTask,
+			alphaWrap.FullName: alphaWrap,
+		},
+		Services: []*parser.Service{
+			{
+				Name: "AlphaSvc", ProtoPackage: "alpha.v1",
+				Methods: []*parser.Method{
+					{
+						Name: "Get", HTTPMethod: "GET", HTTPPath: "/alpha",
+						StreamType: parser.StreamUnary,
+						InputType:  &parser.MessageType{Name: "GetReq", FullName: ".alpha.v1.GetReq"},
+						OutputType: alphaWrap,
+					},
+				},
+			},
+			{
+				Name: "BetaSvc", ProtoPackage: "beta.v1",
+				Methods: []*parser.Method{
+					{
+						Name: "Get", HTTPMethod: "GET", HTTPPath: "/beta",
+						StreamType: parser.StreamUnary,
+						InputType:  &parser.MessageType{Name: "GetReq", FullName: ".beta.v1.GetReq"},
+						OutputType: betaTask,
+					},
+				},
+			},
+		},
+	}
+
+	content := GenerateOpenAPI(api)
+
+	// Both Task messages must be emitted, under disambiguated keys.
+	if !strings.Contains(content, "\n    AlphaV1Task:\n") {
+		t.Errorf("expected AlphaV1Task component key (PascalCase FQN):\n%s", content)
+	}
+	if !strings.Contains(content, "\n    BetaV1Task:\n") {
+		t.Errorf("expected BetaV1Task component key (PascalCase FQN):\n%s", content)
+	}
+	// The unqualified "Task:" must NOT appear as a component key — it
+	// would silently shadow whichever of the two happened to be emitted
+	// last.
+	if strings.Contains(content, "\n    Task:\n") {
+		t.Errorf("unqualified Task component key must not appear under collision:\n%s", content)
+	}
+
+	// Wrap is unique (only one message named Wrap is emitted), so its ID
+	// stays as the short "Wrap" — disambiguation only kicks in on actual
+	// collisions. AlphaSvc returns Wrap; its response $ref must match.
+	if !strings.Contains(content, "$ref: '#/components/schemas/Wrap'") {
+		t.Errorf("AlphaSvc response should $ref Wrap (unique short name):\n%s", content)
+	}
+
+	// BetaSvc.Get returns betaTask directly → response $ref must land on
+	// BetaV1Task, not on AlphaV1Task.
+	betaGetIdx := strings.Index(content, "/beta:\n")
+	alphaGetIdx := strings.Index(content, "/alpha:\n")
+	if betaGetIdx < 0 || alphaGetIdx < 0 {
+		t.Fatalf("expected both /alpha and /beta paths:\n%s", content)
+	}
+	boundary := strings.Index(content, "components:")
+	betaSlice := content[betaGetIdx:boundary]
+	if !strings.Contains(betaSlice, "$ref: '#/components/schemas/BetaV1Task'") {
+		t.Errorf("beta response $ref should resolve to BetaV1Task:\n%s", betaSlice)
+	}
+	if strings.Contains(betaSlice, "$ref: '#/components/schemas/AlphaV1Task'") {
+		t.Errorf("beta response must not point at AlphaV1Task:\n%s", betaSlice)
+	}
+
+	// Wrap.task.TypeName=.alpha.v1.Task → $ref must resolve to AlphaV1Task
+	// (the correct disambiguated ID), not collapse to "Task" or point at
+	// BetaV1Task.
+	wrapIdx := strings.Index(content, "\n    Wrap:\n")
+	if wrapIdx < 0 {
+		t.Fatalf("expected Wrap schema in output:\n%s", content)
+	}
+	wrapSlice := content[wrapIdx:]
+	if !strings.Contains(wrapSlice, "$ref: '#/components/schemas/AlphaV1Task'") {
+		t.Errorf("Wrap.task $ref should resolve to AlphaV1Task (same package as Wrap):\n%s", wrapSlice)
+	}
+}
+
+func TestQualifiedID(t *testing.T) {
+	cases := map[string]string{
+		".taskboard.v1.Task":                    "TaskboardV1Task",
+		".alpha.v1.Task":                        "AlphaV1Task",
+		".foo.bar.Baz.Qux":                      "FooBarBazQux",
+		".Task":                                 "Task",       // no package
+		"":                                      "",           // degenerate
+		".taskboard.v1.Container.AttachmentEntry": "TaskboardV1ContainerAttachmentEntry",
+	}
+	for fqn, want := range cases {
+		if got := qualifiedID(fqn); got != want {
+			t.Errorf("qualifiedID(%q) = %q, want %q", fqn, got, want)
 		}
 	}
 }

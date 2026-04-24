@@ -11,6 +11,13 @@ import (
 
 // GenerateAsyncAPI produces an AsyncAPI 3.0 YAML spec for all streaming RPCs.
 // Returns empty string if there are no streaming endpoints.
+//
+// Schema IDs are computed the same way as in GenerateOpenAPI: short name
+// when unique across the emitted set, PascalCase-qualified FQN when two
+// messages share a short name across proto packages. Message IDs under
+// components.messages match the schema IDs, so `$ref: '#/components/
+// messages/<id>'` and `$ref: '#/components/schemas/<id>'` are always
+// consistent for the same type.
 func GenerateAsyncAPI(api *parser.ParsedAPI) string {
 	var channels []asyncChannel
 	for _, svc := range api.Services {
@@ -29,6 +36,10 @@ func GenerateAsyncAPI(api *parser.ParsedAPI) string {
 		return ""
 	}
 
+	index := buildMessageIndex(api)
+	schemas := collectAsyncSchemas(channels, index)
+	ids := buildSchemaIDs(schemas)
+
 	var b strings.Builder
 
 	b.WriteString("asyncapi: '3.0.0'\n")
@@ -46,7 +57,7 @@ func GenerateAsyncAPI(api *parser.ParsedAPI) string {
 	// Channels – messages reference #/components/messages/*
 	b.WriteString("channels:\n")
 	for _, ch := range channels {
-		writeAsyncChannel(&b, ch)
+		writeAsyncChannel(&b, ch, ids)
 	}
 
 	// Operations
@@ -58,29 +69,23 @@ func GenerateAsyncAPI(api *parser.ParsedAPI) string {
 	// Components
 	b.WriteString("components:\n")
 
-	// Messages – each wraps a schema via payload.$ref
+	// Messages – each wraps a schema via payload.$ref. The set mirrors the
+	// top-level channel message types (inputs for client/bidi, outputs for
+	// server/bidi), deduplicated on FullName so two same-named messages
+	// from different proto packages stay distinct.
 	messages := collectAsyncMessages(channels)
 	b.WriteString("  messages:\n")
-	for _, name := range messages {
-		fmt.Fprintf(&b, "    %s:\n", name)
+	for _, mt := range messages {
+		id := schemaRefForType(mt, ids)
+		fmt.Fprintf(&b, "    %s:\n", id)
 		fmt.Fprintf(&b, "      payload:\n")
-		fmt.Fprintf(&b, "        $ref: '#/components/schemas/%s'\n", name)
+		fmt.Fprintf(&b, "        $ref: '#/components/schemas/%s'\n", id)
 	}
 
 	// Schemas – include all referenced types transitively
-	schemas := collectAsyncSchemas(channels, api)
 	b.WriteString("  schemas:\n")
-	index := api.Messages
-	if len(index) == 0 {
-		index = make(map[string]*parser.MessageType)
-		for _, mt := range schemas {
-			if mt.FullName != "" {
-				index[mt.FullName] = mt
-			}
-		}
-	}
 	for _, mt := range schemas {
-		writeSchema(&b, mt, index)
+		writeSchema(&b, mt, index, ids)
 	}
 
 	return b.String()
@@ -95,7 +100,7 @@ func asyncChannelID(svc *parser.Service, m *parser.Method) string {
 	return toLowerCamel(svc.Name) + toPascalCase(m.Name)
 }
 
-func writeAsyncChannel(b *strings.Builder, ch asyncChannel) {
+func writeAsyncChannel(b *strings.Builder, ch asyncChannel, ids map[string]string) {
 	id := asyncChannelID(ch.svc, ch.method)
 	m := ch.method
 
@@ -104,14 +109,16 @@ func writeAsyncChannel(b *strings.Builder, ch asyncChannel) {
 	fmt.Fprintf(b, "    description: '%s.%s (%s)'\n", ch.svc.Name, m.Name, streamLabel(m.StreamType))
 	fmt.Fprintf(b, "    messages:\n")
 
-	// Collect unique message names for this channel.
+	// Collect the unique set of message types for this channel, keyed on
+	// FullName so cross-package same-named messages don't collapse.
 	seen := make(map[string]bool)
-	var names []string
+	var types []*parser.MessageType
 	addMsg := func(mt *parser.MessageType) {
-		if mt != nil && !seen[mt.Name] {
-			seen[mt.Name] = true
-			names = append(names, mt.Name)
+		if mt == nil || mt.FullName == "" || seen[mt.FullName] {
+			return
 		}
+		seen[mt.FullName] = true
+		types = append(types, mt)
 	}
 
 	switch m.StreamType {
@@ -124,9 +131,10 @@ func writeAsyncChannel(b *strings.Builder, ch asyncChannel) {
 		addMsg(m.OutputType)
 	}
 
-	for _, name := range names {
-		fmt.Fprintf(b, "      %s:\n", name)
-		fmt.Fprintf(b, "        $ref: '#/components/messages/%s'\n", name)
+	for _, mt := range types {
+		id := schemaRefForType(mt, ids)
+		fmt.Fprintf(b, "      %s:\n", id)
+		fmt.Fprintf(b, "        $ref: '#/components/messages/%s'\n", id)
 	}
 }
 
@@ -161,15 +169,17 @@ func writeAsyncOperation(b *strings.Builder, ch asyncChannel) {
 	}
 }
 
-// collectAsyncMessages returns deduplicated message type names used in channels.
-func collectAsyncMessages(channels []asyncChannel) []string {
+// collectAsyncMessages returns deduplicated top-level channel messages.
+// Dedup key is FullName so cross-package same-named messages stay distinct.
+func collectAsyncMessages(channels []asyncChannel) []*parser.MessageType {
 	seen := make(map[string]bool)
-	var names []string
+	var out []*parser.MessageType
 	add := func(mt *parser.MessageType) {
-		if mt != nil && !seen[mt.Name] {
-			seen[mt.Name] = true
-			names = append(names, mt.Name)
+		if mt == nil || mt.FullName == "" || seen[mt.FullName] {
+			return
 		}
+		seen[mt.FullName] = true
+		out = append(out, mt)
 	}
 	for _, ch := range channels {
 		m := ch.method
@@ -183,55 +193,69 @@ func collectAsyncMessages(channels []asyncChannel) []string {
 			add(m.OutputType)
 		}
 	}
-	return names
+	return out
 }
 
-// collectAsyncSchemas returns all MessageTypes needed for schemas, including
-// types referenced transitively by message fields (e.g. TaskEvent → Task).
-func collectAsyncSchemas(channels []asyncChannel, api *parser.ParsedAPI) []*parser.MessageType {
+// collectAsyncSchemas returns every MessageType reachable from channel
+// input/output types, in BFS discovery order. WKTs and map entries are
+// skipped (rendered inline / collapsed to additionalProperties downstream).
+// Follows MESSAGE field targets through the FQN index so cross-package
+// messages with duplicate short names stay distinct.
+func collectAsyncSchemas(channels []asyncChannel, index map[string]*parser.MessageType) []*parser.MessageType {
 	seen := make(map[string]bool)
-	var result []*parser.MessageType
+	var out []*parser.MessageType
+	var queue []*parser.MessageType
 
-	var enqueue func(mt *parser.MessageType)
-	enqueue = func(mt *parser.MessageType) {
-		if mt == nil || seen[mt.Name] {
+	enqueue := func(mt *parser.MessageType) {
+		if mt == nil || mt.FullName == "" {
 			return
 		}
-		seen[mt.Name] = true
-		result = append(result, mt)
-		// Follow message-typed fields to collect transitive deps.
-		for _, f := range mt.Fields {
-			if f.Type == descriptorpb.FieldDescriptorProto_TYPE_MESSAGE && f.TypeName != "" {
-				parts := strings.Split(f.TypeName, ".")
-				refName := parts[len(parts)-1]
-				if ref := findMessageTypeInAPI(api, refName); ref != nil {
-					enqueue(ref)
-				}
-			}
+		if isWellKnown(mt.FullName) || mt.MapEntry {
+			return
 		}
+		if seen[mt.FullName] {
+			return
+		}
+		seen[mt.FullName] = true
+		queue = append(queue, mt)
 	}
 
 	for _, ch := range channels {
 		enqueue(ch.method.InputType)
 		enqueue(ch.method.OutputType)
 	}
-	return result
-}
 
-// findMessageTypeInAPI searches all services' input/output types for a
-// MessageType with the given unqualified name.
-func findMessageTypeInAPI(api *parser.ParsedAPI, name string) *parser.MessageType {
-	for _, svc := range api.Services {
-		for _, m := range svc.Methods {
-			if m.InputType != nil && m.InputType.Name == name {
-				return m.InputType
+	for len(queue) > 0 {
+		mt := queue[0]
+		queue = queue[1:]
+		out = append(out, mt)
+		for _, f := range mt.Fields {
+			if f.Type != descriptorpb.FieldDescriptorProto_TYPE_MESSAGE || f.TypeName == "" {
+				continue
 			}
-			if m.OutputType != nil && m.OutputType.Name == name {
-				return m.OutputType
+			if isWellKnown(f.TypeName) {
+				continue
 			}
+			target, ok := index[f.TypeName]
+			if !ok {
+				continue
+			}
+			if target.MapEntry {
+				// Follow into value-field target instead of emitting the
+				// synthetic entry message.
+				for _, vf := range target.Fields {
+					if vf.Number == 2 && vf.Type == descriptorpb.FieldDescriptorProto_TYPE_MESSAGE && !isWellKnown(vf.TypeName) {
+						if next, ok := index[vf.TypeName]; ok {
+							enqueue(next)
+						}
+					}
+				}
+				continue
+			}
+			enqueue(target)
 		}
 	}
-	return nil
+	return out
 }
 
 func streamLabel(st parser.StreamType) string {

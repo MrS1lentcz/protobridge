@@ -90,6 +90,37 @@ components:
           type: string
         task:
           $ref: '#/components/schemas/Task'
+    BulkCreateTaskRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum:
+            - low
+            - medium
+            - high
+            - critical
+    BulkCreateTaskResponse:
+      type: object
+      properties:
+        created_count:
+          type: integer
+          format: int32
+        ids:
+          type: array
+          items:
+            type: string
+    ChatMessage:
+      type: object
+      properties:
+        content:
+          type: string
+        sender:
+          type: string
     Task:
       type: object
       properties:
@@ -131,34 +162,20 @@ components:
             - file
         - required:
             - link
-    BulkCreateTaskRequest:
+    FileAttachment:
       type: object
       properties:
-        title:
+        filename:
           type: string
-        description:
-          type: string
-        priority:
-          type: string
-          enum:
-            - low
-            - medium
-            - high
-            - critical
-    BulkCreateTaskResponse:
-      type: object
-      properties:
-        created_count:
+        size_bytes:
           type: integer
-          format: int32
-        ids:
-          type: array
-          items:
-            type: string
-    ChatMessage:
+          format: int64
+        mime_type:
+          type: string
+    LinkAttachment:
       type: object
       properties:
-        content:
+        url:
           type: string
-        sender:
+        title:
           type: string

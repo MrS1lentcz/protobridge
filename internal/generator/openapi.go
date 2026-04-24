@@ -3,6 +3,7 @@ package generator
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"google.golang.org/protobuf/types/descriptorpb"
 
@@ -21,7 +22,16 @@ import (
 // fields render as object+additionalProperties; proto oneof renders with
 // a JSON Schema oneOf constraint so consumers see the discriminated union
 // rather than a lossy comment.
+//
+// Component keys are derived from each message's FullName: short name when
+// unique across the emitted set, PascalCase-qualified when two messages
+// share a short name across proto packages (otherwise the YAML would have
+// duplicate keys and $refs would resolve ambiguously).
 func GenerateOpenAPI(api *parser.ParsedAPI) string {
+	index := buildMessageIndex(api)
+	emitted := collectOpenAPISchemas(api, index)
+	ids := buildSchemaIDs(emitted)
+
 	var b strings.Builder
 
 	b.WriteString("openapi: '3.1.0'\n")
@@ -51,33 +61,50 @@ func GenerateOpenAPI(api *parser.ParsedAPI) string {
 	for _, path := range pathOrder {
 		fmt.Fprintf(&b, "  %s:\n", path)
 		for _, pm := range pathGroups[path] {
-			writePathMethod(&b, pm.svc, pm.method)
+			writePathMethod(&b, pm.svc, pm.method, ids)
 		}
 	}
 
 	b.WriteString("components:\n")
 	b.WriteString("  schemas:\n")
+	for _, mt := range emitted {
+		writeSchema(&b, mt, index, ids)
+	}
 
-	// Prefer the parser-built FQN index; fall back to harvesting the
-	// method Input/Output pointers when tests construct ParsedAPI without
-	// it (real runs always populate api.Messages).
-	index := api.Messages
-	if len(index) == 0 {
-		index = make(map[string]*parser.MessageType)
-		for _, svc := range api.Services {
-			for _, m := range svc.Methods {
-				if m.InputType != nil && m.InputType.FullName != "" {
-					index[m.InputType.FullName] = m.InputType
-				}
-				if m.OutputType != nil && m.OutputType.FullName != "" {
-					index[m.OutputType.FullName] = m.OutputType
-				}
+	return b.String()
+}
+
+// buildMessageIndex returns a FQN → MessageType map. Prefers the parser-
+// built api.Messages; falls back to harvesting RPC Input/Output pointers
+// when tests construct ParsedAPI without the index.
+func buildMessageIndex(api *parser.ParsedAPI) map[string]*parser.MessageType {
+	if len(api.Messages) > 0 {
+		return api.Messages
+	}
+	index := make(map[string]*parser.MessageType)
+	for _, svc := range api.Services {
+		for _, m := range svc.Methods {
+			if m.InputType != nil && m.InputType.FullName != "" {
+				index[m.InputType.FullName] = m.InputType
+			}
+			if m.OutputType != nil && m.OutputType.FullName != "" {
+				index[m.OutputType.FullName] = m.OutputType
 			}
 		}
 	}
+	return index
+}
 
-	written := make(map[string]bool)
+// collectOpenAPISchemas returns every MessageType that must appear in
+// components.schemas, in BFS discovery order. Seeds: OutputType of every
+// unary HTTP method, plus InputType when the method carries a body
+// (POST/PUT/PATCH) — GET/DELETE inputs are never $ref'd. Expansion follows
+// MESSAGE-typed fields through the index, skipping WKTs and map entries.
+func collectOpenAPISchemas(api *parser.ParsedAPI, index map[string]*parser.MessageType) []*parser.MessageType {
+	seen := make(map[string]bool)
+	var out []*parser.MessageType
 	var queue []*parser.MessageType
+
 	enqueue := func(mt *parser.MessageType) {
 		if mt == nil || mt.FullName == "" {
 			return
@@ -85,10 +112,10 @@ func GenerateOpenAPI(api *parser.ParsedAPI) string {
 		if isWellKnown(mt.FullName) || mt.MapEntry {
 			return
 		}
-		if written[mt.FullName] {
+		if seen[mt.FullName] {
 			return
 		}
-		written[mt.FullName] = true
+		seen[mt.FullName] = true
 		queue = append(queue, mt)
 	}
 
@@ -107,13 +134,12 @@ func GenerateOpenAPI(api *parser.ParsedAPI) string {
 	for len(queue) > 0 {
 		mt := queue[0]
 		queue = queue[1:]
-		writeSchema(&b, mt, index)
+		out = append(out, mt)
 		for _, f := range mt.Fields {
 			walkFieldTargets(f, index, enqueue)
 		}
 	}
-
-	return b.String()
+	return out
 }
 
 func hasRequestBody(httpMethod string) bool {
@@ -146,7 +172,74 @@ func walkFieldTargets(f *parser.Field, index map[string]*parser.MessageType, enq
 	enqueue(target)
 }
 
-func writePathMethod(b *strings.Builder, svc *parser.Service, m *parser.Method) {
+// buildSchemaIDs assigns a stable component-key ID to each emitted
+// MessageType. Short name wins when unique across the emitted set;
+// collisions (same short name in different proto packages) fall back to a
+// PascalCase concatenation of the FQN so every ID stays globally unique.
+// Keyed by FullName so callers can look up the ID from any MessageType
+// pointer or TypeName reference.
+func buildSchemaIDs(emitted []*parser.MessageType) map[string]string {
+	byShort := make(map[string]int, len(emitted))
+	for _, mt := range emitted {
+		byShort[mt.Name]++
+	}
+	ids := make(map[string]string, len(emitted))
+	for _, mt := range emitted {
+		if byShort[mt.Name] > 1 {
+			ids[mt.FullName] = qualifiedID(mt.FullName)
+		} else {
+			ids[mt.FullName] = mt.Name
+		}
+	}
+	return ids
+}
+
+// qualifiedID turns a proto FQN into a unique PascalCase identifier safe
+// for OpenAPI component keys and downstream codegen (no dots, no dashes).
+// ".taskboard.v1.Task" → "TaskboardV1Task".
+func qualifiedID(fqn string) string {
+	parts := strings.Split(strings.TrimPrefix(fqn, "."), ".")
+	var b strings.Builder
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		r := []rune(p)
+		r[0] = unicode.ToUpper(r[0])
+		b.WriteString(string(r))
+	}
+	return b.String()
+}
+
+// schemaRef resolves a proto TypeName to the OpenAPI component key that
+// was assigned during buildSchemaIDs. Falls back to the unqualified tail
+// of TypeName when the target isn't in the index — that preserves the
+// previous shallow behavior for tests that build synthetic ParsedAPIs
+// without populating Messages, while real runs always hit the indexed path.
+func schemaRef(typeName string, index map[string]*parser.MessageType, ids map[string]string) string {
+	if target, ok := index[typeName]; ok {
+		if id, ok := ids[target.FullName]; ok {
+			return id
+		}
+		return target.Name
+	}
+	return lastSegment(typeName)
+}
+
+// schemaRefForType is the MessageType-pointer variant of schemaRef, for
+// callers holding a concrete InputType/OutputType rather than a TypeName
+// string.
+func schemaRefForType(mt *parser.MessageType, ids map[string]string) string {
+	if mt == nil {
+		return ""
+	}
+	if id, ok := ids[mt.FullName]; ok {
+		return id
+	}
+	return mt.Name
+}
+
+func writePathMethod(b *strings.Builder, svc *parser.Service, m *parser.Method, ids map[string]string) {
 	method := strings.ToLower(m.HTTPMethod)
 
 	fmt.Fprintf(b, "    %s:\n", method)
@@ -201,7 +294,7 @@ func writePathMethod(b *strings.Builder, svc *parser.Service, m *parser.Method) 
 		fmt.Fprintf(b, "          application/json:\n")
 		fmt.Fprintf(b, "            schema:\n")
 		if m.InputType != nil {
-			fmt.Fprintf(b, "              $ref: '#/components/schemas/%s'\n", m.InputType.Name)
+			fmt.Fprintf(b, "              $ref: '#/components/schemas/%s'\n", schemaRefForType(m.InputType, ids))
 		}
 	}
 
@@ -213,7 +306,7 @@ func writePathMethod(b *strings.Builder, svc *parser.Service, m *parser.Method) 
 	fmt.Fprintf(b, "            application/json:\n")
 	fmt.Fprintf(b, "              schema:\n")
 	if m.OutputType != nil {
-		fmt.Fprintf(b, "                $ref: '#/components/schemas/%s'\n", m.OutputType.Name)
+		fmt.Fprintf(b, "                $ref: '#/components/schemas/%s'\n", schemaRefForType(m.OutputType, ids))
 	}
 	fmt.Fprintf(b, "        '400':\n")
 	fmt.Fprintf(b, "          description: Bad Request\n")
@@ -223,8 +316,8 @@ func writePathMethod(b *strings.Builder, svc *parser.Service, m *parser.Method) 
 	fmt.Fprintf(b, "          description: Validation Error\n")
 }
 
-func writeSchema(b *strings.Builder, mt *parser.MessageType, index map[string]*parser.MessageType) {
-	fmt.Fprintf(b, "    %s:\n", mt.Name)
+func writeSchema(b *strings.Builder, mt *parser.MessageType, index map[string]*parser.MessageType, ids map[string]string) {
+	fmt.Fprintf(b, "    %s:\n", schemaRefForType(mt, ids))
 	fmt.Fprintf(b, "      type: object\n")
 
 	// required[] only carries non-oneof fields — oneof "exactly one"
@@ -248,7 +341,7 @@ func writeSchema(b *strings.Builder, mt *parser.MessageType, index map[string]*p
 		fmt.Fprintf(b, "      properties:\n")
 		for _, f := range mt.Fields {
 			fmt.Fprintf(b, "        %s:\n", f.Name)
-			writeFieldType(b, f, "          ", index)
+			writeFieldType(b, f, "          ", index, ids)
 		}
 	}
 
@@ -285,13 +378,13 @@ func writeOneOfBlock(b *strings.Builder, od *parser.OneofDecl, indent string) {
 	}
 }
 
-func writeFieldType(b *strings.Builder, f *parser.Field, indent string, index map[string]*parser.MessageType) {
+func writeFieldType(b *strings.Builder, f *parser.Field, indent string, index map[string]*parser.MessageType, ids map[string]string) {
 	// Map fields are wire-level a repeated MESSAGE of a synthetic *Entry;
 	// short-circuit to additionalProperties before the Repeated branch
 	// turns them into an array of entries.
 	if f.Type == descriptorpb.FieldDescriptorProto_TYPE_MESSAGE {
 		if entry, ok := index[f.TypeName]; ok && entry.MapEntry {
-			writeMapField(b, entry, indent, index)
+			writeMapField(b, entry, indent, index, ids)
 			return
 		}
 	}
@@ -350,13 +443,13 @@ func writeFieldType(b *strings.Builder, f *parser.Field, indent string, index ma
 		if writeWellKnownInline(b, f.TypeName, indent) {
 			return
 		}
-		fmt.Fprintf(b, "%s$ref: '#/components/schemas/%s'\n", indent, lastSegment(f.TypeName))
+		fmt.Fprintf(b, "%s$ref: '#/components/schemas/%s'\n", indent, schemaRef(f.TypeName, index, ids))
 	default:
 		fmt.Fprintf(b, "%stype: string\n", indent)
 	}
 }
 
-func writeMapField(b *strings.Builder, entry *parser.MessageType, indent string, index map[string]*parser.MessageType) {
+func writeMapField(b *strings.Builder, entry *parser.MessageType, indent string, index map[string]*parser.MessageType, ids map[string]string) {
 	fmt.Fprintf(b, "%stype: object\n", indent)
 	fmt.Fprintf(b, "%sadditionalProperties:\n", indent)
 
@@ -379,7 +472,7 @@ func writeMapField(b *strings.Builder, entry *parser.MessageType, indent string,
 	// simple if the parser ever changes.
 	vf := *value
 	vf.Repeated = false
-	writeFieldType(b, &vf, indent+"  ", index)
+	writeFieldType(b, &vf, indent+"  ", index, ids)
 }
 
 // isWellKnown reports whether typeName is a google.protobuf.* type that
