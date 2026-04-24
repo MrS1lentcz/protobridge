@@ -239,6 +239,22 @@ func schemaRefForType(mt *parser.MessageType, ids map[string]string) string {
 	return mt.Name
 }
 
+// writeMessageSchemaRef emits the schema for a top-level RPC input/output
+// message at the given indent. Well-known types render inline (same
+// mapping as field-position WKTs) because the BFS collector deliberately
+// skips them — emitting a $ref: '#/components/schemas/Empty' here would
+// leave the reference unresolvable downstream. Non-WKT messages get a
+// $ref pointing at the component key assigned by buildSchemaIDs.
+func writeMessageSchemaRef(b *strings.Builder, mt *parser.MessageType, indent string, ids map[string]string) {
+	if mt == nil {
+		return
+	}
+	if writeWellKnownInline(b, mt.FullName, indent) {
+		return
+	}
+	fmt.Fprintf(b, "%s$ref: '#/components/schemas/%s'\n", indent, schemaRefForType(mt, ids))
+}
+
 func writePathMethod(b *strings.Builder, svc *parser.Service, m *parser.Method, ids map[string]string) {
 	method := strings.ToLower(m.HTTPMethod)
 
@@ -287,15 +303,13 @@ func writePathMethod(b *strings.Builder, svc *parser.Service, m *parser.Method, 
 	}
 
 	// Request body
-	if hasRequestBody(m.HTTPMethod) {
+	if hasRequestBody(m.HTTPMethod) && m.InputType != nil {
 		fmt.Fprintf(b, "      requestBody:\n")
 		fmt.Fprintf(b, "        required: true\n")
 		fmt.Fprintf(b, "        content:\n")
 		fmt.Fprintf(b, "          application/json:\n")
 		fmt.Fprintf(b, "            schema:\n")
-		if m.InputType != nil {
-			fmt.Fprintf(b, "              $ref: '#/components/schemas/%s'\n", schemaRefForType(m.InputType, ids))
-		}
+		writeMessageSchemaRef(b, m.InputType, "              ", ids)
 	}
 
 	// Response
@@ -306,7 +320,7 @@ func writePathMethod(b *strings.Builder, svc *parser.Service, m *parser.Method, 
 	fmt.Fprintf(b, "            application/json:\n")
 	fmt.Fprintf(b, "              schema:\n")
 	if m.OutputType != nil {
-		fmt.Fprintf(b, "                $ref: '#/components/schemas/%s'\n", schemaRefForType(m.OutputType, ids))
+		writeMessageSchemaRef(b, m.OutputType, "                ", ids)
 	}
 	fmt.Fprintf(b, "        '400':\n")
 	fmt.Fprintf(b, "          description: Bad Request\n")

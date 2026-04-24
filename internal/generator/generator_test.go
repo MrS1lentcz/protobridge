@@ -3064,3 +3064,97 @@ func TestQualifiedID(t *testing.T) {
 		}
 	}
 }
+
+// TestGenerateOpenAPIWellKnownAsRPCType covers RPCs whose input or output
+// is a google.protobuf.* WKT. The BFS collector intentionally skips WKTs
+// from components.schemas (they render inline at field sites), so path-
+// level schema slots must also inline them — otherwise the emitted
+// $ref: '#/components/schemas/Empty' resolves to nothing and downstream
+// tooling (Spectral, openapi-generator, Redocly) rejects the spec.
+func TestGenerateOpenAPIWellKnownAsRPCType(t *testing.T) {
+	empty := &parser.MessageType{Name: "Empty", FullName: ".google.protobuf.Empty"}
+	timestamp := &parser.MessageType{Name: "Timestamp", FullName: ".google.protobuf.Timestamp"}
+	api := &parser.ParsedAPI{
+		Messages: map[string]*parser.MessageType{
+			empty.FullName:     empty,
+			timestamp.FullName: timestamp,
+		},
+		Services: []*parser.Service{
+			{
+				Name:         "PingService",
+				ProtoPackage: "repro.v1",
+				DisplayName:  "Ping",
+				Methods: []*parser.Method{
+					{
+						// POST — body + response both Empty: the symmetric
+						// dead-$ref case the bug report reproduces.
+						Name:       "Ping",
+						HTTPMethod: "POST",
+						HTTPPath:   "/ping",
+						StreamType: parser.StreamUnary,
+						InputType:  empty,
+						OutputType: empty,
+					},
+					{
+						// GET — no requestBody, but response is a WKT
+						// wrapper; the response slot used to dead-ref too.
+						Name:       "Now",
+						HTTPMethod: "GET",
+						HTTPPath:   "/now",
+						StreamType: parser.StreamUnary,
+						InputType:  empty,
+						OutputType: timestamp,
+					},
+				},
+			},
+		},
+	}
+
+	content := GenerateOpenAPI(api)
+
+	// No $ref should target a WKT short name — those are rendered inline
+	// at field sites and must be inlined at path sites too.
+	for _, orphan := range []string{
+		"$ref: '#/components/schemas/Empty'",
+		"$ref: '#/components/schemas/Timestamp'",
+	} {
+		if strings.Contains(content, orphan) {
+			t.Errorf("WKT used as RPC type must not emit a $ref (%q):\n%s", orphan, content)
+		}
+	}
+
+	// components.schemas must stay empty (no WKT leaked in) and no other
+	// schema should exist either — both RPCs use only WKTs.
+	componentsIdx := strings.Index(content, "components:\n  schemas:\n")
+	if componentsIdx < 0 {
+		t.Fatalf("expected components.schemas header in output:\n%s", content)
+	}
+	tail := content[componentsIdx+len("components:\n  schemas:\n"):]
+	if strings.TrimSpace(tail) != "" {
+		t.Errorf("components.schemas should be empty when every RPC uses only WKTs; got:\n%q", tail)
+	}
+
+	// Ping's POST body and 200 response inline Empty as type: object.
+	pingIdx := strings.Index(content, "/ping:")
+	nowIdx := strings.Index(content, "/now:")
+	if pingIdx < 0 || nowIdx < 0 {
+		t.Fatalf("expected /ping and /now paths:\n%s", content)
+	}
+	pingSlice := content[pingIdx:nowIdx]
+	if !strings.Contains(pingSlice, "            schema:\n              type: object\n") {
+		t.Errorf("expected Empty-as-requestBody rendered inline (type: object):\n%s", pingSlice)
+	}
+	// The response schema slot is one indent level deeper.
+	if !strings.Contains(pingSlice, "              schema:\n                type: object\n") {
+		t.Errorf("expected Empty-as-response rendered inline (type: object):\n%s", pingSlice)
+	}
+
+	// Now's 200 response inlines Timestamp with date-time format.
+	nowSlice := content[nowIdx:]
+	if i := strings.Index(nowSlice, "components:"); i > 0 {
+		nowSlice = nowSlice[:i]
+	}
+	if !strings.Contains(nowSlice, "              schema:\n                type: string\n                format: date-time\n") {
+		t.Errorf("expected Timestamp response rendered inline (type: string, format: date-time):\n%s", nowSlice)
+	}
+}
